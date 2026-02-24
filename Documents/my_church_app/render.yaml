@@ -2,6 +2,7 @@ services:
   - type: web
     name: graceconnect-web
     env: static
+    rootDir: graceconnect_app
     # We download the Flutter SDK during the build phase since Render doesn't have it pre-installed.
     buildCommand: git clone https://github.com/flutter/flutter.git -b stable && export PATH="$PATH:`pwd`/flutter/bin" && flutter build web --release
     staticPublishPath: ./build/web
