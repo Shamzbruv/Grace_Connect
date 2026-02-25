@@ -10,6 +10,9 @@ export PATH="$PATH:$HOME/flutter/bin"
 echo ">>> Verifying Flutter installation..."
 flutter --version
 
+echo ">>> Moving to app directory..."
+cd Documents/my_church_app/graceconnect_app
+
 echo ">>> Building Flutter Web..."
 flutter build web --dart-define=HF_API_KEY="${HF_API_KEY}" --release
 
