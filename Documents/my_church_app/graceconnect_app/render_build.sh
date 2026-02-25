@@ -3,8 +3,13 @@
 # Exit on error
 set -o errexit
 
-echo ">>> Downloading Flutter..."
-git clone https://github.com/flutter/flutter.git -b stable $HOME/flutter
+if [ ! -d "$HOME/flutter" ]; then
+  echo ">>> Downloading Flutter..."
+  git clone https://github.com/flutter/flutter.git -b stable $HOME/flutter
+else
+  echo ">>> Flutter already exists in cache."
+fi
+
 export PATH="$PATH:$HOME/flutter/bin"
 
 echo ">>> Verifying Flutter installation..."
