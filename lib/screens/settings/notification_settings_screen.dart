@@ -1,0 +1,163 @@
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart'; // Added
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../widgets/ui/app_scaffold.dart';
+import '../../theme/app_colors.dart';
+import 'package:google_fonts/google_fonts.dart';
+import '../../services/notification_service.dart'; // Added
+import '../../providers/user_role_provider.dart'; // Added
+
+class NotificationSettingsScreen extends StatefulWidget {
+  const NotificationSettingsScreen({super.key});
+
+  @override
+  State<NotificationSettingsScreen> createState() =>
+      _NotificationSettingsScreenState();
+}
+
+class _NotificationSettingsScreenState
+    extends State<NotificationSettingsScreen> {
+  bool _serviceReminders = true;
+  bool _communityPosts = true;
+  bool _prayerRequests = true;
+  bool _dailyDevotionals = true;
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSettings();
+  }
+
+  Future<void> _loadSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _serviceReminders = prefs.getBool('notify_service') ?? true;
+      _communityPosts = prefs.getBool('notify_community') ?? true;
+      _prayerRequests = prefs.getBool('notify_prayer') ?? true;
+      _dailyDevotionals = prefs.getBool('notify_devotionals') ?? true;
+      _isLoading = false;
+    });
+  }
+
+  Future<void> _toggleSetting(String key, bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(key, value);
+    setState(() {
+      if (key == 'notify_service') _serviceReminders = value;
+      if (key == 'notify_community') _communityPosts = value;
+      if (key == 'notify_prayer') _prayerRequests = value;
+      if (key == 'notify_devotionals') _dailyDevotionals = value;
+    });
+
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user != null && key == 'notify_service') {
+      await Supabase.instance.client
+          .from('users')
+          .update({'notifyAttendance': value}).eq('uid', user.id);
+    }
+
+    // Refresh subscriptions based on new settings
+    // We need the churchId from the provider
+    if (mounted) {
+      final userProvider =
+          Provider.of<UserRoleProvider>(context, listen: false);
+      if (userProvider.userProfile?.churchId != null) {
+        await NotificationService()
+            .syncSubscriptions(userProvider.userProfile!.churchId);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AppScaffold(
+      title: 'Notifications',
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                _buildSectionHeader('Church Activities'),
+                ListTile(
+                  leading: const Icon(Icons.inbox_outlined),
+                  title: const Text('Notification Inbox'),
+                  subtitle:
+                      const Text('View likes, comments, and family requests'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.pushNamed(context, '/notifications'),
+                ),
+                const SizedBox(height: 12),
+                _buildSwitchTile(
+                  'Service Reminders',
+                  'Get notified 30 mins before service starts',
+                  _serviceReminders,
+                  (val) => _toggleSetting('notify_service', val),
+                ),
+                _buildSwitchTile(
+                  'Prayer Requests',
+                  'When urgent prayer is needed',
+                  _prayerRequests,
+                  (val) => _toggleSetting('notify_prayer', val),
+                ),
+                _buildSwitchTile(
+                  'Daily Devotionals',
+                  'Bible reading and study reminders',
+                  _dailyDevotionals,
+                  (val) => _toggleSetting('notify_devotionals', val),
+                ),
+                const Divider(height: 32),
+                _buildSectionHeader('Community'),
+                _buildSwitchTile(
+                  'Community Posts',
+                  'New posts and announcements',
+                  _communityPosts,
+                  (val) => _toggleSetting('notify_community', val),
+                ),
+              ],
+            ),
+    );
+  }
+
+  Widget _buildSectionHeader(String title) {
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12, top: 8),
+      child: Text(
+        title,
+        style: GoogleFonts.outfit(
+          fontSize: 14,
+          fontWeight: FontWeight.bold,
+          color: isDarkMode ? Colors.white : AppColors.primary,
+          letterSpacing: 1,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSwitchTile(
+      String title, String subtitle, bool value, ValueChanged<bool> onChanged) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+          color: Theme.of(context).cardTheme.color,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+                color: Colors.black.withValues(alpha: 0.05),
+                blurRadius: 4,
+                offset: const Offset(0, 2))
+          ]),
+      child: SwitchListTile(
+        title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
+        subtitle: Text(subtitle,
+            style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+        value: value,
+        activeColor: AppColors.primary,
+        onChanged: onChanged,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    );
+  }
+}

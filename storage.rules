@@ -1,0 +1,37 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // Helper: Auth Check
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    // Helper: Ownership Check
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // NEW STANDARD PATH: users/{userId}/profile/...
+    match /users/{userId}/profile/{fileName} {
+      allow read: if true;
+      allow write: if isOwner(userId);
+    }
+    
+    // NEW STANDARD PATH: users/{userId}/cover/...
+    match /users/{userId}/cover/{fileName} {
+      allow read: if true;
+      allow write: if isOwner(userId);
+    }
+
+    // Legacy Path Support (Optional - keeping for backward compatibility if needed temporarily)
+    match /user_profile_images/{userId}/{fileName} {
+      allow read: if true;
+      allow write: if isOwner(userId);
+    }
+
+    // Default: Deny
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

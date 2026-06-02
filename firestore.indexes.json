@@ -1,0 +1,33 @@
+{
+    "indexes": [
+        {
+            "collectionGroup": "events",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "churchId",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "date",
+                    "order": "ASCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "community_posts",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "placeId",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "timestamp",
+                    "order": "DESCENDING"
+                }
+            ]
+        }
+    ],
+    "fieldOverrides": []
+}

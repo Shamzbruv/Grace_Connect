@@ -1,0 +1,210 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // --- HELPER FUNCTIONS ---
+    function isAuthenticated() {
+      // TEMPORARY MIGRATION FIX: Removed email_verified requirement to allow auth during migration
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    // --- ROLE MANAGEMENT (CUSTOM CLAIMS WITH READ FALLBACK) ---
+    function getUserRoles() {
+      return (request.auth.token.roles != null) 
+             ? request.auth.token.roles 
+             : get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roles;
+    }
+
+    function hasAnyRole(allowedRoles) {
+      return isAuthenticated() && getUserRoles().hasAny(allowedRoles);
+    }
+
+    // Role Groupings
+    function isExecutive() {
+      return hasAnyRole(['Super Admin', 'Admin', 'Senior Pastor', 'Pastor', 'Assistant Pastor', 'Acting Pastor', 'Church Secretary']);
+    }
+
+    function isFinanceAdmin() {
+      return isExecutive() || hasAnyRole(['Treasurer', 'Financial Secretary']);
+    }
+
+    function isCareAdmin() {
+      return isExecutive() || hasAnyRole(['Elder', 'Deacon', 'Deaconess', 'Care & Counseling Coord.', 'Prayer Ministry Leader']);
+    }
+
+    function isEventAdmin() {
+      return isExecutive() || hasAnyRole([
+        'Head Usher', 'Worship Leader', 'Choir Director', 'Media/AV Director',
+        'Sunday School Supt.', 'Youth Ministry Leader', 'Teen Ministry Leader', 
+        'Life Builders Leader', "Men's Ministry Leader", "Women's Ministry Leader", 
+        "Children's Leader", 'Hospitality Coordinator', 'Security Coordinator'
+      ]);
+    }
+
+    function isContentModerator() {
+      return isExecutive() || isCareAdmin() || isEventAdmin();
+    }
+
+    function isStaff() {
+      // General staff designation for broad read access
+      return isContentModerator() || isFinanceAdmin();
+    }
+
+    // Helper Functions
+    function getMyPlaceId() {
+      return (request.auth.token.placeId != null && request.auth.token.placeId != '') 
+        ? request.auth.token.placeId 
+        : (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.placeId);
+    }
+
+    function isSameChurch(churchId) {
+      return getMyPlaceId() == churchId;
+    }
+
+    // --- 1. USERS COLLECTION (STRICT ISOLATION) ---
+    match /users/{userId} {
+      
+      // Allow read ONLY if same church OR is owner OR is general staff
+      allow read: if isAuthenticated() && (
+         isOwner(userId) ||
+         isStaff() ||
+         isSameChurch(resource.data.placeId)
+      );
+
+      allow create: if isAuthenticated();
+
+      // Update: Owner (safe fields) or Executive
+      allow update: if (isOwner(userId) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['roles', 'placeId', 'isDeveloper', 'accountState']))
+                    || isExecutive();
+
+      allow delete: if isExecutive();
+
+      match /settings/{settingName} {
+        allow read, write: if isOwner(userId) || isExecutive();
+      }
+    }
+
+    // --- 2. CHURCHES & CONFIG ---
+    match /churches/{churchId} {
+      allow read: if true;
+      allow create: if true; // Initial church creation
+      allow update: if isAuthenticated() && (
+        resource.data.ownerUserId == request.auth.uid || isExecutive()
+      );
+
+      match /settings/{settingName} {
+         allow read, write: if isExecutive();
+      }
+
+      // --- TRANSACTIONS (STRICT ISOLATION) ---
+      match /transactions/{transactionId} {
+         // Users can read only their own transactions, Finance staff can read all
+         allow read: if isAuthenticated() && (
+            resource.data.userId == request.auth.uid || isFinanceAdmin()
+         );
+         
+         allow create: if isAuthenticated() && request.resource.data.churchId == getMyPlaceId();
+         allow update: if isFinanceAdmin();
+         allow delete: if false; 
+      }
+
+      match /schedules/{scheduleId} {
+         allow read: if true;
+         allow write: if isEventAdmin();
+      }
+    }
+
+    // --- 3. SUPPORT TICKETS ---
+    match /support_tickets/{ticketId} {
+      allow create: if isAuthenticated();
+      allow read: if isAuthenticated() && (resource.data.uid == request.auth.uid || isExecutive());
+      allow update: if isExecutive();
+    }
+
+    // --- 4. COMMUNITY POSTS (STRICT ISOLATION) ---
+    match /community_posts/{postId} {
+      allow read: if isSameChurch(resource.data.placeId);
+
+      allow create: if isAuthenticated() &&
+                    request.resource.data.placeId == getMyPlaceId();
+
+      allow update: if
+        (isContentModerator() && isSameChurch(resource.data.placeId)) ||
+        (resource.data.authorId == request.auth.uid) ||
+        (isAuthenticated() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes', 'comments']));
+
+      allow delete: if resource.data.authorId == request.auth.uid || isContentModerator();
+
+      match /comments/{commentId} {
+        allow read, create: if isAuthenticated();
+        allow delete: if resource.data.authorId == request.auth.uid || isContentModerator();
+      }
+    }
+
+    // --- 5. EVENTS (STRICT ISOLATION) ---
+    match /events/{eventId} {
+      allow read: if isSameChurch(resource.data.churchId);
+
+      allow create: if isEventAdmin() && request.resource.data.churchId == getMyPlaceId();
+      allow delete: if isEventAdmin() && resource.data.churchId == getMyPlaceId();
+
+      allow update: if
+        (isEventAdmin() && resource.data.churchId == getMyPlaceId()) ||
+        (isAuthenticated() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['attendees']));
+    }
+
+    // --- 6. AUDIT LOGS (RBAC) ---
+    match /audit_logs/{logId} {
+      allow read: if isExecutive();
+      allow create: if isExecutive(); 
+      allow update, delete: if false;
+    }
+
+    // --- 7. STUDY GROUPS ---
+    match /study_groups/{groupId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      
+      allow update: if isAuthenticated() && (
+        resource.data.leaderId == request.auth.uid || isContentModerator()
+      );
+      
+      match /messages/{msgId} {
+         allow read, create: if isAuthenticated();
+      }
+    }
+
+    // --- 8. FEEDBACK ---
+    match /feedback/{feedbackId} {
+      allow create: if isAuthenticated();
+      allow read: if isExecutive() || (isAuthenticated() && resource.data.userId == request.auth.uid);
+    }
+
+    // --- 9. ATTENDANCE ---
+    match /attendance/{recordId} {
+      allow read: if isAuthenticated() && (
+        resource.data.userId == request.auth.uid ||
+        (isExecutive() && isSameChurch(resource.data.churchId))
+      );
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isExecutive() && isSameChurch(resource.data.churchId);
+    }
+
+    // --- 10. CHURCH LOCATIONS & SCHEDULES ---
+    match /church_locations/{locationId} {
+      allow read: if isAuthenticated();
+      allow create: if isExecutive() && request.resource.data.churchId == getMyPlaceId();
+      allow update, delete: if isExecutive() && isSameChurch(resource.data.churchId);
+    }
+    
+    match /service_schedules/{scheduleId} {
+      allow read: if isAuthenticated();
+      allow create: if isExecutive() && request.resource.data.churchId == getMyPlaceId();
+      allow update, delete: if isExecutive() && isSameChurch(resource.data.churchId);
+    }
+  }
+}

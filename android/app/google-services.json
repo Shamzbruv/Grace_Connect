@@ -1,0 +1,54 @@
+{
+  "project_info": {
+    "project_number": "47100126669",
+    "project_id": "graceconnect-9a97c",
+    "storage_bucket": "graceconnect-9a97c.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:47100126669:android:a6100cb15fd1a070a65084",
+        "android_client_info": {
+          "package_name": "com.example.grace_connect"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "47100126669-us2rkftjcrarfvnmds5bt0ev02k3ln2s.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.grace_connect",
+            "certificate_hash": "368a9325f34d6a53f8b8935747a4dfe397b83369"
+          }
+        },
+        {
+          "client_id": "47100126669-hrbi86pb9nm3oefuochj1dfbqd7ia006.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDbE9rFDj8htVoaj-XruVHdQNnwqTDvEm0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "47100126669-hrbi86pb9nm3oefuochj1dfbqd7ia006.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "47100126669-0k1eobdp3dnmmtpi9uth7ot3d61oe186.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.graceconnect"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
