@@ -6,7 +6,9 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../theme/app_colors.dart';
 import '../../providers/user_role_provider.dart';
 import '../../models/family_relationship.dart';
+import '../../models/priority_follow_up.dart';
 import '../../models/user_profile.dart';
+import '../../services/attendance_analysis_service.dart';
 import '../../services/direct_message_service.dart';
 import '../../services/bible_nudge_service.dart';
 import '../../services/family_service.dart';
@@ -24,9 +26,12 @@ class _MembersListScreenState extends State<MembersListScreen> {
   final ScrollController _scrollController = ScrollController();
   final DirectMessageService _messageService = DirectMessageService();
   final BibleNudgeService _bibleNudgeService = BibleNudgeService();
+  final AttendanceAnalysisService _attendanceAnalysisService =
+      AttendanceAnalysisService();
   final FamilyService _familyService = FamilyService();
 
   List<Map<String, dynamic>> _members = [];
+  Map<String, PriorityFollowUp> _careAlertsByUserId = {};
   bool _isLoading = true;
   bool _hasMore = true;
   int _currentOffset = 0;
@@ -85,6 +90,7 @@ class _MembersListScreenState extends State<MembersListScreen> {
             if (response.length < _limit) _hasMore = false;
           });
         }
+        await _loadCareAlertsForVisibleMembers();
       } else {
         if (mounted) {
           setState(() {
@@ -92,6 +98,7 @@ class _MembersListScreenState extends State<MembersListScreen> {
             _hasMore = false;
           });
         }
+        await _loadCareAlertsForVisibleMembers();
       }
     } catch (e) {
       if (mounted) setState(() => _isLoading = false);
@@ -131,8 +138,32 @@ class _MembersListScreenState extends State<MembersListScreen> {
           _isLoading = false;
         });
       }
+      await _loadCareAlertsForVisibleMembers();
     } catch (e) {
       if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _loadCareAlertsForVisibleMembers() async {
+    if (!mounted || _members.isEmpty) {
+      if (mounted) setState(() => _careAlertsByUserId = {});
+      return;
+    }
+
+    final currentUser =
+        Provider.of<UserRoleProvider>(context, listen: false).userProfile;
+    final churchId = currentUser?.churchId;
+    if (churchId == null || churchId.isEmpty) return;
+
+    try {
+      final alerts = await _attendanceAnalysisService.getOpenFollowUpsByUserIds(
+        churchId,
+        _members.map((member) => member['uid']?.toString() ?? ''),
+      );
+      if (!mounted) return;
+      setState(() => _careAlertsByUserId = alerts);
+    } catch (error) {
+      debugPrint('Could not load attendance care markers: $error');
     }
   }
 
@@ -158,10 +189,34 @@ class _MembersListScreenState extends State<MembersListScreen> {
       );
     } catch (error) {
       if (!mounted) return;
+      final otherUser = UserProfile.fromMap(data);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not open message: $error')),
+        SnackBar(
+          content: Text(_messageAccessHelpForMember(otherUser, error)),
+        ),
       );
     }
+  }
+
+  String _messageAccessHelpForMember(UserProfile member, Object error) {
+    final currentUser =
+        Provider.of<UserRoleProvider>(context, listen: false).userProfile;
+    final errorText = error.toString().toLowerCase();
+    final isOtherChurch = currentUser?.churchId.isNotEmpty == true &&
+        member.churchId.isNotEmpty &&
+        member.churchId != currentUser!.churchId;
+    final looksLikeAccessRule = errorText.contains('bible nudge') ||
+        errorText.contains('outside your church') ||
+        errorText.contains('profile was not found') ||
+        errorText.contains('not accepting messages') ||
+        errorText.contains('not available') ||
+        errorText.contains('blocked');
+
+    if (isOtherChurch && looksLikeAccessRule) {
+      return 'This person is outside your church. Send a Bible Nudge first. Once both people accept, you can view their profile and message each other anytime.';
+    }
+
+    return 'Could not open message: $error';
   }
 
   Future<void> _sendBibleNudge(UserProfile recipient) async {
@@ -240,8 +295,10 @@ class _MembersListScreenState extends State<MembersListScreen> {
     final showContactInfo = isOwnProfile ||
         (!isPrivate &&
             memberProfile.canShowContactInfoTo(isSameChurch: isSameChurch));
+    final careAlert = _careAlertsByUserId[memberProfile.uid];
     final canMessage =
         !isOwnProfile && memberProfile.allowMessages && !isPrivate;
+    final canNudge = !isOwnProfile && !isPrivate;
 
     showModalBottomSheet(
       context: context,
@@ -317,6 +374,10 @@ class _MembersListScreenState extends State<MembersListScreen> {
                         ),
                       ),
                     ],
+                    if (careAlert != null) ...[
+                      const SizedBox(height: 16),
+                      _buildCareAlertNotice(context, careAlert),
+                    ],
                     const SizedBox(height: 24),
                     if (isPrivate)
                       _buildPrivacyNotice(
@@ -368,6 +429,8 @@ class _MembersListScreenState extends State<MembersListScreen> {
               memberProfile: memberProfile,
               data: data,
               canMessage: canMessage,
+              canNudge: canNudge,
+              careAlert: careAlert,
             ),
           ],
         ),
@@ -379,25 +442,28 @@ class _MembersListScreenState extends State<MembersListScreen> {
     required UserProfile memberProfile,
     required Map<String, dynamic> data,
     required bool canMessage,
+    required bool canNudge,
+    PriorityFollowUp? careAlert,
   }) {
     return Padding(
       padding: const EdgeInsets.all(24),
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final twoColumn = canMessage && constraints.maxWidth >= 360;
+          final hasAction = canMessage || canNudge;
+          final twoColumn = hasAction && constraints.maxWidth >= 360;
           final buttonWidth = twoColumn
               ? (constraints.maxWidth - 12) / 2
               : constraints.maxWidth;
 
           final actions = <Widget>[
             SizedBox(
-              width: canMessage ? buttonWidth : constraints.maxWidth,
+              width: hasAction ? buttonWidth : constraints.maxWidth,
               child: OutlinedButton(
                 onPressed: () => Navigator.pop(context),
                 child: const Text('Close'),
               ),
             ),
-            if (canMessage)
+            if (canNudge)
               SizedBox(
                 width: buttonWidth,
                 child: OutlinedButton.icon(
@@ -418,8 +484,8 @@ class _MembersListScreenState extends State<MembersListScreen> {
                 width: constraints.maxWidth,
                 child: FilledButton.icon(
                   icon: const Icon(Icons.chat_bubble_outline),
-                  label: const Text(
-                    'Message',
+                  label: Text(
+                    careAlert == null ? 'Message' : 'Reach Out',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -437,6 +503,61 @@ class _MembersListScreenState extends State<MembersListScreen> {
             children: actions,
           );
         },
+      ),
+    );
+  }
+
+  Widget _buildCareAlertNotice(
+    BuildContext context,
+    PriorityFollowUp careAlert,
+  ) {
+    final theme = Theme.of(context);
+    final weeks = careAlert.absenceStreakWeeks;
+    final lastSeen = careAlert.lastAttendedDate == null
+        ? 'No attendance recorded yet'
+        : 'Last attended ${_formatShortDate(careAlert.lastAttendedDate!)}';
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.errorContainer.withValues(alpha: 0.42),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: theme.colorScheme.error.withValues(alpha: 0.32),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.favorite_outline,
+            color: theme.colorScheme.error,
+            size: 22,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Care check-in',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    color: theme.colorScheme.onErrorContainer,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Missed $weeks week${weeks == 1 ? '' : 's'} • $lastSeen',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onErrorContainer,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -679,6 +800,24 @@ class _MembersListScreenState extends State<MembersListScreen> {
     return 'Member for ${parts.join(', ')}';
   }
 
+  String _formatShortDate(DateTime date) {
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec'
+    ];
+    return '${months[date.month - 1]} ${date.day}, ${date.year}';
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -747,6 +886,7 @@ class _MembersListScreenState extends State<MembersListScreen> {
                         _searchController.clear();
                         setState(() {
                           _members = [];
+                          _careAlertsByUserId = {};
                           _isLoading = true;
                           _hasMore = true;
                           _currentOffset = 0;
@@ -787,6 +927,7 @@ class _MembersListScreenState extends State<MembersListScreen> {
                                   _searchController.clear();
                                   setState(() {
                                     _members = [];
+                                    _careAlertsByUserId = {};
                                     _isLoading = true;
                                     _hasMore = true;
                                     _currentOffset = 0;
@@ -822,6 +963,8 @@ class _MembersListScreenState extends State<MembersListScreen> {
                               ? member['roles'][0]
                               : 'Member';
                           final bio = (member['bio'] as String?)?.trim() ?? '';
+                          final careAlert = _careAlertsByUserId[
+                              member['uid']?.toString() ?? ''];
 
                           return Container(
                             margin: const EdgeInsets.only(bottom: 12),
@@ -846,22 +989,50 @@ class _MembersListScreenState extends State<MembersListScreen> {
                                   padding: const EdgeInsets.all(12),
                                   child: Row(
                                     children: [
-                                      CircleAvatar(
-                                        radius: 28,
-                                        backgroundColor:
-                                            colorScheme.surfaceContainerHighest,
-                                        backgroundImage: (member['photoUrl'] !=
-                                                    null &&
-                                                member['photoUrl'] != '')
-                                            ? NetworkImage(member['photoUrl'])
-                                            : null,
-                                        child: (member['photoUrl'] == null ||
-                                                member['photoUrl'] == '')
-                                            ? Text(displayName[0],
-                                                style: TextStyle(
-                                                    fontWeight: FontWeight.bold,
-                                                    color: colorScheme.primary))
-                                            : null,
+                                      Stack(
+                                        clipBehavior: Clip.none,
+                                        children: [
+                                          CircleAvatar(
+                                            radius: 28,
+                                            backgroundColor: colorScheme
+                                                .surfaceContainerHighest,
+                                            backgroundImage:
+                                                (member['photoUrl'] != null &&
+                                                        member['photoUrl'] !=
+                                                            '')
+                                                    ? NetworkImage(
+                                                        member['photoUrl'])
+                                                    : null,
+                                            child: (member['photoUrl'] ==
+                                                        null ||
+                                                    member['photoUrl'] == '')
+                                                ? Text(displayName[0],
+                                                    style: TextStyle(
+                                                        fontWeight:
+                                                            FontWeight.bold,
+                                                        color: colorScheme
+                                                            .primary))
+                                                : null,
+                                          ),
+                                          if (careAlert != null)
+                                            Positioned(
+                                              right: -1,
+                                              top: -1,
+                                              child: Container(
+                                                width: 15,
+                                                height: 15,
+                                                decoration: BoxDecoration(
+                                                  color: colorScheme.error,
+                                                  shape: BoxShape.circle,
+                                                  border: Border.all(
+                                                    color: theme
+                                                        .scaffoldBackgroundColor,
+                                                    width: 2,
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                        ],
                                       ),
                                       const SizedBox(width: 16),
                                       Expanded(
@@ -886,6 +1057,32 @@ class _MembersListScreenState extends State<MembersListScreen> {
                                                   color: colorScheme.primary,
                                                   fontWeight: FontWeight.bold),
                                             ),
+                                            if (careAlert != null) ...[
+                                              const SizedBox(height: 5),
+                                              Container(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                        horizontal: 8,
+                                                        vertical: 3),
+                                                decoration: BoxDecoration(
+                                                  color: colorScheme
+                                                      .errorContainer
+                                                      .withValues(alpha: 0.5),
+                                                  borderRadius:
+                                                      BorderRadius.circular(
+                                                          999),
+                                                ),
+                                                child: Text(
+                                                  'Care check-in • ${careAlert.absenceStreakWeeks} wk',
+                                                  style: TextStyle(
+                                                    fontSize: 11,
+                                                    color: colorScheme
+                                                        .onErrorContainer,
+                                                    fontWeight: FontWeight.w800,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
                                             if (bio.isNotEmpty) ...[
                                               const SizedBox(height: 4),
                                               Text(

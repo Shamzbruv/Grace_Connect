@@ -99,6 +99,13 @@ class _PastorDashboardState extends State<PastorDashboard> {
         ),
         const SizedBox(height: 12),
         ActionCard(
+          title: 'Attendance Alerts',
+          description: 'Set absence alerts and coordinate care follow-up',
+          icon: Icons.volunteer_activism_outlined,
+          onTap: () => Navigator.pushNamed(context, '/attendance_insights'),
+        ),
+        const SizedBox(height: 12),
+        ActionCard(
           title: 'Counseling Cases',
           description: 'View pastoral care requests',
           icon: Icons.favorite_outline,

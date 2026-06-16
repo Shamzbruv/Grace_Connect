@@ -9,6 +9,7 @@ import '../../widgets/ui/app_scaffold.dart';
 import '../../widgets/ui/app_text_field.dart';
 import '../../theme/app_colors.dart';
 import '../../providers/user_role_provider.dart';
+import '../../services/account_deletion_service.dart';
 import '../../services/auth_flow_service.dart';
 import '../../services/profile_service.dart';
 
@@ -163,12 +164,28 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
   }
 
   Future<void> _deleteAccount() async {
+    final reasonController = TextEditingController();
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Delete Account?'),
-        content: const Text(
-            'This action is permanent and cannot be undone. Are you sure you want to delete your account?'),
+        title: const Text('Request Account Deletion?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Grace Connect will submit a deletion request, anonymize your visible profile, disable direct messages, and sign you out. Some ministry, finance, care, safety, and audit records may be retained or anonymized according to policy.',
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: reasonController,
+              maxLines: 3,
+              decoration: const InputDecoration(
+                labelText: 'Reason (optional)',
+                alignLabelWithHint: true,
+              ),
+            ),
+          ],
+        ),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
@@ -176,17 +193,18 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
           TextButton(
             onPressed: () => Navigator.pop(context, true),
             style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text('Delete'),
+            child: const Text('Request Deletion'),
           ),
         ],
       ),
     );
 
     if (confirmed == true) {
-      // In a real app, you might want to call a Cloud Function to clean up data securely
       try {
-        // NOTE: Deleting a Supabase user directly from the client is not allowed by default.
-        // You would typically call a Supabase Edge Function here. For now, we sign out.
+        if (mounted) setState(() => _isLoading = true);
+        await AccountDeletionService().requestDeletion(
+          reason: reasonController.text,
+        );
         await Supabase.instance.client.auth.signOut();
         if (mounted) {
           Navigator.of(context)
@@ -197,10 +215,15 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
                 content: Text(
-                    'Error deleting account: $e. You may need to re-login first.')),
+                    'Error requesting account deletion: $e. Please re-login and try again.')),
           );
         }
+      } finally {
+        reasonController.dispose();
+        if (mounted) setState(() => _isLoading = false);
       }
+    } else {
+      reasonController.dispose();
     }
   }
 

@@ -1,11 +1,11 @@
 {
-    "name": "church_app",
-    "short_name": "church_app",
+    "name": "Grace Connect",
+    "short_name": "Grace Connect",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#hex_code",
-    "theme_color": "#hex_code",
-    "description": "A new Flutter project.",
+    "background_color": "#0b111c",
+    "theme_color": "#1f4f8f",
+    "description": "Grace Connect church community app.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

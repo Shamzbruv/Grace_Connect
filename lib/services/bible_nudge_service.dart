@@ -51,10 +51,19 @@ class BibleNudgeService {
     required bool accepted,
   }) async {
     final status = accepted ? 'accepted' : 'declined';
-    await _supabase.from('bible_nudges').update({
-      'status': status,
-      'responded_at': DateTime.now().toIso8601String(),
-    }).eq('id', nudge.id);
+    if (accepted) {
+      try {
+        await _supabase.rpc(
+          'accept_bible_nudge_and_grant_messages',
+          params: {'target_nudge_id': nudge.id},
+        );
+      } on PostgrestException catch (error) {
+        if (!_isMissingGrantFunction(error)) rethrow;
+        await _updateNudgeStatus(nudge.id, status);
+      }
+    } else {
+      await _updateNudgeStatus(nudge.id, status);
+    }
 
     await _notify(
       targetUserId: nudge.senderId,
@@ -68,6 +77,20 @@ class BibleNudgeService {
       entityId: nudge.id,
       route: accepted ? '/inbox' : '/notifications',
     );
+  }
+
+  Future<void> _updateNudgeStatus(String nudgeId, String status) async {
+    await _supabase.from('bible_nudges').update({
+      'status': status,
+      'responded_at': DateTime.now().toIso8601String(),
+    }).eq('id', nudgeId);
+  }
+
+  bool _isMissingGrantFunction(PostgrestException error) {
+    final message = error.message.toLowerCase();
+    return error.code == 'PGRST202' ||
+        message.contains('accept_bible_nudge_and_grant_messages') &&
+            message.contains('not found');
   }
 
   Future<BibleNudge?> getNudge(String nudgeId) async {

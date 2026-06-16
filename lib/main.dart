@@ -13,6 +13,7 @@ import 'providers/theme_provider.dart';
 import 'theme/app_theme.dart';
 import 'screens/dashboard/variants/admin_dashboard.dart';
 import 'screens/admin/finance_dashboard_screen.dart';
+import 'screens/admin/attendance_insights_screen.dart';
 import 'screens/admin/role_management_screen.dart';
 import 'screens/admin/schedule_management_screen.dart';
 import 'screens/landing/landing_page.dart';
@@ -169,6 +170,8 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
                   _protected(const CompleteProfileScreen()),
               '/members': (context) => _protected(const MembersListScreen()),
               '/attendance': (context) => _protected(const AttendanceScreen()),
+              '/attendance_insights': (context) =>
+                  _protected(const AttendanceInsightsScreen()),
               '/attendance_location': (context) =>
                   _protected(const ChurchLocationPickerScreen()),
               '/donations': (context) => _protected(const DonationsScreen()),

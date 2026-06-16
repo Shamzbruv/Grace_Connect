@@ -642,14 +642,14 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
     }
 
     try {
-      final otherUser = await _userService.getUserProfile(post.authorId);
-      if (otherUser == null) {
-        throw Exception('Member profile was not found.');
-      }
-      final conversation = await _messageService.getOrCreateConversation(
+      final conversation =
+          await _messageService.getOrCreateConversationWithUserId(
         currentUser: currentUser,
-        otherUser: otherUser,
+        otherUserId: post.authorId,
       );
+      final otherUser = await _messageService.getConversationPeer(
+              conversation, currentAuthUser.id) ??
+          _profileFromPostAuthor(post);
       if (!mounted) return;
       await Navigator.of(context).push(
         MaterialPageRoute(
@@ -662,9 +662,49 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not open message: $error')),
+        SnackBar(
+          content: Text(_messageAccessHelpForPost(post, currentUser, error)),
+        ),
       );
     }
+  }
+
+  UserProfile _profileFromPostAuthor(Post post) {
+    return UserProfile(
+      uid: post.authorId,
+      email: '',
+      fullName:
+          post.authorName.trim().isEmpty ? 'Member' : post.authorName.trim(),
+      phoneNumber: '',
+      placeId: post.placeId,
+      placeName: _churchNamesById[post.placeId] ?? '',
+      roles: const ['Member'],
+      joinDate: DateTime.now(),
+      photoUrl: post.authorPhoto ?? '',
+      allowMessages: true,
+    );
+  }
+
+  String _messageAccessHelpForPost(
+    Post post,
+    UserProfile currentUser,
+    Object error,
+  ) {
+    final isOtherChurch =
+        post.placeId.trim().isNotEmpty && post.placeId != currentUser.churchId;
+    final message = error.toString().toLowerCase();
+    final isAccessIssue = message.contains('bible nudge') ||
+        message.contains('outside your church') ||
+        message.contains('member profile was not found') ||
+        message.contains('not accepting messages') ||
+        message.contains('not available') ||
+        message.contains('blocked');
+
+    if (isOtherChurch && isAccessIssue) {
+      return 'This person is outside your church. Send a Bible Nudge first. Once both people accept, you can view their profile and message each other anytime.';
+    }
+
+    return 'Could not open message: $error';
   }
 
   Future<void> _showReportContentSheet({
@@ -1576,9 +1616,35 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not open message: $error')),
+        SnackBar(
+          content: Text(
+            _messageAccessHelpForProfile(otherUser, currentUser, error),
+          ),
+        ),
       );
     }
+  }
+
+  String _messageAccessHelpForProfile(
+    UserProfile otherUser,
+    UserProfile currentUser,
+    Object error,
+  ) {
+    final isOtherChurch = otherUser.churchId.trim().isNotEmpty &&
+        otherUser.churchId != currentUser.churchId;
+    final message = error.toString().toLowerCase();
+    final isAccessIssue = message.contains('bible nudge') ||
+        message.contains('outside your church') ||
+        message.contains('member profile was not found') ||
+        message.contains('not accepting messages') ||
+        message.contains('not available') ||
+        message.contains('blocked');
+
+    if (isOtherChurch && isAccessIssue) {
+      return 'This person is outside your church. Send a Bible Nudge first. Once both people accept, you can view their profile and message each other anytime.';
+    }
+
+    return 'Could not open message: $error';
   }
 
   Widget _buildFloatingComposeMenu(BuildContext context) {

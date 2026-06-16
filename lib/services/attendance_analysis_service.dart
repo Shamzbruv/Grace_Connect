@@ -6,6 +6,33 @@ import '../models/user_profile.dart';
 
 class AttendanceAnalysisService {
   final SupabaseClient _supabase = Supabase.instance.client;
+  static const int defaultAlertThresholdWeeks = 2;
+
+  Future<int> getAlertThresholdWeeks(String churchId) async {
+    try {
+      final row = await _supabase
+          .from('church_attendance_alert_settings')
+          .select('absence_threshold_weeks')
+          .eq('church_id', churchId)
+          .maybeSingle();
+      final value = row?['absence_threshold_weeks'];
+      if (value is int) return value.clamp(1, 26).toInt();
+      if (value is num) return value.toInt().clamp(1, 26).toInt();
+    } catch (_) {
+      // Older databases did not have configurable attendance alerts.
+    }
+    return defaultAlertThresholdWeeks;
+  }
+
+  Future<void> saveAlertThresholdWeeks(String churchId, int weeks) async {
+    final cleanWeeks = weeks.clamp(1, 26);
+    await _supabase.from('church_attendance_alert_settings').upsert({
+      'church_id': churchId,
+      'absence_threshold_weeks': cleanWeeks,
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
+      'updated_by': _supabase.auth.currentUser?.id,
+    }, onConflict: 'church_id');
+  }
 
   // 1. Get Priority Follow-Up List for Church
   Stream<List<PriorityFollowUp>> getPriorityList(String churchId) {
@@ -15,9 +42,50 @@ class AttendanceAnalysisService {
         .eq('churchId', churchId)
         .order('flaggedAt', ascending: false)
         .map((docs) => docs
-            .where((doc) => doc['status'] == 'open') // Filter active items in Dart
+            .where(
+                (doc) => doc['status'] == 'open') // Filter active items in Dart
             .map((doc) => PriorityFollowUp.fromMap(doc))
             .toList());
+  }
+
+  Future<List<PriorityFollowUp>> fetchPriorityList(String churchId) async {
+    final rows = await _supabase
+        .from('priority_follow_ups')
+        .select()
+        .eq('churchId', churchId)
+        .eq('status', 'open')
+        .order('flaggedAt', ascending: false);
+    return rows
+        .map<PriorityFollowUp>((row) => PriorityFollowUp.fromMap(row))
+        .toList();
+  }
+
+  Future<Map<String, PriorityFollowUp>> getOpenFollowUpsByUserIds(
+    String churchId,
+    Iterable<String> userIds,
+  ) async {
+    final ids = userIds
+        .map((id) => id.trim())
+        .where((id) => id.isNotEmpty)
+        .toSet()
+        .toList();
+    if (ids.isEmpty) return {};
+
+    final rows = await _supabase
+        .from('priority_follow_ups')
+        .select()
+        .eq('churchId', churchId)
+        .eq('status', 'open')
+        .inFilter('userId', ids);
+
+    final result = <String, PriorityFollowUp>{};
+    for (final row in rows) {
+      final followUp = PriorityFollowUp.fromMap(row);
+      if (followUp.userId.isNotEmpty) {
+        result[followUp.userId] = followUp;
+      }
+    }
+    return result;
   }
 
   // 2. Resolve a Flag (Pastor only logic controlled by UI, backend validates existence)
@@ -39,70 +107,45 @@ class AttendanceAnalysisService {
   // It iterates active members, checks their last 4 weeks, and creates triggers.
   // NOTE: In a real app with thousands of users, this should be a Cloud Function.
   // For MVP client-side, we limit to batch size or expect smaller church sizes (<500).
-  Future<void> refreshPriorityList(String churchId) async {
-    // A. Get all members of church
-    final membersSnapshot = await _supabase
-        .from('users')
-        .select()
-        .eq('placeId', churchId);
+  Future<void> refreshPriorityList(String churchId,
+      {int? thresholdWeeks}) async {
+    final threshold = thresholdWeeks ?? await getAlertThresholdWeeks(churchId);
 
-    // B. Define "4 weeks ago" window
+    // A. Get all members of church
+    final membersSnapshot =
+        await _supabase.from('users').select().eq('placeId', churchId);
+
     final now = DateTime.now();
-    final fourWeeksAgo = now.subtract(const Duration(days: 28));
 
     for (var doc in membersSnapshot) {
       final user = UserProfile.fromMap(doc);
+      if (user.uid.isEmpty || user.accountState == 'deletion_requested') {
+        continue;
+      }
 
       // Check if already flagged and open
       final existingFlag = await _supabase
           .from('priority_follow_ups')
           .select('id')
           .eq('userId', user.uid)
+          .eq('churchId', churchId)
           .eq('status', 'open')
           .limit(1);
+      final existingFlags = (existingFlag as List)
+          .whereType<Map>()
+          .map((row) => Map<String, dynamic>.from(row))
+          .toList();
 
-      if ((existingFlag as List).isNotEmpty) continue; // Already flagged
+      final lastDate = await _lastPresentDate(user.uid, churchId);
+      final baseline = lastDate ?? user.joinDate;
+      final daysAbsent = now.difference(baseline).inDays;
+      final weeksAbsent = daysAbsent <= 0 ? 0 : daysAbsent ~/ 7;
 
-      // Check attendance in last 4 weeks
-      final attendanceSnapshot = await _supabase
-          .from('attendance')
-          .select('id')
-          .eq('user_id', user.uid)
-          .eq('church_id', churchId)
-          .gt('timestamp', fourWeeksAgo.toIso8601String())
-          .limit(1);
-
-      if ((attendanceSnapshot as List).isEmpty) {
-        // No attendance in last 4 weeks!
-        // Get LAST known attendance date (to calculate streak/show data)
-        final lastAttendanceQuery = await _supabase
-            .from('attendance')
-            .select()
-            .eq('user_id', user.uid)
-            .eq('church_id', churchId)
-            .order('timestamp', ascending: false)
-            .limit(1);
-
-        DateTime? lastDate;
-        if ((lastAttendanceQuery as List).isNotEmpty) {
-          final record = AttendanceRecord.fromMap(lastAttendanceQuery.first);
-          lastDate = record.timestamp;
-        }
-
-        // Create Flag
-        // Calculate weeks absent roughly
-        int weeksAbsent = 4;
-        if (lastDate != null) {
-          final diff = now.difference(lastDate).inDays;
-          weeksAbsent = (diff / 7).floor();
-        } else {
-          // Never attended? Maybe ignore or flag as "New/Inactive"
-          // For now, if they are a member and have NO attendance, flag them.
-          weeksAbsent = 99;
-        }
-
+      if (weeksAbsent >= threshold) {
         final followUp = PriorityFollowUp(
-          id: const Uuid().v4(),
+          id: existingFlags.isNotEmpty
+              ? existingFlags.first['id']?.toString() ?? const Uuid().v4()
+              : const Uuid().v4(),
           userId: user.uid,
           userName: user.fullName,
           userPhotoUrl: user.photoUrl,
@@ -113,11 +156,41 @@ class AttendanceAnalysisService {
           status: 'open',
         );
 
-        await _supabase
-            .from('priority_follow_ups')
-            .insert(followUp.toMap());
+        if (existingFlags.isNotEmpty) {
+          await _supabase.from('priority_follow_ups').update({
+            'userName': followUp.userName,
+            'userPhotoUrl': followUp.userPhotoUrl,
+            'absenceStreakWeeks': followUp.absenceStreakWeeks,
+            'lastAttendedDate': followUp.lastAttendedDate?.toIso8601String(),
+            'updatedAt': DateTime.now().toIso8601String(),
+          }).eq('id', followUp.id);
+        } else {
+          await _supabase.from('priority_follow_ups').insert(followUp.toMap());
+        }
+      } else if (existingFlags.isNotEmpty) {
+        await _supabase.from('priority_follow_ups').update({
+          'status': 'resolved',
+          'resolvedAt': DateTime.now().toIso8601String(),
+          'resolvedBy': _supabase.auth.currentUser?.id,
+          'updatedAt': DateTime.now().toIso8601String(),
+        }).eq('id', existingFlags.first['id']);
       }
     }
+  }
+
+  Future<DateTime?> _lastPresentDate(String userId, String churchId) async {
+    final lastAttendanceQuery = await _supabase
+        .from('attendance')
+        .select()
+        .eq('user_id', userId)
+        .eq('church_id', churchId)
+        .eq('present', true)
+        .order('timestamp', ascending: false)
+        .limit(1);
+
+    if ((lastAttendanceQuery as List).isEmpty) return null;
+    final record = AttendanceRecord.fromMap(lastAttendanceQuery.first);
+    return record.timestamp;
   }
 
   // 4. Get Basic Engagement Stats
@@ -129,7 +202,8 @@ class AttendanceAnalysisService {
         .from('attendance')
         .select('id')
         .eq('church_id', churchId)
-        .gt('timestamp', DateTime.now().subtract(const Duration(days: 7)).toIso8601String());
+        .gt('timestamp',
+            DateTime.now().subtract(const Duration(days: 7)).toIso8601String());
 
     return {
       'weeklyAttendance': (countList as List).length,

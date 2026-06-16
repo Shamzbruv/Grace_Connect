@@ -239,7 +239,49 @@ class NotificationsScreen extends StatelessWidget {
       if (profile != null && profile.uid != currentUser.uid) return profile;
     }
 
+    if (nudge?.status == 'accepted') {
+      final fallbackId = candidateIds.firstWhere(
+        (id) => id.isNotEmpty && id != currentUser.uid,
+        orElse: () => '',
+      );
+      if (fallbackId.isNotEmpty) {
+        return UserProfile(
+          uid: fallbackId,
+          email: '',
+          fullName: _fallbackBibleNudgeName(currentUser, notification, nudge),
+          phoneNumber: '',
+          placeId: nudge?.churchId ?? currentUser.churchId,
+          placeName: '',
+          roles: const ['Member'],
+          joinDate: DateTime.now(),
+          allowMessages: true,
+        );
+      }
+    }
+
     return null;
+  }
+
+  String _fallbackBibleNudgeName(
+    UserProfile currentUser,
+    AppNotification notification,
+    BibleNudge? nudge,
+  ) {
+    if (nudge != null) {
+      if (currentUser.uid == nudge.senderId &&
+          nudge.recipientName.trim().isNotEmpty) {
+        return nudge.recipientName.trim();
+      }
+      if (currentUser.uid == nudge.recipientId &&
+          nudge.senderName.trim().isNotEmpty) {
+        return nudge.senderName.trim();
+      }
+    }
+    if (notification.actorName.trim().isNotEmpty) {
+      return notification.actorName.trim();
+    }
+    final bodyName = _nameFromBibleNudgeBody(notification.body);
+    return bodyName.isNotEmpty ? bodyName : 'Member';
   }
 
   String _nameFromBibleNudgeBody(String body) {

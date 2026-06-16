@@ -143,6 +143,13 @@ class AdminDashboard extends StatelessWidget {
         if (userProfile.capabilities.canManageSchedules)
           const SizedBox(height: 12),
         ActionCard(
+          title: 'Attendance Alerts',
+          description: 'Set absence alerts and coordinate care follow-up',
+          icon: Icons.volunteer_activism_outlined,
+          onTap: () => Navigator.pushNamed(context, '/attendance_insights'),
+        ),
+        const SizedBox(height: 12),
+        ActionCard(
           title: 'Create Announcement',
           description: 'Send church-wide updates',
           icon: Icons.campaign_outlined,

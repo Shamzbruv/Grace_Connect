@@ -23,7 +23,6 @@ class InboxScreen extends StatefulWidget {
 
 class _InboxScreenState extends State<InboxScreen> {
   final DirectMessageService _messageService = DirectMessageService();
-  final UserService _userService = UserService();
 
   @override
   void initState() {
@@ -144,7 +143,6 @@ class _InboxScreenState extends State<InboxScreen> {
                     return _ConversationTile(
                       conversation: conversations[index],
                       currentUser: currentUser,
-                      userService: _userService,
                       messageService: _messageService,
                     );
                   },
@@ -159,23 +157,36 @@ class _ConversationTile extends StatelessWidget {
   const _ConversationTile({
     required this.conversation,
     required this.currentUser,
-    required this.userService,
     required this.messageService,
   });
 
   final DirectConversation conversation;
   final UserProfile currentUser;
-  final UserService userService;
   final DirectMessageService messageService;
 
   @override
   Widget build(BuildContext context) {
-    final otherUserId = conversation.otherMemberId(currentUser.uid);
-
     return FutureBuilder<UserProfile?>(
-      future: userService.getUserProfile(otherUserId),
+      future: messageService.getConversationPeer(
+        conversation,
+        currentUser.uid,
+      ),
       builder: (context, snapshot) {
-        final otherUser = snapshot.data;
+        final fallbackPeerId = conversation.otherMemberId(currentUser.uid);
+        final otherUser = snapshot.data ??
+            (fallbackPeerId.isEmpty
+                ? null
+                : UserProfile(
+                    uid: fallbackPeerId,
+                    email: '',
+                    fullName: 'Member',
+                    phoneNumber: '',
+                    placeId: conversation.churchId,
+                    placeName: '',
+                    roles: const ['Member'],
+                    joinDate: DateTime.now(),
+                    allowMessages: true,
+                  ));
         final displayName = otherUser?.fullName.isNotEmpty == true
             ? otherUser!.fullName
             : 'Member';

@@ -125,9 +125,6 @@ class DirectMessageService {
     if (currentUser.uid == otherUser.uid) {
       throw Exception('You cannot message yourself.');
     }
-    if (!otherUser.allowMessages) {
-      throw Exception('This member is not accepting messages right now.');
-    }
 
     final key = _participantKey(currentUser.uid, otherUser.uid);
     final existing = await _supabase
@@ -148,6 +145,10 @@ class DirectMessageService {
       }
     } on PostgrestException catch (error) {
       throw Exception(_conversationErrorMessage(error));
+    }
+
+    if (!otherUser.allowMessages) {
+      throw Exception('This member is not accepting messages right now.');
     }
 
     try {
@@ -209,12 +210,18 @@ class DirectMessageService {
   bool _isMissingFunctionError(PostgrestException error) {
     final message = error.message.toLowerCase();
     return error.code == 'PGRST202' ||
-        message.contains('get_or_create_direct_conversation') &&
+        (message.contains('get_or_create_direct_conversation') ||
+                message.contains('get_direct_conversation_peer')) &&
             message.contains('not found');
   }
 
   String _conversationErrorMessage(PostgrestException error) {
     final message = error.message.toLowerCase();
+    if (message.contains('operator does not exist: uuid = text') ||
+        message.contains('schema cache') ||
+        message.contains('get_or_create_direct_conversation')) {
+      return 'Messaging access was out of date. Refresh the app and try again. If this person is outside your church, send a Bible Nudge first and wait for them to accept it.';
+    }
     if (message.contains('row-level security') ||
         message.contains('violates row-level security') ||
         error.code == '42501') {
@@ -227,6 +234,18 @@ class DirectMessageService {
     required UserProfile currentUser,
     required String otherUserId,
   }) async {
+    if (currentUser.uid == otherUserId) {
+      throw Exception('You cannot message yourself.');
+    }
+
+    try {
+      final rpcConversation =
+          await _tryGetOrCreateConversationViaRpc(otherUserId);
+      if (rpcConversation != null) return rpcConversation;
+    } on PostgrestException catch (error) {
+      throw Exception(_conversationErrorMessage(error));
+    }
+
     final otherUser = await UserService().getUserProfile(otherUserId);
     if (otherUser == null) {
       throw Exception('Member profile was not found.');
@@ -235,6 +254,65 @@ class DirectMessageService {
       currentUser: currentUser,
       otherUser: otherUser,
     );
+  }
+
+  Future<UserProfile?> getConversationPeer(
+    DirectConversation conversation,
+    String currentUserId,
+  ) async {
+    final viewerId = _currentUid.isNotEmpty ? _currentUid : currentUserId;
+    final directPeerId = conversation.otherMemberId(viewerId);
+    if (directPeerId.isNotEmpty) {
+      final directProfile = await UserService().getUserProfile(directPeerId);
+      if (directProfile != null) return directProfile;
+    }
+
+    try {
+      final data = await _supabase.rpc(
+        'get_direct_conversation_peer',
+        params: {'target_conversation_id': conversation.id},
+      );
+      final map = _mapFromRpcResult(data);
+      if (map != null) return UserProfile.fromMap(map);
+    } on PostgrestException catch (error) {
+      if (!_isMissingFunctionError(error)) {
+        debugPrint('Could not resolve conversation peer: $error');
+      }
+    } catch (error) {
+      debugPrint('Could not resolve conversation peer: $error');
+    }
+
+    final fallbackPeerId = directPeerId.isNotEmpty
+        ? directPeerId
+        : conversation.memberIds.firstWhere(
+            (id) => id != viewerId,
+            orElse: () => '',
+          );
+    if (fallbackPeerId.isEmpty) return null;
+
+    return UserProfile(
+      uid: fallbackPeerId,
+      email: '',
+      fullName: 'Member',
+      phoneNumber: '',
+      placeId: conversation.churchId,
+      placeName: '',
+      roles: const ['Member'],
+      joinDate: DateTime.now(),
+      allowMessages: true,
+    );
+  }
+
+  Map<String, dynamic>? _mapFromRpcResult(dynamic data) {
+    if (data == null) return null;
+    if (data is Map<String, dynamic>) return data;
+    if (data is Map) return Map<String, dynamic>.from(data);
+    if (data is List && data.isNotEmpty) {
+      final first = data.first;
+      if (first is Map<String, dynamic>) return first;
+      if (first is Map) return Map<String, dynamic>.from(first);
+    }
+    return null;
   }
 
   Future<void> sendMessage({
@@ -403,6 +481,15 @@ class DirectMessageService {
     if (uid.isEmpty || message.senderId != uid) return;
 
     await _supabase.from('direct_messages').delete().eq('id', message.id);
+    if (message.mediaPath?.trim().isNotEmpty == true) {
+      try {
+        await _supabase.storage
+            .from(_chatMediaBucket)
+            .remove([message.mediaPath!.trim()]);
+      } catch (error) {
+        debugPrint('Message deleted, but media cleanup failed: $error');
+      }
+    }
     await _refreshConversationPreview(message.conversationId);
   }
 
