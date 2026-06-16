@@ -23,14 +23,14 @@ class FinanceDashboard extends StatelessWidget {
           title: 'Record Contribution',
           description: 'Enter offline giving manually',
           icon: Icons.add_card,
-          onTap: () {}, // Navigate to input
+          onTap: () => Navigator.pushNamed(context, '/finance'),
         ),
         const SizedBox(height: 12),
         ActionCard(
           title: 'View Financial Reports',
           description: 'Analyze giving trends',
           icon: Icons.bar_chart,
-          onTap: () {},
+          onTap: () => Navigator.pushNamed(context, '/finance'),
         ),
       ],
     );

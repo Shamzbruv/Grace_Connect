@@ -50,6 +50,8 @@
     <key>UIBackgroundModes</key>
     <array>
         <string>location</string>
+        <string>fetch</string>
+        <string>remote-notification</string>
     </array>
     <key>NSLocationWhenInUseUsageDescription</key>
     <string>Grace Connect uses your location to automatically mark you present at church during services.</string>
@@ -57,8 +59,22 @@
     <string>Grace Connect uses your location to automatically mark you present at church during services.</string>
     <key>NSCameraUsageDescription</key>
     <string>Grace Connect needs access to the camera to allow you to take photos for your profile and the community feed.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Grace Connect needs microphone access to record voice notes and media for secure messages.</string>
     <key>NSPhotoLibraryUsageDescription</key>
     <string>Grace Connect needs access to your photo library to allow you to upload photos for your profile and the community feed.</string>
+    <key>NSPhotoLibraryAddUsageDescription</key>
+    <string>Grace Connect may save media you create or receive when you choose to keep it.</string>
+    <key>NSUserNotificationsUsageDescription</key>
+    <string>Grace Connect sends church updates, messages, Bible Nudges, and attendance reminders.</string>
+    <key>LSApplicationQueriesSchemes</key>
+    <array>
+        <string>youtube</string>
+        <string>youtubei</string>
+        <string>youtubes</string>
+        <string>tel</string>
+        <string>mailto</string>
+    </array>
     <!-- Deep linking for Supabase Authentication -->
     <key>CFBundleURLTypes</key>
     <array>

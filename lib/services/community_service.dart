@@ -121,6 +121,32 @@ class CommunityService {
     return _normalizePosts(data);
   }
 
+  Future<List<Post>> fetchPostsForChurches(List<String>? churchIds) async {
+    final queryChurchIds = churchIds
+        ?.where((churchId) => churchId.trim().isNotEmpty)
+        .map((churchId) => churchId.trim())
+        .toSet()
+        .toList();
+
+    late final List<dynamic> data;
+    final now = DateTime.now().toUtc().toIso8601String();
+    try {
+      var query = _supabase.from(_postsTable).select().gt('expires_at', now);
+      if (queryChurchIds != null && queryChurchIds.isNotEmpty) {
+        query = query.inFilter('place_id', queryChurchIds);
+      }
+      data = await query.order('created_at', ascending: false).limit(75);
+    } catch (_) {
+      var query = _supabase.from(_postsTable).select();
+      if (queryChurchIds != null && queryChurchIds.isNotEmpty) {
+        query = query.inFilter('place_id', queryChurchIds);
+      }
+      data = await query.order('created_at', ascending: false).limit(75);
+    }
+
+    return _normalizePosts(data);
+  }
+
   // Get stream of posts for a specific church. The feed is REST-first so
   // realtime subscription timeouts never blank the screen.
   Stream<List<Post>> getPosts(String churchId) async* {
@@ -151,6 +177,41 @@ class CommunityService {
     }
   }
 
+  Stream<List<Post>> getPostsForChurches(List<String>? churchIds) async* {
+    var lastKnown = <Post>[];
+    final queryChurchIds = churchIds
+        ?.where((churchId) => churchId.trim().isNotEmpty)
+        .map((churchId) => churchId.trim())
+        .toSet()
+        .toList();
+
+    try {
+      lastKnown = await fetchPostsForChurches(queryChurchIds);
+      yield lastKnown;
+    } catch (error) {
+      debugPrint('Could not load filtered posts before realtime: $error');
+    }
+
+    try {
+      await for (final posts
+          in _postsRealtimeForChurches(queryChurchIds).timeout(
+        _realtimeQuietTimeout,
+        onTimeout: (sink) {
+          sink.add(lastKnown);
+        },
+      )) {
+        lastKnown = posts;
+        yield posts;
+      }
+    } catch (error) {
+      debugPrint(
+          'Filtered post realtime unavailable, keeping last known data: $error');
+      if (lastKnown.isNotEmpty) {
+        yield lastKnown;
+      }
+    }
+  }
+
   Stream<List<Post>> _postsRealtime(String churchId) {
     return _supabase
         .from(_postsTable)
@@ -161,6 +222,21 @@ class CommunityService {
         .map(_normalizePosts);
   }
 
+  Stream<List<Post>> _postsRealtimeForChurches(List<String>? churchIds) {
+    final filterIds = churchIds?.toSet();
+    final query = _supabase
+        .from(_postsTable)
+        .stream(primaryKey: ['id'])
+        .order('created_at', ascending: false)
+        .limit(75);
+    return query.map((rows) {
+      if (filterIds == null || filterIds.isEmpty) return _normalizePosts(rows);
+      return _normalizePosts(
+        rows.where((row) => filterIds.contains(row['place_id'])).toList(),
+      );
+    });
+  }
+
   Stream<Post?> getPost(String postId) {
     return _supabase
         .from(_postsTable)
@@ -168,6 +244,48 @@ class CommunityService {
         .eq('id', postId)
         .limit(1)
         .map((data) => data.isEmpty ? null : Post.fromMap(data.first));
+  }
+
+  Future<Post?> fetchPostById(String postId) async {
+    if (postId.trim().isEmpty) return null;
+
+    final row = await _supabase
+        .from(_postsTable)
+        .select()
+        .eq('id', postId)
+        .maybeSingle();
+    if (row == null) return null;
+
+    final post = Post.fromMap(Map<String, dynamic>.from(row));
+    final expiresAt = post.expiresAt;
+    if (expiresAt != null && expiresAt.isBefore(DateTime.now())) {
+      return null;
+    }
+    return post;
+  }
+
+  Future<Post?> fetchPostForNotification({
+    required String? entityTable,
+    required String? entityId,
+  }) async {
+    final id = entityId?.trim() ?? '';
+    if (id.isEmpty) return null;
+
+    if (entityTable == 'community_posts') {
+      return fetchPostById(id);
+    }
+
+    if (entityTable == 'community_comments') {
+      final row = await _supabase
+          .from(_commentsTable)
+          .select('post_id')
+          .eq('id', id)
+          .maybeSingle();
+      final postId = row?['post_id']?.toString() ?? '';
+      return fetchPostById(postId);
+    }
+
+    return null;
   }
 
   Future<void> addPost(Post post) async {
@@ -223,17 +341,21 @@ class CommunityService {
     return _supabase.storage.from(_bucketName).getPublicUrl(path);
   }
 
-  Future<void> toggleLike(String postId, String userId) async {
-    if (userId.isEmpty) return;
+  Future<Post?> toggleLike(String postId, String userId) async {
+    if (userId.isEmpty) return null;
 
-    try {
-      await _supabase.rpc(
-        'toggle_community_post_like',
-        params: {'post_id': postId},
-      );
-    } catch (e) {
-      debugPrint('Error toggling like: $e');
+    final data = await _supabase.rpc(
+      'toggle_community_post_like',
+      params: {'post_id': postId},
+    );
+
+    if (data is Map<String, dynamic>) {
+      return Post.fromMap(data);
     }
+    if (data is Map) {
+      return Post.fromMap(Map<String, dynamic>.from(data));
+    }
+    return null;
   }
 
   Future<void> addComment(

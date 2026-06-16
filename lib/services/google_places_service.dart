@@ -2,17 +2,47 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
+class GooglePlaceResult {
+  const GooglePlaceResult({
+    required this.id,
+    required this.name,
+    required this.address,
+    this.latitude,
+    this.longitude,
+  });
+
+  final String id;
+  final String name;
+  final String address;
+  final double? latitude;
+  final double? longitude;
+}
+
 class GooglePlacesService {
   // Ideally this should be in an environment variable or secure config
-  static const String _apiKey = 'AIzaSyCwOedktmKNGVOK5mmpvNbSrnbzZ0PG1wg';
+  static const String apiKey = 'AIzaSyCwOedktmKNGVOK5mmpvNbSrnbzZ0PG1wg';
 
   static Future<List<Map<String, String>>> searchChurches(String query) async {
+    final results = await searchChurchLocations(query);
+    return results
+        .map(
+          (place) => {
+            'id': place.id,
+            'name': place.name,
+            'address': place.address,
+          },
+        )
+        .toList();
+  }
+
+  static Future<List<GooglePlaceResult>> searchChurchLocations(
+      String query) async {
     if (query.isEmpty) return [];
 
     try {
       // Use Text Search API to find churches
       final url = Uri.parse(
-          'https://maps.googleapis.com/maps/api/place/textsearch/json?query=$query&type=church&key=$_apiKey');
+          'https://maps.googleapis.com/maps/api/place/textsearch/json?query=${Uri.encodeQueryComponent(query)}&type=church&key=$apiKey');
 
       final response = await http.get(url);
 
@@ -22,12 +52,15 @@ class GooglePlacesService {
         if (data['status'] == 'OK' || data['status'] == 'ZERO_RESULTS') {
           final results = data['results'] as List;
 
-          return results.map<Map<String, String>>((place) {
-            return {
-              'id': place['place_id'] as String,
-              'name': place['name'] as String,
-              'address': place['formatted_address'] as String? ?? '',
-            };
+          return results.map<GooglePlaceResult>((place) {
+            final location = place['geometry']?['location'];
+            return GooglePlaceResult(
+              id: place['place_id'] as String,
+              name: place['name'] as String? ?? 'Unnamed place',
+              address: place['formatted_address'] as String? ?? '',
+              latitude: (location?['lat'] as num?)?.toDouble(),
+              longitude: (location?['lng'] as num?)?.toDouble(),
+            );
           }).toList();
         } else {
           debugPrint(

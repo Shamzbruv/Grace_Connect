@@ -53,10 +53,28 @@ class AppBottomMenu extends StatelessWidget {
       selectedIcon: Icons.people,
     ),
     _MenuItem(
+      label: 'Announcements',
+      route: '/announcements',
+      icon: Icons.campaign_outlined,
+      selectedIcon: Icons.campaign,
+    ),
+    _MenuItem(
+      label: 'Ministries',
+      route: '/ministries',
+      icon: Icons.groups_outlined,
+      selectedIcon: Icons.groups,
+    ),
+    _MenuItem(
       label: 'Attendance',
       route: '/attendance',
       icon: Icons.checklist_rtl_outlined,
       selectedIcon: Icons.checklist_rtl,
+    ),
+    _MenuItem(
+      label: 'Transfer',
+      route: '/church_transfer',
+      icon: Icons.compare_arrows_outlined,
+      selectedIcon: Icons.compare_arrows,
     ),
     _MenuItem(
       label: 'Prayers',

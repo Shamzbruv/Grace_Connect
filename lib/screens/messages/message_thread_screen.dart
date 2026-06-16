@@ -1,11 +1,12 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:audioplayers/audioplayers.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
+import 'package:record/record.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../models/direct_conversation.dart';
@@ -35,12 +36,27 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
   final ModerationService _moderationService = ModerationService();
   final TextEditingController _messageController = TextEditingController();
   final ImagePicker _imagePicker = ImagePicker();
+  final AudioRecorder _voiceRecorder = AudioRecorder();
+  final AudioPlayer _voicePreviewPlayer = AudioPlayer();
   bool _isSending = false;
+  bool _isRecordingVoice = false;
+  bool _isStoppingVoice = false;
+  bool _isPlayingVoicePreview = false;
+  Duration _voiceRecordingElapsed = Duration.zero;
+  DateTime? _voiceRecordingStartedAt;
+  Timer? _voiceRecordingTimer;
+  StreamSubscription<Uint8List>? _voiceRecordingSubscription;
+  StreamSubscription<void>? _voicePreviewCompleteSubscription;
+  final List<int> _voicePcmBytes = [];
   Uint8List? _pendingMediaBytes;
   String? _pendingMediaName;
   String? _pendingMediaType;
   String? _pendingMimeType;
   int? _pendingDurationSeconds;
+
+  static const Duration _maxVoiceDuration = Duration(minutes: 2);
+  static const int _voiceSampleRate = 16000;
+  static const int _voiceChannels = 1;
 
   String get _currentUid => Supabase.instance.client.auth.currentUser?.id ?? '';
 
@@ -53,6 +69,11 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
 
   @override
   void dispose() {
+    _voiceRecordingTimer?.cancel();
+    unawaited(_voiceRecordingSubscription?.cancel());
+    unawaited(_voicePreviewCompleteSubscription?.cancel());
+    unawaited(_voiceRecorder.dispose());
+    unawaited(_voicePreviewPlayer.dispose());
     _messageController.dispose();
     super.dispose();
   }
@@ -131,45 +152,194 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
     });
   }
 
-  Future<void> _pickVoiceNote() async {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.audio,
-      withData: true,
-    );
-    final file = result?.files.single;
-    final bytes = file?.bytes;
-    if (file == null || bytes == null) return;
+  Future<void> _startVoiceRecording() async {
+    if (_isSending || _isRecordingVoice || _isStoppingVoice) return;
 
-    const maxVoiceBytes = 6 * 1024 * 1024;
-    if (file.size > maxVoiceBytes) {
+    final hasPermission = await _voiceRecorder.hasPermission();
+    if (!hasPermission) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Voice notes are capped at about 2 minutes.'),
+          content: Text('Microphone permission is needed for voice notes.'),
         ),
       );
       return;
     }
 
+    await _voicePreviewPlayer.stop();
+    await _voicePreviewCompleteSubscription?.cancel();
+    _voicePcmBytes.clear();
+
+    final stream = await _voiceRecorder.startStream(
+      const RecordConfig(
+        encoder: AudioEncoder.pcm16bits,
+        sampleRate: _voiceSampleRate,
+        numChannels: _voiceChannels,
+        echoCancel: true,
+        noiseSuppress: true,
+      ),
+    );
+
+    _voiceRecordingSubscription = stream.listen(_voicePcmBytes.addAll);
+    _voiceRecordingStartedAt = DateTime.now();
+    _voiceRecordingTimer?.cancel();
+    _voiceRecordingTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      final startedAt = _voiceRecordingStartedAt;
+      if (startedAt == null || !mounted) return;
+      final elapsed = DateTime.now().difference(startedAt);
+      setState(() => _voiceRecordingElapsed = elapsed);
+      if (elapsed >= _maxVoiceDuration) {
+        unawaited(_finishVoiceRecording(autoStopped: true));
+      }
+    });
+
     if (!mounted) return;
     setState(() {
-      _pendingMediaBytes = bytes;
-      _pendingMediaName = file.name;
-      _pendingMediaType = 'voice';
-      _pendingMimeType = _mimeForExtension(file.extension, 'audio/aac');
-      _pendingDurationSeconds = 120;
+      _clearPendingMediaStateOnly();
+      _isRecordingVoice = true;
+      _isPlayingVoicePreview = false;
+      _voiceRecordingElapsed = Duration.zero;
     });
   }
 
-  void _clearPendingMedia() {
+  Future<void> _finishVoiceRecording({bool autoStopped = false}) async {
+    if (!_isRecordingVoice || _isStoppingVoice) return;
+    _isStoppingVoice = true;
+
+    final startedAt = _voiceRecordingStartedAt;
+    final duration = startedAt == null
+        ? _voiceRecordingElapsed
+        : DateTime.now().difference(startedAt);
+
+    _voiceRecordingTimer?.cancel();
+    await _voiceRecorder.stop();
+    await _voiceRecordingSubscription?.cancel();
+
     if (!mounted) return;
     setState(() {
-      _pendingMediaBytes = null;
-      _pendingMediaName = null;
-      _pendingMediaType = null;
-      _pendingMimeType = null;
-      _pendingDurationSeconds = null;
+      _isRecordingVoice = false;
+      _isStoppingVoice = false;
+      _voiceRecordingStartedAt = null;
+      _voiceRecordingElapsed = duration;
     });
+
+    if (_voicePcmBytes.length < 1600 || duration.inMilliseconds < 700) {
+      _voicePcmBytes.clear();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Hold a little longer to record.')),
+      );
+      return;
+    }
+
+    final cappedDuration =
+        duration > _maxVoiceDuration ? _maxVoiceDuration : duration;
+    final wavBytes = _buildWavFile(Uint8List.fromList(_voicePcmBytes));
+    _voicePcmBytes.clear();
+
+    setState(() {
+      _pendingMediaBytes = wavBytes;
+      _pendingMediaName = 'Voice note ${_formatDuration(cappedDuration)}.wav';
+      _pendingMediaType = 'voice';
+      _pendingMimeType = 'audio/wav';
+      _pendingDurationSeconds = cappedDuration.inSeconds.clamp(1, 120).toInt();
+    });
+
+    if (autoStopped) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Voice note capped at 2 minutes.')),
+      );
+    }
+  }
+
+  Future<void> _cancelVoiceRecording() async {
+    if (!_isRecordingVoice) return;
+    _voiceRecordingTimer?.cancel();
+    await _voiceRecorder.cancel();
+    await _voiceRecordingSubscription?.cancel();
+    _voicePcmBytes.clear();
+    if (!mounted) return;
+    setState(() {
+      _isRecordingVoice = false;
+      _isStoppingVoice = false;
+      _voiceRecordingStartedAt = null;
+      _voiceRecordingElapsed = Duration.zero;
+    });
+  }
+
+  Future<void> _toggleVoicePreview() async {
+    final bytes = _pendingMediaBytes;
+    if (_pendingMediaType != 'voice' || bytes == null) return;
+
+    if (_isPlayingVoicePreview) {
+      await _voicePreviewPlayer.stop();
+      if (mounted) setState(() => _isPlayingVoicePreview = false);
+      return;
+    }
+
+    await _voicePreviewCompleteSubscription?.cancel();
+    setState(() => _isPlayingVoicePreview = true);
+    _voicePreviewCompleteSubscription =
+        _voicePreviewPlayer.onPlayerComplete.listen((_) {
+      if (mounted) setState(() => _isPlayingVoicePreview = false);
+    });
+    await _voicePreviewPlayer.play(
+      BytesSource(bytes, mimeType: _pendingMimeType),
+    );
+  }
+
+  void _clearPendingMediaStateOnly() {
+    _pendingMediaBytes = null;
+    _pendingMediaName = null;
+    _pendingMediaType = null;
+    _pendingMimeType = null;
+    _pendingDurationSeconds = null;
+  }
+
+  void _clearPendingMedia() {
+    unawaited(_voicePreviewPlayer.stop());
+    if (!mounted) return;
+    setState(() {
+      _isPlayingVoicePreview = false;
+      _clearPendingMediaStateOnly();
+    });
+  }
+
+  Uint8List _buildWavFile(Uint8List pcmData) {
+    const int bitsPerSample = 16;
+    final byteRate = _voiceSampleRate * _voiceChannels * bitsPerSample ~/ 8;
+    final blockAlign = _voiceChannels * bitsPerSample ~/ 8;
+    final dataLength = pcmData.length;
+    final fileLength = 44 + dataLength;
+    final output = Uint8List(fileLength);
+    final data = ByteData.view(output.buffer);
+
+    void writeAscii(int offset, String value) {
+      for (var i = 0; i < value.length; i++) {
+        output[offset + i] = value.codeUnitAt(i);
+      }
+    }
+
+    writeAscii(0, 'RIFF');
+    data.setUint32(4, fileLength - 8, Endian.little);
+    writeAscii(8, 'WAVE');
+    writeAscii(12, 'fmt ');
+    data.setUint32(16, 16, Endian.little);
+    data.setUint16(20, 1, Endian.little);
+    data.setUint16(22, _voiceChannels, Endian.little);
+    data.setUint32(24, _voiceSampleRate, Endian.little);
+    data.setUint32(28, byteRate, Endian.little);
+    data.setUint16(32, blockAlign, Endian.little);
+    data.setUint16(34, bitsPerSample, Endian.little);
+    writeAscii(36, 'data');
+    data.setUint32(40, dataLength, Endian.little);
+    output.setRange(44, fileLength, pcmData);
+    return output;
+  }
+
+  String _formatDuration(Duration duration) {
+    final minutes = duration.inMinutes;
+    final seconds = duration.inSeconds.remainder(60);
+    return '$minutes:${seconds.toString().padLeft(2, '0')}';
   }
 
   String _chatMediaPath(String mediaType) {
@@ -189,17 +359,6 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
       'video' => 'mp4',
       'voice' => 'aac',
       _ => 'bin',
-    };
-  }
-
-  String _mimeForExtension(String? extension, String fallback) {
-    return switch (extension?.toLowerCase()) {
-      'mp3' => 'audio/mpeg',
-      'm4a' => 'audio/m4a',
-      'mp4' => 'audio/mp4',
-      'wav' => 'audio/wav',
-      'webm' => 'audio/webm',
-      _ => fallback,
     };
   }
 
@@ -377,6 +536,50 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
     Navigator.of(context).pop();
   }
 
+  Widget _buildVoiceRecordButton() {
+    final theme = Theme.of(context);
+    final isDisabled = _isSending || _isStoppingVoice;
+    return Tooltip(
+      message: _isRecordingVoice
+          ? 'Release to finish recording'
+          : 'Hold to record voice note',
+      child: GestureDetector(
+        onLongPressStart:
+            isDisabled ? null : (_) => unawaited(_startVoiceRecording()),
+        onLongPressEnd:
+            isDisabled ? null : (_) => unawaited(_finishVoiceRecording()),
+        onLongPressCancel:
+            isDisabled ? null : () => unawaited(_cancelVoiceRecording()),
+        onTap: isDisabled
+            ? null
+            : () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Hold the mic to record a voice note.'),
+                  ),
+                );
+              },
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: _isRecordingVoice
+                ? theme.colorScheme.errorContainer
+                : theme.colorScheme.surfaceContainerHighest,
+          ),
+          child: Icon(
+            _isRecordingVoice ? Icons.mic : Icons.mic_none_outlined,
+            color: _isRecordingVoice
+                ? theme.colorScheme.onErrorContainer
+                : theme.colorScheme.onSurface,
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final displayName = widget.otherUser.fullName.isNotEmpty
@@ -461,22 +664,67 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
                             mediaType: _pendingMediaType ?? 'attachment',
                             fileName: _pendingMediaName ?? 'Attachment',
                             bytes: _pendingMediaBytes,
+                            isPlaying: _isPlayingVoicePreview,
+                            durationSeconds: _pendingDurationSeconds,
+                            onPlay: _pendingMediaType == 'voice'
+                                ? () => unawaited(_toggleVoicePreview())
+                                : null,
                             onClear: _clearPendingMedia,
+                          ),
+                        if (_isRecordingVoice)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.fiber_manual_record,
+                                  color: Theme.of(context).colorScheme.error,
+                                  size: 14,
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'Recording ${_formatDuration(_voiceRecordingElapsed)} / 2:00',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .bodySmall
+                                      ?.copyWith(
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                ),
+                                const Spacer(),
+                                Text(
+                                  'release to preview',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .bodySmall
+                                      ?.copyWith(
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .onSurfaceVariant,
+                                      ),
+                                ),
+                              ],
+                            ),
                           ),
                         Row(
                           children: [
-                            IconButton(
-                              tooltip: 'Voice note',
-                              onPressed: _isSending ? null : _pickVoiceNote,
-                              icon: const Icon(Icons.mic_none_outlined),
-                            ),
+                            _buildVoiceRecordButton(),
+                            const SizedBox(width: 4),
                             IconButton(
                               tooltip: 'Image',
+                              style: IconButton.styleFrom(
+                                foregroundColor:
+                                    Theme.of(context).colorScheme.onSurface,
+                              ),
                               onPressed: _isSending ? null : _pickImage,
                               icon: const Icon(Icons.image_outlined),
                             ),
                             IconButton(
                               tooltip: 'Video',
+                              style: IconButton.styleFrom(
+                                foregroundColor:
+                                    Theme.of(context).colorScheme.onSurface,
+                              ),
                               onPressed: _isSending ? null : _pickVideo,
                               icon: const Icon(Icons.videocam_outlined),
                             ),
@@ -535,16 +783,23 @@ class _PendingAttachmentPreview extends StatelessWidget {
     required this.fileName,
     required this.bytes,
     required this.onClear,
+    this.onPlay,
+    this.isPlaying = false,
+    this.durationSeconds,
   });
 
   final String mediaType;
   final String fileName;
   final Uint8List? bytes;
   final VoidCallback onClear;
+  final VoidCallback? onPlay;
+  final bool isPlaying;
+  final int? durationSeconds;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isVoice = mediaType == 'voice';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -584,12 +839,42 @@ class _PendingAttachmentPreview extends StatelessWidget {
             ),
           const SizedBox(width: 10),
           Expanded(
-            child: Text(
-              fileName,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  isVoice ? 'Voice note ready' : fileName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+                if (isVoice && durationSeconds != null)
+                  Text(
+                    '${durationSeconds!.clamp(1, 120)} seconds',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  )
+                else
+                  Text(
+                    fileName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+              ],
             ),
           ),
+          if (isVoice && onPlay != null)
+            IconButton(
+              tooltip: isPlaying ? 'Stop preview' : 'Play preview',
+              onPressed: onPlay,
+              icon: Icon(
+                isPlaying ? Icons.stop_circle_outlined : Icons.play_circle,
+              ),
+            ),
           IconButton(
             tooltip: 'Remove attachment',
             onPressed: onClear,
@@ -712,6 +997,14 @@ class _MessageMediaPreview extends StatelessWidget {
       );
     }
 
+    if ((type == 'voice' || type == 'audio') && message.mediaUrl != null) {
+      return _VoiceMessagePlayer(
+        mediaUrl: message.mediaUrl!,
+        textColor: textColor,
+        durationSeconds: message.durationSeconds,
+      );
+    }
+
     final icon = switch (type) {
       'video' => Icons.play_circle_outline,
       'voice' || 'audio' => Icons.mic_none_outlined,
@@ -731,6 +1024,92 @@ class _MessageMediaPreview extends StatelessWidget {
         Text(label, style: TextStyle(color: textColor)),
       ],
     );
+  }
+}
+
+class _VoiceMessagePlayer extends StatefulWidget {
+  const _VoiceMessagePlayer({
+    required this.mediaUrl,
+    required this.textColor,
+    this.durationSeconds,
+  });
+
+  final String mediaUrl;
+  final Color textColor;
+  final int? durationSeconds;
+
+  @override
+  State<_VoiceMessagePlayer> createState() => _VoiceMessagePlayerState();
+}
+
+class _VoiceMessagePlayerState extends State<_VoiceMessagePlayer> {
+  late final AudioPlayer _player = AudioPlayer();
+  StreamSubscription<void>? _completeSubscription;
+  bool _isPlaying = false;
+
+  @override
+  void dispose() {
+    unawaited(_completeSubscription?.cancel());
+    unawaited(_player.dispose());
+    super.dispose();
+  }
+
+  Future<void> _togglePlayback() async {
+    if (_isPlaying) {
+      await _player.stop();
+      if (mounted) setState(() => _isPlaying = false);
+      return;
+    }
+
+    await _completeSubscription?.cancel();
+    _completeSubscription = _player.onPlayerComplete.listen((_) {
+      if (mounted) setState(() => _isPlaying = false);
+    });
+    setState(() => _isPlaying = true);
+    await _player.play(UrlSource(widget.mediaUrl));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final seconds = widget.durationSeconds;
+    final durationText = seconds == null
+        ? 'Voice message'
+        : 'Voice message - ${_formatSeconds(seconds)}';
+
+    return InkWell(
+      onTap: () => unawaited(_togglePlayback()),
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              _isPlaying ? Icons.stop_circle_outlined : Icons.play_circle,
+              color: widget.textColor,
+              size: 26,
+            ),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                durationText,
+                style: TextStyle(
+                  color: widget.textColor,
+                  fontWeight: FontWeight.w700,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _formatSeconds(int seconds) {
+    final minutes = seconds ~/ 60;
+    final remainingSeconds = seconds % 60;
+    return '$minutes:${remainingSeconds.toString().padLeft(2, '0')}';
   }
 }
 

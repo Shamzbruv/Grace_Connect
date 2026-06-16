@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 import '../models/event_model.dart';
@@ -8,27 +10,40 @@ class EventService {
 
   // Get stream of events for a specific church
   Stream<List<EventModel>> getEvents(String churchId) {
-    return _supabase
-        .from(_collection)
-        .stream(primaryKey: ['id'])
-        .eq('churchId', churchId)
-        .order('date', ascending: true)
-        .map((docs) => docs.map((doc) => EventModel.fromMap(doc)).toList());
-  }
-
-  // Get upcoming events (limited)
-  Stream<List<EventModel>> getUpcomingEvents(String churchId, {int limit = 3}) {
-    final now = DateTime.now().toIso8601String();
+    unawaited(cleanupPastEvents());
     return _supabase
         .from(_collection)
         .stream(primaryKey: ['id'])
         .eq('churchId', churchId)
         .order('date', ascending: true)
         .map((docs) => docs
-            .where((doc) => (doc['date'] as String).compareTo(now) >= 0)
             .map((doc) => EventModel.fromMap(doc))
+            .where((event) => !_isPastEvent(event))
+            .toList());
+  }
+
+  // Get upcoming events (limited)
+  Stream<List<EventModel>> getUpcomingEvents(String churchId, {int limit = 3}) {
+    unawaited(cleanupPastEvents());
+    return _supabase
+        .from(_collection)
+        .stream(primaryKey: ['id'])
+        .eq('churchId', churchId)
+        .order('date', ascending: true)
+        .map((docs) => docs
+            .map((doc) => EventModel.fromMap(doc))
+            .where((event) => !_isPastEvent(event))
             .toList())
         .map((events) => events.take(limit).toList());
+  }
+
+  Future<void> cleanupPastEvents() async {
+    try {
+      await _supabase.rpc('cleanup_past_events');
+    } catch (_) {
+      // Older databases may not have the cleanup function yet. Keep the UI
+      // clean locally until the migration is applied.
+    }
   }
 
   // Add a new event
@@ -45,6 +60,8 @@ class EventService {
       churchId: event.churchId,
       organizerId: event.organizerId,
       sourceLabel: event.sourceLabel,
+      ministryId: event.ministryId,
+      ministryName: event.ministryName,
       createdAt: event.createdAt,
       attendees: event.attendees,
     );
@@ -69,5 +86,13 @@ class EventService {
         'is_joining': isJoining,
       },
     );
+  }
+
+  bool _isPastEvent(EventModel event) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final eventDay =
+        DateTime(event.date.year, event.date.month, event.date.day);
+    return eventDay.isBefore(today);
   }
 }

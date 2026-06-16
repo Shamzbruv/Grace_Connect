@@ -25,8 +25,72 @@ const String catPrayerCare = 'Prayer & Care';
 const String catMinistries = 'Ministries';
 const String catMembership = 'Membership';
 
+String _roleId(String value) {
+  return value
+      .trim()
+      .toLowerCase()
+      .replaceAll('&', 'and')
+      .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+      .replaceAll(RegExp(r'_+'), '_')
+      .replaceAll(RegExp(r'^_|_$'), '');
+}
+
+String _fullRoleLabel(String role) {
+  return role
+      .replaceAll(RegExp(r'\bPRO\b'), 'PRO (Public Relations Officer)')
+      .replaceAll('Public Relation Officer', 'Public Relations Officer')
+      .replaceAll('Spiritual Hands of Worship Director',
+          'Spiritual Hands of Worship (S.H.O.W) Director')
+      .replaceAll('United Praise Dancer Director',
+          'United Praise Dancer (U.P.D) Director')
+      .replaceAll(
+          'Graphic Designer', 'Graphic Designer (Flyers, Posters etc.)');
+}
+
+bool _roleAlreadyHasMinistry(String role, String ministry) {
+  final normalizedRole = _roleId(role);
+  final normalizedMinistry = _roleId(ministry);
+  final ministryWords = normalizedMinistry
+      .split('_')
+      .where((word) => word.length > 2 && word != 'ministry')
+      .toList();
+  return normalizedRole.contains(normalizedMinistry) ||
+      ministryWords.any(normalizedRole.contains) ||
+      normalizedRole.contains('flm') ||
+      normalizedRole.contains('s_h_o_w') ||
+      normalizedRole.contains('u_p_d') ||
+      normalizedRole.contains('teen_talent');
+}
+
+List<ChurchRole> _ministryRoles(
+  String ministry,
+  String category,
+  List<String> roles, {
+  String? description,
+}) {
+  return roles.map((role) {
+    final cleanRole = _fullRoleLabel(role);
+    final name = _roleAlreadyHasMinistry(cleanRole, ministry)
+        ? cleanRole
+        : '$ministry $cleanRole';
+    return ChurchRole(
+      id: _roleId(name),
+      name: name,
+      category: category,
+      description: description ?? '$ministry role',
+      responsibilities: [
+        'Serve within $ministry',
+        'Coordinate with assigned leaders and team members',
+      ],
+      platformDuties: [
+        'Access can be granted through app privileges during assignment',
+      ],
+    );
+  }).toList();
+}
+
 // --- REGISTRY ---
-const List<ChurchRole> churchRoleRegistry = [
+final List<ChurchRole> churchRoleRegistry = [
   // A) GOVERNANCE
   ChurchRole(
     id: 'senior_pastor',
@@ -308,6 +372,245 @@ const List<ChurchRole> churchRoleRegistry = [
     description: 'Children\'s oversight',
     responsibilities: ['Children\'s events'],
     platformDuties: ['Events', 'Safety workflows'],
+  ),
+
+  ..._ministryRoles(
+    'Pastoral Care',
+    catPrayerCare,
+    ['Director', 'Asst. Director', 'Secretary', 'Treasurer'],
+    description: 'Pastoral care and member support',
+  ),
+  ..._ministryRoles(
+    'Youth Ministry',
+    catMinistries,
+    ['Youth Director', 'Asst. Youth Director'],
+    description:
+        'Youth Director oversees children, teens, young adults, sports, Sunday School, and tertiary ministry coordination',
+  ),
+  ..._ministryRoles(
+    'Children\'s Ministry',
+    catMinistries,
+    ['Director', 'Asst. Director', 'Secretary', 'PRO', 'Treasurer'],
+  ),
+  ..._ministryRoles(
+    'Young Adult Ministry',
+    catMinistries,
+    ['Director', 'Asst. Director', 'Secretary', 'PRO', 'Treasurer'],
+  ),
+  ..._ministryRoles(
+    'Teens Ministry',
+    catMinistries,
+    ['Director', 'Asst. Director', 'Secretary', 'PRO', 'Treasurer'],
+  ),
+  ..._ministryRoles(
+    'Sports Ministry',
+    catMinistries,
+    [
+      'Director',
+      'Asst. Director',
+      'Secretary',
+      'PRO',
+      'Treasurer',
+      'Netball Coach',
+      'Football Coach',
+      'Volleyball Coach',
+    ],
+  ),
+  ..._ministryRoles(
+    'Tertiary Ministry',
+    catMinistries,
+    ['Director', 'Asst. Director', 'Secretary', 'PRO', 'Treasurer'],
+  ),
+  ..._ministryRoles(
+    'Sunday School',
+    catTeaching,
+    [
+      'Superintendent',
+      'Asst. Superintendent',
+      'Secretary',
+      'PRO',
+      'Sunday School Teacher',
+      'Satellite Sunday School Leader',
+      'Satellite Sunday School Teacher',
+      'Refreshment Officers',
+    ],
+  ),
+  ..._ministryRoles(
+    'Men\'s Ministry',
+    catMinistries,
+    [
+      'Director',
+      'Asst. Director',
+      'Director for Boys Ministry',
+      'PRO',
+      'Treasurer',
+      'Secretary',
+    ],
+  ),
+  ..._ministryRoles(
+    'Ladies Ministry',
+    catMinistries,
+    [
+      'Director',
+      'Asst. Director',
+      'PRO',
+      'Treasurer',
+      'Secretary',
+      'Cleaning Team Member - 1st Sundays',
+      'Cleaning Team Member - 2nd Sundays',
+      'Cleaning Team Member - 3rd Sundays',
+      'Cleaning Team Member - 4th Sundays',
+      'Cleaning Team Member - 5th Sundays',
+    ],
+  ),
+  ..._ministryRoles(
+    'Family Life Ministry',
+    catMinistries,
+    [
+      'Director for FLM',
+      'Asst. Director FLM',
+      'FLM PRO',
+      'FLM Treasurer',
+      'FLM Secretary',
+      'Singles Ministry Leader',
+      'PRO - Singles Ministry',
+      'Secretary - Singles Ministry',
+      'Couples Ministry Leader',
+      'PRO - Couples Ministry',
+      'Secretary - Couples Ministry',
+      'Senior Citizens Leader',
+      'PRO - Senior Citizen Ministry',
+      'Secretary - Senior Citizen Ministry',
+    ],
+    description: 'Family life, singles, couples, and senior care',
+  ),
+  ..._ministryRoles(
+    'Church Fundraising Committee',
+    catMinistries,
+    [
+      'Director',
+      'Asst. Director',
+      'PRO',
+      'Treasurer',
+      'Secretary',
+      'Committee Member',
+    ],
+  ),
+  ..._ministryRoles(
+    'Ushers Ministry',
+    catService,
+    [
+      'Director',
+      'Asst. Director',
+      'Treasurer',
+      'Door Ushers',
+      'Offering Ushers',
+      'Traffic Attendant',
+    ],
+  ),
+  ..._ministryRoles(
+    'Hospitality Ministry',
+    catService,
+    [
+      'Director',
+      'Asst. Director',
+      'Visitor Care Coordinator',
+      'Team Member',
+      'Refreshment Team Leader',
+      'Refreshment Team Member',
+    ],
+  ),
+  ..._ministryRoles(
+    'Building Maintenance & Beautification Ministry',
+    catService,
+    [
+      'Director',
+      'Asst. Director',
+      'Maintenance Personnel',
+      'Building Caretaker',
+      'Beautification Leader',
+      'Grounds & Gardening Personnel',
+    ],
+  ),
+  ..._ministryRoles(
+    'Music, Media & Technical Team',
+    catWorshipMedia,
+    [
+      'Director',
+      'Asst. Director',
+      'Drummer',
+      'Keyboardist',
+      'Guitarist',
+      'Bassist',
+      'Praise & Worship Director',
+      'Praise & Worship Member',
+      'Choir Director',
+      'Choir Member',
+      'Sound Engineer / Audio Technician',
+      'IT / Technical Support Personnel',
+      'Media Operator / Projectionist',
+      'Camera Operator',
+      'Live Stream Technician',
+      'Social Media Personnel',
+      'Graphic Designer',
+    ],
+  ),
+  ..._ministryRoles(
+    'Administrative Team',
+    catGovernance,
+    ['Admin Secretary', 'Asst. Secretary', 'Announcement Reader'],
+  ),
+  ..._ministryRoles(
+    'Evangelism, Discipleship & Mission',
+    catTeaching,
+    [
+      'Director',
+      'Asst. Director',
+      'Secretary',
+      'Evangelism Coordinator',
+      'Discipleship Coordinator',
+      'Mission Coordinator',
+      'PRO',
+    ],
+  ),
+  ..._ministryRoles(
+    'Prayer & Fasting Team',
+    catPrayerCare,
+    ['Director', 'Asst. Director', 'Secretary', 'PRO'],
+  ),
+  ..._ministryRoles(
+    'Benevolence Ministry',
+    catPrayerCare,
+    [
+      'Director',
+      'Asst. Director',
+      'Secretary',
+      'Visitation Team Member',
+      'Distribution Team Member',
+    ],
+  ),
+  ..._ministryRoles(
+    'Performing Arts Ministry',
+    catMinistries,
+    [
+      'Director',
+      'Asst. Director',
+      'Secretary',
+      'PRO',
+      'Spiritual Hands of Worship Director',
+      'S.H.O.W Asst. Director',
+      'S.H.O.W Member',
+      'S.H.O.W Event Planner',
+      'United Praise Dancer Director',
+      'U.P.D Asst. Director',
+      'U.P.D Member',
+      'Teen Talent Director',
+      'Teen Talent Asst. Director',
+      'Teen Talent Dance Leader',
+      'Teen Talent Bible Quiz Leader',
+      'Teen Talent Music Leader',
+      'Teen Talent Leader',
+    ],
   ),
 
   // G) MEMBERSHIP

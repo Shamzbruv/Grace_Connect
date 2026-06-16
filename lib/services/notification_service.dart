@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/foundation.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/app_notification.dart';
@@ -21,6 +23,9 @@ class NotificationService {
   StreamSubscription<List<AppNotification>>? _foregroundSubscription;
   DateTime _foregroundStartedAt = DateTime.now();
   final Set<String> _shownForegroundNotificationIds = {};
+  static final Uri _topicNotificationEndpoint = Uri.parse(
+    'https://us-central1-graceconnect-9a97c.cloudfunctions.net/sendTopicNotification',
+  );
 
   // Default topics and their pref keys
   static const Map<String, String> topicMap = {
@@ -71,10 +76,43 @@ class NotificationService {
     await _localNotifications.show(0, title, body, details);
   }
 
-  Future<void> sendNotification(String title, String body, String topic) async {
-    // In production, this would trigger a Cloud Function or call FCM API
-    debugPrint(
-        "Simulated sending notification to topic '$topic': $title - $body");
+  Future<void> sendNotification(
+    String title,
+    String body,
+    String topic, {
+    String? route,
+    String type = 'general',
+  }) async {
+    final accessToken = _supabase.auth.currentSession?.accessToken;
+    if (accessToken == null || accessToken.isEmpty) {
+      debugPrint('Topic notification skipped: missing Supabase session.');
+      return;
+    }
+
+    try {
+      final response = await http.post(
+        _topicNotificationEndpoint,
+        headers: {
+          'Authorization': 'Bearer $accessToken',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({
+          'title': title,
+          'body': body,
+          'topic': topic,
+          'route': route,
+          'type': type,
+        }),
+      );
+
+      if (response.statusCode >= 400) {
+        debugPrint(
+          'Topic notification failed (${response.statusCode}): ${response.body}',
+        );
+      }
+    } catch (error) {
+      debugPrint('Topic notification request failed: $error');
+    }
   }
 
   Stream<List<AppNotification>> watchNotifications(String userId) {
@@ -106,6 +144,15 @@ class NotificationService {
         .from('notifications')
         .update({'is_read': true})
         .eq('user_id', userId)
+        .eq('is_read', false);
+  }
+
+  Future<void> markRouteAsRead(String userId, String route) async {
+    await _supabase
+        .from('notifications')
+        .update({'is_read': true})
+        .eq('user_id', userId)
+        .eq('route', route)
         .eq('is_read', false);
   }
 

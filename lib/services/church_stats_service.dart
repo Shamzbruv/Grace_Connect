@@ -22,7 +22,7 @@ class ChurchStatsService {
       final attendanceCountRes = await _supabase
           .from('attendance')
           .select('id')
-          .eq('churchId', churchId)
+          .eq('church_id', churchId)
           .gte('timestamp', startOfWeek.toIso8601String())
           .count(CountOption.exact);
 
@@ -32,16 +32,29 @@ class ChurchStatsService {
       final lastWeekAttendanceRes = await _supabase
           .from('attendance')
           .select('id')
-          .eq('churchId', churchId)
+          .eq('church_id', churchId)
           .gte('timestamp', startOfLastWeek.toIso8601String())
           .lte('timestamp', endOfLastWeek.toIso8601String())
           .count(CountOption.exact);
 
-      final ministriesCountRes = await _supabase
-          .from('study_groups')
-          .select('id')
-          .eq('churchId', churchId)
-          .count(CountOption.exact);
+      var ministryCount = 0;
+      try {
+        final ministriesCountRes = await _supabase
+            .from('ministries')
+            .select('id')
+            .eq('church_id', churchId)
+            .eq('status', 'active')
+            .count(CountOption.exact);
+        ministryCount = ministriesCountRes.count;
+      } catch (error) {
+        debugPrint('Falling back to study group ministry count: $error');
+        final studyGroupsCountRes = await _supabase
+            .from('study_groups')
+            .select('id')
+            .eq('churchId', churchId)
+            .count(CountOption.exact);
+        ministryCount = studyGroupsCountRes.count;
+      }
 
       final currentWeekCount = attendanceCountRes.count;
       final prevWeekCount = lastWeekAttendanceRes.count;
@@ -53,7 +66,7 @@ class ChurchStatsService {
         sundaySchoolAdults: 0, // Future capability
         sundaySchoolYouth: 0, // Future capability
         sundaySchoolKids: 0, // Future capability
-        ministryCount: ministriesCountRes.count,
+        ministryCount: ministryCount,
         weeklyTrend: [
           0.0,
           0.0,

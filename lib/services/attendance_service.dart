@@ -277,6 +277,32 @@ class AttendanceService {
     });
   }
 
+  Future<ChurchLocation?> getChurchLocation(String churchId) {
+    return _getChurchLocation(churchId);
+  }
+
+  Future<void> saveChurchLocation({
+    required String churchId,
+    required double latitude,
+    required double longitude,
+    required double radiusMeters,
+    String? address,
+  }) async {
+    await _supabase.from('church_locations').upsert({
+      'placeId': churchId,
+      'churchId': churchId,
+      'latitude': latitude,
+      'longitude': longitude,
+      'radiusMeters': radiusMeters,
+      'timezone': 'America/Jamaica',
+      if (address != null && address.trim().isNotEmpty)
+        'address': address.trim(),
+      'updatedAt': DateTime.now().toIso8601String(),
+    });
+
+    _updateDebugStatus('Church geofence saved for auto-attendance.');
+  }
+
   /// Returns the currently active recurring service for the given church.
   Future<Map<String, dynamic>?> getActiveService(String churchId) async {
     final now = DateTime.now();
@@ -605,26 +631,14 @@ class AttendanceService {
     required String churchId,
     required String reason,
     required String engagementAnswer,
+    int? watchedMinutes,
   }) async {
-    // 1. Check if ANY service is currently active
     final activeService = await getActiveService(churchId);
-
-    String finalServiceId;
-    String finalServiceName;
-
-    if (activeService != null) {
-      finalServiceId = activeService['id']!;
-      finalServiceName = activeService['name']!;
-    } else {
-      // Allow remote check-in even if no strict schedule match?
-      // Depends on church policy. For now, we'll create an ad-hoc "Remote Service" ID
-      // OR throw an error if strictly during service times only.
-      // Let's go with ad-hoc for flexibility but warn.
-      final now = DateTime.now();
-      finalServiceId = 'remote_${now.weekday}_${now.hour}';
-      finalServiceName = 'Remote Check-In (Off-Schedule)';
-      // Alternatively: throw Exception('No active service found to check in to.');
+    if (activeService == null) {
+      throw Exception('Remote check-in only opens during an active service.');
     }
+    final finalServiceId = activeService['id']! as String;
+    final finalServiceName = activeService['name']! as String;
 
     // 2. Check if already marked present for this service (or today broadly if ad-hoc)
     final todayStart =
@@ -653,7 +667,9 @@ class AttendanceService {
       present: true,
       status: 'remote_verified',
       reasonForAbsence: reason,
-      engagementAnswer: engagementAnswer,
+      engagementAnswer: watchedMinutes == null
+          ? engagementAnswer
+          : '$engagementAnswer\nWatched in app: $watchedMinutes minutes',
       serviceName: finalServiceName,
     );
 
@@ -792,8 +808,18 @@ class AttendanceService {
     return now.isAfter(closedAt);
   }
 
-  Stream<List<AttendanceRecord>> getAttendanceHistory(String userId) {
-    return _supabase
+  Stream<List<AttendanceRecord>> getAttendanceHistory(String userId) async* {
+    final initialRows = await _supabase
+        .from('attendance')
+        .select()
+        .eq('user_id', userId)
+        .order('timestamp', ascending: false);
+
+    yield initialRows
+        .map<AttendanceRecord>((record) => AttendanceRecord.fromMap(record))
+        .toList();
+
+    yield* _supabase
         .from('attendance')
         .stream(primaryKey: ['id'])
         .eq('user_id', userId)
@@ -859,17 +885,12 @@ class AttendanceService {
       ),
     );
 
-    await _supabase.from('church_locations').upsert({
-      'placeId': churchId,
-      'churchId': churchId,
-      'latitude': position.latitude,
-      'longitude': position.longitude,
-      'radiusMeters': radiusMeters,
-      'timezone': 'America/Jamaica',
-      'updatedAt': DateTime.now().toIso8601String(),
-    });
-
-    _updateDebugStatus('Church location saved for auto-attendance.');
+    await saveChurchLocation(
+      churchId: churchId,
+      latitude: position.latitude,
+      longitude: position.longitude,
+      radiusMeters: radiusMeters,
+    );
   }
 
   // Seeding Logic (Client-Side)

@@ -16,6 +16,7 @@ class UserProfile {
   final String photoUrl;
   final String coverPhotoUrl;
   final String bio;
+  final List<String> appPrivileges;
 
   // Social Links
   final String? instagramLink;
@@ -26,6 +27,12 @@ class UserProfile {
   final bool isProfilePrivate;
   final bool allowMessages;
   final bool notifyAttendance;
+  final bool showContactInfo;
+  final String contactInfoVisibility;
+  final bool showFamilyTree;
+  final bool showFamilyRelationshipTypes;
+  final bool allowFamilyLinkRequests;
+  final String familyTreeVisibility;
 
   // Family & Dev
   final String? fatherId;
@@ -54,12 +61,19 @@ class UserProfile {
     this.photoUrl = '',
     this.coverPhotoUrl = '',
     this.bio = '',
+    this.appPrivileges = const [],
     this.instagramLink,
     this.facebookLink,
     this.whatsappLink,
     this.isProfilePrivate = false,
     this.allowMessages = true,
     this.notifyAttendance = true,
+    this.showContactInfo = true,
+    this.contactInfoVisibility = 'church',
+    this.showFamilyTree = true,
+    this.showFamilyRelationshipTypes = true,
+    this.allowFamilyLinkRequests = true,
+    this.familyTreeVisibility = 'church',
     this.fatherId,
     this.motherId,
     this.spouseId,
@@ -68,7 +82,10 @@ class UserProfile {
     this.accountState = 'active',
   }) {
     // Initialize capabilities based on roles
-    capabilities = UserCapabilities.fromRoleIds(roles);
+    capabilities = UserCapabilities.fromRoleIdsAndPrivileges(
+      roles,
+      appPrivileges,
+    );
   }
 
   /// Parses a date from either a Firestore Timestamp or an ISO 8601 string (Supabase).
@@ -96,12 +113,20 @@ class UserProfile {
       photoUrl: data['photoUrl'] ?? '',
       coverPhotoUrl: data['coverPhotoUrl'] ?? '',
       bio: data['bio'] ?? '',
+      appPrivileges: List<String>.from(data['appPrivileges'] ?? const []),
       instagramLink: data['instagramLink'],
       facebookLink: data['facebookLink'],
       whatsappLink: data['whatsappLink'],
       isProfilePrivate: data['isProfilePrivate'] ?? false,
       allowMessages: data['allowMessages'] ?? true,
       notifyAttendance: data['notifyAttendance'] ?? true,
+      showContactInfo: data['showContactInfo'] ?? true,
+      contactInfoVisibility: data['contactInfoVisibility'] ??
+          (data['showContactInfo'] == false ? 'private' : 'church'),
+      showFamilyTree: data['showFamilyTree'] ?? true,
+      showFamilyRelationshipTypes: data['showFamilyRelationshipTypes'] ?? true,
+      allowFamilyLinkRequests: data['allowFamilyLinkRequests'] ?? true,
+      familyTreeVisibility: data['familyTreeVisibility'] ?? 'church',
       fatherId: data['fatherId'],
       motherId: data['motherId'],
       spouseId: data['spouseId'],
@@ -129,12 +154,19 @@ class UserProfile {
       'photoUrl': photoUrl,
       'coverPhotoUrl': coverPhotoUrl,
       'bio': bio,
+      'appPrivileges': appPrivileges,
       'instagramLink': instagramLink,
       'facebookLink': facebookLink,
       'whatsappLink': whatsappLink,
       'isProfilePrivate': isProfilePrivate,
       'allowMessages': allowMessages,
       'notifyAttendance': notifyAttendance,
+      'showContactInfo': showContactInfo,
+      'contactInfoVisibility': contactInfoVisibility,
+      'showFamilyTree': showFamilyTree,
+      'showFamilyRelationshipTypes': showFamilyRelationshipTypes,
+      'allowFamilyLinkRequests': allowFamilyLinkRequests,
+      'familyTreeVisibility': familyTreeVisibility,
       'fatherId': fatherId,
       'motherId': motherId,
       'spouseId': spouseId,
@@ -163,12 +195,19 @@ class UserProfile {
     String? photoUrl,
     String? coverPhotoUrl,
     String? bio,
+    List<String>? appPrivileges,
     String? instagramLink,
     String? facebookLink,
     String? whatsappLink,
     bool? isProfilePrivate,
     bool? allowMessages,
     bool? notifyAttendance,
+    bool? showContactInfo,
+    String? contactInfoVisibility,
+    bool? showFamilyTree,
+    bool? showFamilyRelationshipTypes,
+    bool? allowFamilyLinkRequests,
+    String? familyTreeVisibility,
     String? fatherId,
     String? motherId,
     String? spouseId,
@@ -192,12 +231,22 @@ class UserProfile {
       photoUrl: photoUrl ?? this.photoUrl,
       coverPhotoUrl: coverPhotoUrl ?? this.coverPhotoUrl,
       bio: bio ?? this.bio,
+      appPrivileges: appPrivileges ?? this.appPrivileges,
       instagramLink: instagramLink ?? this.instagramLink,
       facebookLink: facebookLink ?? this.facebookLink,
       whatsappLink: whatsappLink ?? this.whatsappLink,
       isProfilePrivate: isProfilePrivate ?? this.isProfilePrivate,
       allowMessages: allowMessages ?? this.allowMessages,
       notifyAttendance: notifyAttendance ?? this.notifyAttendance,
+      showContactInfo: showContactInfo ?? this.showContactInfo,
+      contactInfoVisibility:
+          contactInfoVisibility ?? this.contactInfoVisibility,
+      showFamilyTree: showFamilyTree ?? this.showFamilyTree,
+      showFamilyRelationshipTypes:
+          showFamilyRelationshipTypes ?? this.showFamilyRelationshipTypes,
+      allowFamilyLinkRequests:
+          allowFamilyLinkRequests ?? this.allowFamilyLinkRequests,
+      familyTreeVisibility: familyTreeVisibility ?? this.familyTreeVisibility,
       fatherId: fatherId ?? this.fatherId,
       motherId: motherId ?? this.motherId,
       spouseId: spouseId ?? this.spouseId,
@@ -219,6 +268,16 @@ class UserProfile {
   bool get canAssignPrayers => capabilities.canAssignPrayers;
   bool get canViewFinance => capabilities.canViewFinance;
   bool get canManageRoles => capabilities.canManageRoles;
+
+  bool canShowContactInfoTo({required bool isSameChurch}) {
+    if (!showContactInfo || isProfilePrivate) return false;
+    return switch (contactInfoVisibility) {
+      'everyone' => true,
+      'church' => isSameChurch,
+      'private' => false,
+      _ => isSameChurch,
+    };
+  }
 
   bool get isPrayerWarrior => _normalizedRoles.any((role) =>
       role == 'prayer_warrior' ||

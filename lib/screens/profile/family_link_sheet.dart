@@ -27,18 +27,6 @@ class _FamilyLinkSheetState extends State<FamilyLinkSheet> {
   String _relationshipType = 'father';
   bool _isSending = false;
 
-  static const List<DropdownMenuItem<String>> _relationshipItems = [
-    DropdownMenuItem(value: 'father', child: Text('Father')),
-    DropdownMenuItem(value: 'mother', child: Text('Mother')),
-    DropdownMenuItem(value: 'husband', child: Text('Husband')),
-    DropdownMenuItem(value: 'wife', child: Text('Wife')),
-    DropdownMenuItem(value: 'spouse', child: Text('Spouse')),
-    DropdownMenuItem(value: 'child', child: Text('Child')),
-    DropdownMenuItem(value: 'sibling', child: Text('Sibling')),
-    DropdownMenuItem(value: 'guardian', child: Text('Guardian')),
-    DropdownMenuItem(value: 'other', child: Text('Other family')),
-  ];
-
   @override
   void dispose() {
     _memberController.dispose();
@@ -100,6 +88,8 @@ class _FamilyLinkSheetState extends State<FamilyLinkSheet> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final selectedRelationship =
+        FamilyRelationship.optionFor(_relationshipType);
 
     return SafeArea(
       child: Padding(
@@ -141,7 +131,18 @@ class _FamilyLinkSheetState extends State<FamilyLinkSheet> {
               const SizedBox(height: 20),
               DropdownButtonFormField<String>(
                 value: _relationshipType,
-                items: _relationshipItems,
+                isExpanded: true,
+                items: FamilyRelationship.relationshipOptions
+                    .map(
+                      (option) => DropdownMenuItem(
+                        value: option.value,
+                        child: Text(
+                          option.menuLabel,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    )
+                    .toList(),
                 decoration: const InputDecoration(
                   labelText: 'Relationship',
                   prefixIcon: Icon(Icons.family_restroom_outlined),
@@ -150,6 +151,13 @@ class _FamilyLinkSheetState extends State<FamilyLinkSheet> {
                   if (value == null) return;
                   setState(() => _relationshipType = value);
                 },
+              ),
+              const SizedBox(height: 8),
+              Text(
+                selectedRelationship.description,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
               ),
               const SizedBox(height: 16),
               TypeAheadField<FamilyMemberSummary>(
@@ -202,8 +210,9 @@ class _FamilyLinkSheetState extends State<FamilyLinkSheet> {
                 controller: _noteController,
                 maxLines: 3,
                 decoration: const InputDecoration(
-                  labelText: 'Note',
-                  hintText: 'Optional message',
+                  labelText: 'Relationship context',
+                  hintText:
+                      'Optional detail, such as married through my daughter, step-family, adopted, or church family.',
                   alignLabelWithHint: true,
                 ),
               ),

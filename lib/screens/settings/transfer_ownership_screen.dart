@@ -11,14 +11,15 @@ class TransferOwnershipScreen extends StatefulWidget {
   const TransferOwnershipScreen({super.key, required this.churchId});
 
   @override
-  State<TransferOwnershipScreen> createState() => _TransferOwnershipScreenState();
+  State<TransferOwnershipScreen> createState() =>
+      _TransferOwnershipScreenState();
 }
 
 class _TransferOwnershipScreenState extends State<TransferOwnershipScreen> {
   final TextEditingController _emailController = TextEditingController();
   final ChurchService _churchService = ChurchService();
   final RoleService _roleService = RoleService();
-  
+
   bool _isLoading = false;
   Map<String, dynamic>? _foundUser;
   String? _foundUserUid;
@@ -40,18 +41,26 @@ class _TransferOwnershipScreenState extends State<TransferOwnershipScreen> {
     });
 
     try {
+      final church = await _churchService.getChurch(widget.churchId);
+      final validChurchIds = {
+        widget.churchId,
+        if (church != null) church.id,
+        if (church != null) church.placeId,
+      }.where((id) => id.trim().isNotEmpty).toSet();
+
       final query = await Supabase.instance.client
           .from('users')
           .select()
-          .eq('email', email)
+          .ilike('email', email)
           .limit(1);
 
       if (query.isNotEmpty) {
         final data = query.first;
-        final docId = data['uid']; 
-        
+        final docId = data['uid'];
+        final userChurchId = data['placeId']?.toString() ?? '';
+
         // Ensure the user belongs to the same church
-        if (data['placeId'] == widget.churchId) {
+        if (validChurchIds.contains(userChurchId)) {
           setState(() {
             _foundUser = data;
             _foundUserUid = docId as String?;
@@ -59,7 +68,9 @@ class _TransferOwnershipScreenState extends State<TransferOwnershipScreen> {
         } else {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('User found, but they do not belong to this church.')),
+              const SnackBar(
+                  content: Text(
+                      'User found, but they do not belong to this church.')),
             );
           }
         }
@@ -100,7 +111,8 @@ class _TransferOwnershipScreenState extends State<TransferOwnershipScreen> {
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Yes, Transfer', style: TextStyle(color: Colors.white)),
+            child: const Text('Yes, Transfer',
+                style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -117,7 +129,8 @@ class _TransferOwnershipScreenState extends State<TransferOwnershipScreen> {
       // Also assign Admin/Pastor roles just to be safe so they can manage
       final currentRoles = List<String>.from(_foundUser?['roles'] ?? []);
       if (!currentRoles.contains('Pastor')) {
-        await _roleService.assignRole(_foundUserUid!, 'Pastor', widget.churchId);
+        await _roleService.assignRole(
+            _foundUserUid!, 'Pastor', widget.churchId);
       }
       if (!currentRoles.contains('Admin')) {
         await _roleService.assignRole(_foundUserUid!, 'Admin', widget.churchId);
@@ -152,6 +165,17 @@ class _TransferOwnershipScreenState extends State<TransferOwnershipScreen> {
             const Text(
               'Enter the email address of the member you want to transfer church ownership to. They must already be a member of this church.',
             ),
+            if (widget.churchId.trim().isEmpty) ...[
+              const SizedBox(height: 12),
+              const Card(
+                child: Padding(
+                  padding: EdgeInsets.all(12),
+                  child: Text(
+                    'This church record is missing an id. Go back to Church Settings and reopen this screen after the church profile loads.',
+                  ),
+                ),
+              ),
+            ],
             const SizedBox(height: 16),
             Row(
               children: [
@@ -186,7 +210,8 @@ class _TransferOwnershipScreenState extends State<TransferOwnershipScreen> {
                     children: [
                       const Text(
                         'User Found',
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 16),
                       ),
                       const SizedBox(height: 8),
                       Text('Name: ${_foundUser?['fullName']}'),

@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../config/rbac_config.dart';
 import '../../models/role_system/church_role.dart';
 import '../../models/user_profile.dart';
 import '../../providers/user_role_provider.dart';
@@ -27,9 +28,6 @@ class _RoleManagementScreenState extends State<RoleManagementScreen> {
   String? _churchId;
   String _searchQuery = '';
   bool _isLoading = true;
-  String? _savingMemberId;
-  String? _editingMemberId;
-  final Map<String, Set<String>> _draftRolesByMemberId = {};
 
   @override
   void initState() {
@@ -58,48 +56,21 @@ class _RoleManagementScreenState extends State<RoleManagementScreen> {
     if (mounted) setState(() => _isLoading = false);
   }
 
-  List<String> _getAllowedRoles() {
-    return [
-      'Member',
-      'Pastor',
-      'Senior Pastor',
-      'Assistant Pastor',
-      'Acting Pastor',
-      'Admin',
-      'Church Admin',
-      'Secretary',
-      'Church Secretary',
-      'Treasurer',
-      'Financial Secretary',
-      'Elder',
-      'Deacon',
-      'Deaconess',
-      'Prayer Warrior',
-      'Intercessor',
-      'Prayer Ministry Leader',
-      'Counselor',
-      'Care Counseling Coordinator',
-      'Media Team',
-      'Usher Lead',
-      'Sunday School Leader',
-    ];
-  }
-
-  Future<void> _saveRoles(
+  Future<bool> _saveRoles(
     UserProfile member,
     Set<String> selectedRoles,
+    Set<String> selectedPrivileges,
   ) async {
     final churchId = _churchId;
-    if (churchId == null || churchId.isEmpty) return;
+    if (churchId == null || churchId.isEmpty) return false;
 
     if (selectedRoles.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('A member needs at least one role.')),
       );
-      return;
+      return false;
     }
 
-    setState(() => _savingMemberId = member.uid);
     try {
       final currentRoles = member.roles.toSet();
       final rolesToAdd = selectedRoles.difference(currentRoles);
@@ -111,24 +82,25 @@ class _RoleManagementScreenState extends State<RoleManagementScreen> {
       for (final role in rolesToRemove) {
         await _roleService.removeRole(member.uid, role, churchId);
       }
+      await _roleService.updatePrivileges(
+        member.uid,
+        selectedPrivileges,
+        churchId,
+      );
 
-      if (!mounted) return;
-      setState(() {
-        _editingMemberId = null;
-        _draftRolesByMemberId.remove(member.uid);
-      });
+      if (!mounted) return false;
       await context.read<UserRoleProvider>().refreshProfile();
-      if (!mounted) return;
+      if (!mounted) return false;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Roles updated for ${member.fullName}.')),
       );
+      return true;
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted) return false;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Could not update roles: $e')),
       );
-    } finally {
-      if (mounted) setState(() => _savingMemberId = null);
+      return false;
     }
   }
 
@@ -141,15 +113,493 @@ class _RoleManagementScreenState extends State<RoleManagementScreen> {
       return;
     }
 
-    setState(() {
-      if (_editingMemberId == member.uid) {
-        _editingMemberId = null;
-        _draftRolesByMemberId.remove(member.uid);
-      } else {
-        _editingMemberId = member.uid;
-        _draftRolesByMemberId[member.uid] = member.roles.toSet();
+    _showRoleEditorSheet(member);
+  }
+
+  Future<void> _showRoleEditorSheet(UserProfile member) async {
+    final selectedRoles = member.roles.toSet();
+    final selectedPrivileges = member.appPrivileges.toSet();
+    var isSaving = false;
+    var roleSearchQuery = '';
+    var privilegesExpanded = selectedPrivileges.isNotEmpty;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            final displayName =
+                member.fullName.isEmpty ? member.email : member.fullName;
+
+            return SizedBox(
+              height: MediaQuery.of(sheetContext).size.height * 0.86,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 18, 12, 10),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            displayName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(sheetContext)
+                                .textTheme
+                                .titleLarge
+                                ?.copyWith(fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Close',
+                          icon: const Icon(Icons.close),
+                          onPressed: isSaving
+                              ? null
+                              : () => Navigator.pop(sheetContext),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Divider(height: 1),
+                  Expanded(
+                    child: ListView(
+                      padding: const EdgeInsets.all(16),
+                      children: [
+                        Text(
+                          'Ministry Roles',
+                          style:
+                              Theme.of(context).textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                        ),
+                        const SizedBox(height: 10),
+                        TextField(
+                          decoration: const InputDecoration(
+                            labelText: 'Search roles',
+                            prefixIcon: Icon(Icons.search),
+                          ),
+                          onChanged: (value) {
+                            setSheetState(() {
+                              roleSearchQuery = value.trim().toLowerCase();
+                            });
+                          },
+                        ),
+                        const SizedBox(height: 12),
+                        ..._buildRoleCategoryTiles(
+                          context: context,
+                          roleSearchQuery: roleSearchQuery,
+                          selectedRoles: selectedRoles,
+                          selectedPrivileges: selectedPrivileges,
+                          isSaving: isSaving,
+                          setSheetState: setSheetState,
+                          onRoleAdded: () {
+                            privilegesExpanded = true;
+                          },
+                        ),
+                        const Divider(height: 28),
+                        ExpansionTile(
+                          initiallyExpanded: privilegesExpanded,
+                          leading: const Icon(Icons.admin_panel_settings),
+                          title: const Text('App Privileges'),
+                          subtitle: const Text(
+                            'Grant exact app access separately from ministry titles.',
+                          ),
+                          onExpansionChanged: (expanded) {
+                            privilegesExpanded = expanded;
+                          },
+                          children: [
+                            for (final group in _permissionGroups().entries)
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(0, 8, 0, 10),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 16,
+                                        vertical: 4,
+                                      ),
+                                      child: Text(
+                                        group.key,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .labelLarge
+                                            ?.copyWith(
+                                              fontWeight: FontWeight.w900,
+                                              color: Theme.of(context)
+                                                  .colorScheme
+                                                  .primary,
+                                            ),
+                                      ),
+                                    ),
+                                    for (final permission in group.value)
+                                      CheckboxListTile(
+                                        contentPadding:
+                                            const EdgeInsets.symmetric(
+                                          horizontal: 16,
+                                        ),
+                                        title: Text(
+                                          _permissionLabel(permission),
+                                        ),
+                                        subtitle: Text(
+                                          _permissionDescription(permission),
+                                        ),
+                                        value: selectedPrivileges
+                                            .contains(permission.name),
+                                        onChanged: isSaving
+                                            ? null
+                                            : (value) {
+                                                setSheetState(() {
+                                                  if (value == true) {
+                                                    selectedPrivileges
+                                                        .add(permission.name);
+                                                  } else {
+                                                    selectedPrivileges.remove(
+                                                        permission.name);
+                                                  }
+                                                });
+                                              },
+                                      ),
+                                  ],
+                                ),
+                              ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  Padding(
+                    padding: EdgeInsets.fromLTRB(
+                      16,
+                      10,
+                      16,
+                      MediaQuery.of(sheetContext).padding.bottom + 16,
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: isSaving
+                                ? null
+                                : () => Navigator.pop(sheetContext),
+                            child: const Text('Cancel'),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: FilledButton.icon(
+                            onPressed: isSaving
+                                ? null
+                                : () async {
+                                    setSheetState(() => isSaving = true);
+                                    final saved = await _saveRoles(
+                                      member,
+                                      selectedRoles,
+                                      selectedPrivileges,
+                                    );
+                                    if (sheetContext.mounted) {
+                                      if (saved) {
+                                        Navigator.pop(sheetContext);
+                                      } else {
+                                        setSheetState(() => isSaving = false);
+                                      }
+                                    }
+                                  },
+                            icon: isSaving
+                                ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(Icons.save_outlined),
+                            label: const Text('Save'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  List<Widget> _buildRoleCategoryTiles({
+    required BuildContext context,
+    required String roleSearchQuery,
+    required Set<String> selectedRoles,
+    required Set<String> selectedPrivileges,
+    required bool isSaving,
+    required StateSetter setSheetState,
+    required VoidCallback onRoleAdded,
+  }) {
+    final grouped = <String, List<_RoleOption>>{};
+    for (final option in _getAllowedRoleOptions()) {
+      final matchesSearch = roleSearchQuery.isEmpty ||
+          option.name.toLowerCase().contains(roleSearchQuery) ||
+          option.category.toLowerCase().contains(roleSearchQuery) ||
+          _roleDescription(option.name).toLowerCase().contains(roleSearchQuery);
+      if (!matchesSearch) continue;
+      grouped.putIfAbsent(option.category, () => []).add(option);
+    }
+
+    if (grouped.isEmpty) {
+      return [
+        const AppCard(child: Text('No roles match that search.')),
+      ];
+    }
+
+    return grouped.entries.map((entry) {
+      final selectedCount =
+          entry.value.where((role) => selectedRoles.contains(role.name)).length;
+      return ExpansionTile(
+        initiallyExpanded: roleSearchQuery.isNotEmpty || selectedCount > 0,
+        title: Text(entry.key),
+        subtitle: Text(
+          selectedCount == 0
+              ? '${entry.value.length} role${entry.value.length == 1 ? '' : 's'}'
+              : '$selectedCount selected',
+        ),
+        children: [
+          for (final option in entry.value)
+            CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(option.name),
+              subtitle: Text(
+                _roleDescription(option.name),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+              value: selectedRoles.contains(option.name),
+              onChanged: isSaving
+                  ? null
+                  : (value) {
+                      setSheetState(() {
+                        if (value == true) {
+                          selectedRoles.add(option.name);
+                          final recommended =
+                              _recommendedPrivilegesForRoles({option.name});
+                          selectedPrivileges.addAll(recommended);
+                          if (recommended.isNotEmpty) onRoleAdded();
+                        } else {
+                          selectedRoles.remove(option.name);
+                        }
+                      });
+                    },
+            ),
+        ],
+      );
+    }).toList();
+  }
+
+  List<_RoleOption> _getAllowedRoleOptions() {
+    final byName = <String, _RoleOption>{
+      for (final role in churchRoleRegistry)
+        role.name: _RoleOption(role.name, role.category),
+      'Admin': const _RoleOption('Admin', catGovernance),
+      'Church Admin': const _RoleOption('Church Admin', catGovernance),
+      'Prayer Warrior': const _RoleOption('Prayer Warrior', catPrayerCare),
+      'Counselor': const _RoleOption('Counselor', catPrayerCare),
+      'Media Team': const _RoleOption('Media Team', catWorshipMedia),
+      'Usher Lead': const _RoleOption('Usher Lead', catService),
+      'Sunday School Leader':
+          const _RoleOption('Sunday School Leader', catTeaching),
+    };
+
+    return byName.values.toList()
+      ..sort((a, b) {
+        final categoryCompare =
+            a.category.toLowerCase().compareTo(b.category.toLowerCase());
+        if (categoryCompare != 0) return categoryCompare;
+        return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+      });
+  }
+
+  String _roleDescription(String role) {
+    final normalized = _normalizeRole(role);
+    final alias = switch (normalized) {
+      'admin' => 'church_admin',
+      'secretary' => 'church_secretary',
+      'prayer_warrior' => 'intercessor',
+      'usher_lead' => 'head_usher',
+      'sunday_school_leader' => 'sunday_school_superintendent',
+      _ => normalized,
+    };
+
+    for (final churchRole in churchRoleRegistry) {
+      if (churchRole.id == alias) {
+        final duty = churchRole.platformDuties.isNotEmpty
+            ? churchRole.platformDuties.first
+            : churchRole.description;
+        return duty;
       }
-    });
+    }
+
+    if (normalized == 'church_admin') {
+      return 'Administrative access for member records and operations.';
+    }
+
+    return 'Standard church platform access for this ministry role.';
+  }
+
+  Set<String> _recommendedPrivilegesForRoles(Set<String> roles) {
+    final permissions =
+        RBACConfig.getPermissionsForRoles(roles.toList()).toSet();
+    final normalizedRoles = roles.map(_normalizeRole).toSet();
+
+    final isLeaderRole = normalizedRoles.any((role) =>
+        role.contains('director') ||
+        role.contains('coordinator') ||
+        role.contains('superintendent') ||
+        role.contains('leader'));
+    final isCommunicationsRole = normalizedRoles.any((role) =>
+        role.contains('secretary') ||
+        role.split('_').contains('pro') ||
+        role.contains('public_relations') ||
+        role.contains('announcement_reader') ||
+        role.contains('social_media'));
+    final isFinanceRole = normalizedRoles.any((role) =>
+        role.contains('treasurer') ||
+        role.contains('financial') ||
+        role.contains('fundraising'));
+    final isMediaRole = normalizedRoles.any((role) =>
+        role.contains('media') ||
+        role.contains('technical') ||
+        role.contains('sound_engineer') ||
+        role.contains('camera_operator') ||
+        role.contains('live_stream'));
+
+    if (isLeaderRole) {
+      permissions.add(AppPermission.createAnnouncement);
+      permissions.add(AppPermission.createEvents);
+    }
+    if (isCommunicationsRole) {
+      permissions.add(AppPermission.createAnnouncement);
+      permissions.add(AppPermission.sendPushNotification);
+    }
+    if (isFinanceRole) {
+      permissions.add(AppPermission.viewFinanceDashboard);
+    }
+    if (isMediaRole) {
+      permissions.add(AppPermission.manageLivestream);
+      permissions.add(AppPermission.pinPost);
+    }
+
+    return permissions.map((permission) => permission.name).toSet();
+  }
+
+  Map<String, List<AppPermission>> _permissionGroups() {
+    return const {
+      'Administration': [
+        AppPermission.approveMembers,
+        AppPermission.manageChurchSettings,
+        AppPermission.manageRoles,
+        AppPermission.viewOperationalAnalytics,
+      ],
+      'Finance': [
+        AppPermission.viewFinanceDashboard,
+        AppPermission.manageFinances,
+        AppPermission.approveFinanceReports,
+      ],
+      'Community & Content': [
+        AppPermission.createAnnouncement,
+        AppPermission.sendPushNotification,
+        AppPermission.pinPost,
+        AppPermission.moderateCommunity,
+        AppPermission.createEvents,
+      ],
+      'Ministries': [
+        AppPermission.manageSundaySchool,
+        AppPermission.manageLivestream,
+        AppPermission.manageWorship,
+      ],
+      'Care & Prayer': [
+        AppPermission.managePrayerRequests,
+        AppPermission.assignCareRequests,
+        AppPermission.viewPriorityList,
+        AppPermission.managePriorityList,
+      ],
+      'Attendance & Scheduling': [
+        AppPermission.manualCheckIn,
+        AppPermission.viewAttendanceInsights,
+        AppPermission.manageSchedule,
+      ],
+    };
+  }
+
+  String _permissionLabel(AppPermission permission) {
+    return switch (permission) {
+      AppPermission.approveMembers => 'Approve Members',
+      AppPermission.manageChurchSettings => 'Manage Church Settings',
+      AppPermission.manageRoles => 'Manage Roles',
+      AppPermission.viewOperationalAnalytics => 'View Analytics',
+      AppPermission.viewFinanceDashboard => 'View Finance Dashboard',
+      AppPermission.manageFinances => 'Manage Finances',
+      AppPermission.approveFinanceReports => 'Approve Finance Reports',
+      AppPermission.createAnnouncement => 'Create Announcements',
+      AppPermission.sendPushNotification => 'Send Push Notifications',
+      AppPermission.pinPost => 'Pin Posts',
+      AppPermission.moderateCommunity => 'Moderate Community',
+      AppPermission.createEvents => 'Create Events',
+      AppPermission.manageSundaySchool => 'Manage Sunday School',
+      AppPermission.manageLivestream => 'Manage Livestream',
+      AppPermission.manageWorship => 'Manage Worship',
+      AppPermission.managePrayerRequests => 'Manage Prayer Requests',
+      AppPermission.assignCareRequests => 'Assign Care Requests',
+      AppPermission.manualCheckIn => 'Manual Check-In',
+      AppPermission.viewAttendanceInsights => 'View Attendance Insights',
+      AppPermission.viewPriorityList => 'View Priority List',
+      AppPermission.managePriorityList => 'Manage Priority List',
+      AppPermission.manageSchedule => 'Manage Schedule',
+    };
+  }
+
+  String _permissionDescription(AppPermission permission) {
+    return switch (permission) {
+      AppPermission.approveMembers => 'Approve or decline member requests.',
+      AppPermission.manageChurchSettings => 'Edit church-wide setup.',
+      AppPermission.manageRoles => 'Assign roles and app privileges.',
+      AppPermission.viewOperationalAnalytics => 'Open operational reports.',
+      AppPermission.viewFinanceDashboard =>
+        'View giving and finance summaries.',
+      AppPermission.manageFinances => 'Create and edit finance records.',
+      AppPermission.approveFinanceReports => 'Review finance reports.',
+      AppPermission.createAnnouncement => 'Post official announcements.',
+      AppPermission.sendPushNotification => 'Notify users about updates.',
+      AppPermission.pinPost => 'Pin important community posts.',
+      AppPermission.moderateCommunity => 'Moderate posts and reports.',
+      AppPermission.createEvents => 'Create church or ministry events.',
+      AppPermission.manageSundaySchool => 'Manage Sunday School workflows.',
+      AppPermission.manageLivestream => 'Manage live service media.',
+      AppPermission.manageWorship => 'Manage worship planning.',
+      AppPermission.managePrayerRequests =>
+        'Receive and update assigned prayer or care requests.',
+      AppPermission.assignCareRequests =>
+        'Assign confidential prayer and counseling requests to trusted helpers.',
+      AppPermission.manualCheckIn => 'Check people in manually.',
+      AppPermission.viewAttendanceInsights => 'Review attendance details.',
+      AppPermission.viewPriorityList => 'View urgent care items.',
+      AppPermission.managePriorityList => 'Resolve urgent care items.',
+      AppPermission.manageSchedule => 'Create recurring service schedules.',
+    };
+  }
+
+  String _normalizeRole(String role) {
+    return role
+        .trim()
+        .toLowerCase()
+        .replaceAll('&', 'and')
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+        .replaceAll(RegExp(r'_+'), '_')
+        .replaceAll(RegExp(r'^_|_$'), '');
   }
 
   @override
@@ -230,45 +680,10 @@ class _RoleManagementScreenState extends State<RoleManagementScreen> {
 
                     return Column(
                       children: members.map((member) {
-                        final isEditing = _editingMemberId == member.uid;
-                        final draftRoles = _draftRolesByMemberId[member.uid] ??
-                            member.roles.toSet();
-
-                        return Column(
-                          children: [
-                            _MemberRoleCard(
-                              member: member,
-                              isEditing: isEditing,
-                              onTap: () => _toggleInlineEditor(member),
-                            ),
-                            if (isEditing)
-                              _InlineRoleEditor(
-                                member: member,
-                                allowedRoles: _getAllowedRoles(),
-                                selectedRoles: draftRoles,
-                                isSaving: _savingMemberId == member.uid,
-                                onRoleChanged: (role, selected) {
-                                  setState(() {
-                                    final roles =
-                                        _draftRolesByMemberId[member.uid] ??
-                                            member.roles.toSet();
-                                    if (selected) {
-                                      roles.add(role);
-                                    } else {
-                                      roles.remove(role);
-                                    }
-                                    _draftRolesByMemberId[member.uid] = roles;
-                                  });
-                                },
-                                onCancel: () {
-                                  setState(() {
-                                    _editingMemberId = null;
-                                    _draftRolesByMemberId.remove(member.uid);
-                                  });
-                                },
-                                onSave: () => _saveRoles(member, draftRoles),
-                              ),
-                          ],
+                        return _MemberRoleCard(
+                          member: member,
+                          isEditing: false,
+                          onTap: () => _toggleInlineEditor(member),
                         );
                       }).toList(),
                     );
@@ -379,7 +794,8 @@ class _RoleHistoryScreenState extends State<RoleHistoryScreen> {
                   final action = log['action']?.toString() ?? '';
                   final timestamp = _parseTimestamp(log['timestamp']);
                   final since = _selectedFilter.since;
-                  final isRoleChange = action.startsWith('role_');
+                  final isRoleChange = action.startsWith('role_') ||
+                      action == 'privileges_updated';
                   return isRoleChange &&
                       (since == null ||
                           timestamp == null ||
@@ -419,8 +835,11 @@ class _RoleHistoryScreenState extends State<RoleHistoryScreen> {
                         ? 'Just now'
                         : DateFormat.yMMMd().add_jm().format(timestamp);
                     final action = log['action']?.toString() ?? '';
+                    final isPrivilegeUpdate = action == 'privileges_updated';
                     final isRemoval = action == 'role_removed';
                     final verb = isRemoval ? 'removed from' : 'assigned to';
+                    final privilegesAfter = List<String>.from(
+                        details['privilegesAfter'] ?? const []);
                     final targetName =
                         details['targetName']?.toString().trim().isNotEmpty ==
                                 true
@@ -460,18 +879,33 @@ class _RoleHistoryScreenState extends State<RoleHistoryScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  isRemoval
-                                      ? '$roleChanged removed'
-                                      : '$roleChanged assigned',
+                                  isPrivilegeUpdate
+                                      ? 'App privileges updated'
+                                      : isRemoval
+                                          ? '$roleChanged removed'
+                                          : '$roleChanged assigned',
                                   style: theme.textTheme.titleMedium?.copyWith(
                                     fontWeight: FontWeight.w800,
                                   ),
                                 ),
                                 const SizedBox(height: 5),
                                 Text(
-                                  '$roleChanged was $verb $targetName.',
+                                  isPrivilegeUpdate
+                                      ? 'App access privileges were updated for $targetName.'
+                                      : '$roleChanged was $verb $targetName.',
                                   style: theme.textTheme.bodyMedium,
                                 ),
+                                if (isPrivilegeUpdate) ...[
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    privilegesAfter.isEmpty
+                                        ? 'No extra app privileges are currently granted.'
+                                        : 'Granted: ${privilegesAfter.map(_prettifyPrivilege).join(', ')}',
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: theme.colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                ],
                                 const SizedBox(height: 8),
                                 Text(
                                   'For: $targetName'
@@ -585,6 +1019,20 @@ class _RoleHistoryScreenState extends State<RoleHistoryScreen> {
     final prefix = fallbackKind == 'leader' ? 'Leader' : 'Member';
     final shortId = uid.length <= 8 ? uid : uid.substring(0, 8);
     return '$prefix $shortId';
+  }
+
+  String _prettifyPrivilege(String value) {
+    final words = value
+        .replaceAllMapped(
+          RegExp(r'([a-z])([A-Z])'),
+          (match) => '${match.group(1)} ${match.group(2)}',
+        )
+        .replaceAll('_', ' ')
+        .split(' ')
+        .where((word) => word.isNotEmpty)
+        .map((word) => word[0].toUpperCase() + word.substring(1))
+        .join(' ');
+    return words.isEmpty ? value : words;
   }
 }
 
@@ -725,14 +1173,24 @@ class _MemberRoleCard extends StatelessWidget {
                       Wrap(
                         spacing: 6,
                         runSpacing: 6,
-                        children: member.roles.take(4).map((role) {
-                          return Chip(
-                            label: Text(role),
-                            visualDensity: VisualDensity.compact,
-                            materialTapTargetSize:
-                                MaterialTapTargetSize.shrinkWrap,
-                          );
-                        }).toList(),
+                        children: [
+                          for (final role in member.roles.take(4))
+                            Chip(
+                              label: Text(role),
+                              visualDensity: VisualDensity.compact,
+                              materialTapTargetSize:
+                                  MaterialTapTargetSize.shrinkWrap,
+                            ),
+                          if (member.appPrivileges.isNotEmpty)
+                            Chip(
+                              avatar: const Icon(Icons.key_outlined, size: 16),
+                              label: Text(
+                                  '${member.appPrivileges.length} privileges'),
+                              visualDensity: VisualDensity.compact,
+                              materialTapTargetSize:
+                                  MaterialTapTargetSize.shrinkWrap,
+                            ),
+                        ],
                       ),
                     ],
                   ),
@@ -751,143 +1209,6 @@ class _MemberRoleCard extends StatelessWidget {
         ),
       ),
     );
-  }
-}
-
-class _InlineRoleEditor extends StatelessWidget {
-  const _InlineRoleEditor({
-    required this.member,
-    required this.allowedRoles,
-    required this.selectedRoles,
-    required this.isSaving,
-    required this.onRoleChanged,
-    required this.onCancel,
-    required this.onSave,
-  });
-
-  final UserProfile member;
-  final List<String> allowedRoles;
-  final Set<String> selectedRoles;
-  final bool isSaving;
-  final void Function(String role, bool selected) onRoleChanged;
-  final VoidCallback onCancel;
-  final VoidCallback onSave;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return AppCard(
-      margin: const EdgeInsets.only(bottom: 16),
-      color: theme.colorScheme.surfaceContainerHighest,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  'Editing ${member.fullName.isEmpty ? member.email : member.fullName}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ),
-              Text(
-                '${selectedRoles.length} selected',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Column(
-            children: allowedRoles.map((role) {
-              final selected = selectedRoles.contains(role);
-              return CheckboxListTile(
-                contentPadding: EdgeInsets.zero,
-                dense: true,
-                title: Text(role),
-                subtitle: Text(
-                  _roleDescription(role),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                value: selected,
-                onChanged: isSaving
-                    ? null
-                    : (value) => onRoleChanged(role, value ?? false),
-              );
-            }).toList(),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: isSaving ? null : onCancel,
-                  child: const Text('Cancel'),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: FilledButton.icon(
-                  onPressed: isSaving ? null : onSave,
-                  icon: isSaving
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.save_outlined),
-                  label: const Text('Save'),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  String _roleDescription(String role) {
-    final normalized = _normalizeRole(role);
-    final alias = switch (normalized) {
-      'admin' => 'church_admin',
-      'secretary' => 'church_secretary',
-      'prayer_warrior' => 'intercessor',
-      'usher_lead' => 'head_usher',
-      'sunday_school_leader' => 'sunday_school_superintendent',
-      _ => normalized,
-    };
-
-    for (final churchRole in churchRoleRegistry) {
-      if (churchRole.id == alias) {
-        final duty = churchRole.platformDuties.isNotEmpty
-            ? churchRole.platformDuties.first
-            : churchRole.description;
-        return duty;
-      }
-    }
-
-    if (normalized == 'church_admin') {
-      return 'Administrative access for member records and operations.';
-    }
-
-    return 'Standard church platform access for this ministry role.';
-  }
-
-  String _normalizeRole(String role) {
-    return role
-        .trim()
-        .toLowerCase()
-        .replaceAll('&', 'and')
-        .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
-        .replaceAll(RegExp(r'_+'), '_')
-        .replaceAll(RegExp(r'^_|_$'), '');
   }
 }
 
@@ -919,4 +1240,11 @@ class _MemberAvatar extends StatelessWidget {
           : null,
     );
   }
+}
+
+class _RoleOption {
+  const _RoleOption(this.name, this.category);
+
+  final String name;
+  final String category;
 }

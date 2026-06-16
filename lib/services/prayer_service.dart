@@ -21,6 +21,7 @@ class PrayerService {
       status: 'active',
       createdAt: DateTime.now(),
       prayedBy: [],
+      assignedToHelperId: request.assignedToHelperId,
     );
     await _supabase.from(_collection).insert(newRequest.toMap());
   }
@@ -44,10 +45,32 @@ class PrayerService {
         .map((docs) => docs.map((doc) => PrayerRequest.fromMap(doc)).toList());
   }
 
+  Stream<List<PrayerRequest>> getAssignedRequests(
+    String churchId,
+    String helperId,
+  ) {
+    return _supabase
+        .from(_collection)
+        .stream(primaryKey: ['id'])
+        .eq('churchId', churchId)
+        .order('createdAt', ascending: false)
+        .map((docs) => docs
+            .where((doc) => doc['assignedToHelperId'] == helperId)
+            .map((doc) => PrayerRequest.fromMap(doc))
+            .toList());
+  }
+
   Future<void> updateStatus(String requestId, String status) async {
     await _supabase
         .from(_collection)
         .update({'status': status}).eq('id', requestId);
+  }
+
+  Future<void> assignHelper(String requestId, String? helperId) async {
+    await _supabase.rpc('assign_prayer_helper', params: {
+      'request_id': requestId,
+      'helper_uid': helperId,
+    });
   }
 
   // Mark as Prayed (Team/Community)

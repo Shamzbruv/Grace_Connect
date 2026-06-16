@@ -204,8 +204,11 @@ class _ChurchAdminSettingsScreenState extends State<ChurchAdminSettingsScreen> {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) =>
-                        TransferOwnershipScreen(churchId: _church!.id),
+                    builder: (context) => TransferOwnershipScreen(
+                      churchId: _church!.placeId.isNotEmpty
+                          ? _church!.placeId
+                          : _church!.id,
+                    ),
                   ),
                 ).then((_) => _loadChurch()); // Reload in case of transfer
               },

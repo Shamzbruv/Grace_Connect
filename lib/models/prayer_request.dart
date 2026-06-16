@@ -10,6 +10,7 @@ class PrayerRequest {
   final String status; // 'submitted', 'acknowledged', 'prayed', 'closed'
   final DateTime createdAt;
   final List<String> prayedBy; // List of userIds who prayed
+  final String? assignedToHelperId;
 
   PrayerRequest({
     required this.id,
@@ -23,6 +24,7 @@ class PrayerRequest {
     this.status = 'submitted',
     required this.createdAt,
     this.prayedBy = const [],
+    this.assignedToHelperId,
   });
 
   factory PrayerRequest.fromMap(Map<String, dynamic> data) {
@@ -40,6 +42,7 @@ class PrayerRequest {
           ? DateTime.parse(data['createdAt'])
           : DateTime.now(),
       prayedBy: List<String>.from(data['prayedBy'] ?? []),
+      assignedToHelperId: data['assignedToHelperId'],
     );
   }
 
@@ -57,6 +60,7 @@ class PrayerRequest {
       'id': id,
       'createdAt': createdAt.toIso8601String(),
       'prayedBy': prayedBy,
+      'assignedToHelperId': assignedToHelperId,
     };
   }
 }

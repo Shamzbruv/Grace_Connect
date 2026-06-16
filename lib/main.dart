@@ -24,10 +24,12 @@ import 'screens/signup screen/signup_screen.dart';
 import 'screens/signup screen/church_signup_screen.dart';
 import 'screens/signup screen/complete_profile_screen.dart';
 import 'screens/members/members_list_screen.dart';
+import 'screens/attendance/church_location_picker_screen.dart';
 import 'screens/attendance/attendance_screen.dart';
 import 'screens/donations/donations_screen.dart';
 import 'screens/prayers/prayers_screen.dart';
 import 'screens/analytics/analytics_screen.dart';
+import 'screens/announcements/announcements_screen.dart';
 import 'screens/counseling/counseling_intro_screen.dart';
 import 'screens/live_streaming/live_streaming_screen.dart';
 import 'screens/main/main_tabs_screen.dart';
@@ -53,6 +55,8 @@ import 'screens/notifications/notifications_screen.dart';
 import 'screens/study_groups/study_group_list_screen.dart';
 import 'screens/messages/inbox_screen.dart';
 import 'screens/testimonies/testimonies_screen.dart';
+import 'screens/ministries/ministries_screen.dart';
+import 'screens/transfer/church_transfer_screen.dart';
 import 'widgets/auth_required.dart';
 
 Future<void> main() async {
@@ -165,11 +169,15 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
                   _protected(const CompleteProfileScreen()),
               '/members': (context) => _protected(const MembersListScreen()),
               '/attendance': (context) => _protected(const AttendanceScreen()),
+              '/attendance_location': (context) =>
+                  _protected(const ChurchLocationPickerScreen()),
               '/donations': (context) => _protected(const DonationsScreen()),
               '/events': (context) =>
                   _protected(const MainTabsScreen(initialIndex: 1)),
               '/prayers': (context) => _protected(const PrayersScreen()),
               '/analytics': (context) => _protected(const AnalyticsScreen()),
+              '/announcements': (context) =>
+                  _protected(const AnnouncementsScreen()),
               '/counseling': (context) =>
                   _protected(const CounselingIntroScreen()),
               '/live_streaming': (context) =>
@@ -237,14 +245,13 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
                   _protected(const StudyGroupListScreen()),
               '/testimonies': (context) =>
                   _protected(const TestimoniesScreen()),
+              '/ministries': (context) => _protected(const MinistriesScreen()),
+              '/church_transfer': (context) =>
+                  _protected(const ChurchTransferScreen()),
             },
             onUnknownRoute: (settings) {
               final routeName = settings.name ?? '';
-              if (routeName.contains('access_token') ||
-                  routeName.contains('refresh_token') ||
-                  routeName.contains('error_description') ||
-                  routeName.contains('auth_callback') ||
-                  routeName.contains('code=')) {
+              if (AuthFlowService.isAuthCallbackRouteName(routeName)) {
                 return MaterialPageRoute(
                   builder: (_) => const AuthCallbackScreen(),
                   settings: settings,

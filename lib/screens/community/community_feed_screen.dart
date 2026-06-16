@@ -10,12 +10,16 @@ import '../../providers/user_role_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:timeago/timeago.dart' as timeago;
 import '../../services/community_service.dart';
+import '../../services/church_service.dart';
+import '../../services/bible_nudge_service.dart';
 import '../../services/direct_message_service.dart';
 import '../../services/feed_scroll_service.dart';
 import '../../services/moderation_service.dart';
 import '../../services/user_service.dart';
+import '../../models/church_model.dart';
 import '../../models/community_story.dart';
 import '../../models/post.dart';
+import '../../models/user_profile.dart';
 import 'post_detail_screen.dart';
 import '../messages/message_thread_screen.dart';
 import 'package:image_picker/image_picker.dart';
@@ -40,8 +44,10 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
   final TextEditingController _postController = TextEditingController();
   final CommunityService _communityService = CommunityService();
   final DirectMessageService _messageService = DirectMessageService();
+  final BibleNudgeService _bibleNudgeService = BibleNudgeService();
   final ModerationService _moderationService = ModerationService();
   final UserService _userService = UserService();
+  final ChurchService _churchService = ChurchService();
   final GoTrueClient _auth = Supabase.instance.client.auth;
   final ScrollController _feedScrollController = ScrollController();
   StreamSubscription<void>? _scrollToTopSubscription;
@@ -56,6 +62,12 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
   int _storiesRefreshToken = 0;
   Set<String> _watchedStoryIds = {};
   Set<String> _blockedUserIds = {};
+  final Map<String, String> _churchNamesById = {};
+  final Set<String> _loadingChurchNameIds = {};
+  final Map<String, List<String>> _postLikeOverrides = {};
+  String _feedScope = 'church';
+  List<String>? _selectedFeedChurchIds;
+  String? _selectedFeedLabel;
 
   XFile? _selectedMedia;
   Uint8List? _selectedImagePreviewBytes;
@@ -91,12 +103,46 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
     final prefs = await SharedPreferences.getInstance();
     if (!mounted) return;
     final dataSaver = prefs.getBool('data_saver') ?? false;
+    final uid = _auth.currentUser?.id ?? 'guest';
+    final savedScope = prefs.getString('community_feed_scope_$uid') ?? 'church';
+    final savedChurchIds =
+        prefs.getStringList('community_feed_church_ids_$uid');
+    final savedLabel = prefs.getString('community_feed_label_$uid');
+    final validScope =
+        savedScope == 'all' || savedScope == 'custom' || savedScope == 'church'
+            ? savedScope
+            : 'church';
     setState(() {
       _showMediaPreviews =
           !dataSaver && (prefs.getBool('community_show_media') ?? true);
       _confirmBeforePosting =
           prefs.getBool('community_confirm_before_posting') ?? false;
+      _feedScope = validScope == 'custom' &&
+              (savedChurchIds == null || savedChurchIds.isEmpty)
+          ? 'church'
+          : validScope;
+      _selectedFeedChurchIds = _feedScope == 'custom' ? savedChurchIds : null;
+      _selectedFeedLabel = _feedScope == 'custom' ? savedLabel : null;
     });
+  }
+
+  Future<void> _saveFeedScopePreferences() async {
+    final prefs = await SharedPreferences.getInstance();
+    final uid = _auth.currentUser?.id ?? 'guest';
+    await prefs.setString('community_feed_scope_$uid', _feedScope);
+    if (_selectedFeedChurchIds == null || _selectedFeedChurchIds!.isEmpty) {
+      await prefs.remove('community_feed_church_ids_$uid');
+    } else {
+      await prefs.setStringList(
+        'community_feed_church_ids_$uid',
+        _selectedFeedChurchIds!,
+      );
+    }
+    if (_selectedFeedLabel == null || _selectedFeedLabel!.trim().isEmpty) {
+      await prefs.remove('community_feed_label_$uid');
+    } else {
+      await prefs.setString('community_feed_label_$uid', _selectedFeedLabel!);
+    }
   }
 
   @override
@@ -787,10 +833,30 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
     final theme = Theme.of(context);
     final userProvider = Provider.of<UserRoleProvider>(context);
     final churchId = userProvider.userProfile?.placeId ?? "";
+    final feedChurchIds = _feedChurchIds(churchId);
 
     return AppScaffold(
       title: 'Community Feed',
-      actions: const [InboxIconButton()],
+      leading: IconButton(
+        tooltip: 'Search feed',
+        icon: const Icon(Icons.search),
+        onPressed:
+            churchId.isEmpty ? null : () => _showFeedSearchSheet(churchId),
+      ),
+      actions: [
+        Builder(
+          builder: (actionContext) => IconButton(
+            tooltip: 'Feed settings',
+            icon: const Icon(Icons.tune_outlined),
+            onPressed: churchId.isEmpty
+                ? null
+                : () => Scaffold.maybeOf(actionContext)?.openDrawer(),
+          ),
+        ),
+        const InboxIconButton(),
+      ],
+      drawer:
+          churchId.isEmpty ? null : _buildFeedSettingsDrawer(context, churchId),
       showBottomMenu: widget.showBottomMenu,
       appBarHeight: 48,
       appBarTitleStyle: theme.textTheme.titleMedium?.copyWith(
@@ -802,14 +868,17 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
           : Stack(
               children: [
                 StreamBuilder<List<Post>>(
-                  key: ValueKey('feed-$churchId-$_feedRefreshToken'),
-                  stream: _communityService.getPosts(churchId),
+                  key: ValueKey(
+                    'feed-$churchId-$_feedScope-${_selectedFeedChurchIds?.join('|')}-$_feedRefreshToken',
+                  ),
+                  stream: _communityService.getPostsForChurches(feedChurchIds),
                   builder: (context, snapshot) {
                     final posts = (snapshot.data ?? [])
                         .where(
                           (post) => !_blockedUserIds.contains(post.authorId),
                         )
                         .toList();
+                    _queueChurchNameLoads(posts, churchId);
                     final isWaiting =
                         snapshot.connectionState == ConnectionState.waiting;
                     final hasLoadIssue = snapshot.hasError && posts.isEmpty;
@@ -823,43 +892,35 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                             setState(() => _feedRefreshToken++);
                           }
                         },
-                        child: ListView(
+                        child: ListView.builder(
+                          key: PageStorageKey<String>(
+                            'community-feed-list-$churchId-$_feedScope-${_selectedFeedChurchIds?.join('|') ?? 'own'}',
+                          ),
                           controller: _feedScrollController,
-                          physics: const AlwaysScrollableScrollPhysics(),
+                          physics: const ClampingScrollPhysics(
+                            parent: AlwaysScrollableScrollPhysics(),
+                          ),
                           padding: EdgeInsets.zero,
-                          children: [
-                            _buildStoriesSection(context, churchId),
-                            const Divider(height: 1),
-                            if (snapshot.hasError)
-                              _buildFeedConnectionNotice(
-                                context,
-                                hasLoadIssue,
-                              ),
-                            if (isWaiting && posts.isEmpty)
-                              Padding(
-                                padding:
-                                    const EdgeInsets.fromLTRB(12, 10, 12, 0),
-                                child: Column(
-                                  children: List.generate(
-                                    5,
-                                    (_) => const AppSkeletonListItem(),
-                                  ),
-                                ),
-                              )
-                            else if (posts.isEmpty)
-                              _buildEmptyFeedState(context)
-                            else
-                              Padding(
-                                padding:
-                                    const EdgeInsets.fromLTRB(12, 10, 12, 104),
-                                child: Column(
-                                  children: [
-                                    for (final post in posts)
-                                      _buildPostCard(context, post),
-                                  ],
-                                ),
-                              ),
-                          ],
+                          cacheExtent: 1200,
+                          clipBehavior: Clip.hardEdge,
+                          keyboardDismissBehavior:
+                              ScrollViewKeyboardDismissBehavior.onDrag,
+                          itemCount: _feedListItemCount(
+                            postsLength: posts.length,
+                            isWaiting: isWaiting,
+                            hasConnectionNotice: snapshot.hasError,
+                          ),
+                          itemBuilder: (context, index) {
+                            return _buildFeedListItem(
+                              context,
+                              index: index,
+                              churchId: churchId,
+                              posts: posts,
+                              isWaiting: isWaiting,
+                              hasConnectionNotice: snapshot.hasError,
+                              hasLoadIssue: hasLoadIssue,
+                            );
+                          },
                         ),
                       ),
                     );
@@ -869,6 +930,655 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
               ],
             ),
     );
+  }
+
+  int _feedListItemCount({
+    required int postsLength,
+    required bool isWaiting,
+    required bool hasConnectionNotice,
+  }) {
+    const headerCount = 3;
+    final noticeCount = hasConnectionNotice ? 1 : 0;
+    final contentCount = isWaiting && postsLength == 0
+        ? 5
+        : postsLength == 0
+            ? 1
+            : postsLength;
+    return headerCount + noticeCount + contentCount;
+  }
+
+  Widget _buildFeedListItem(
+    BuildContext context, {
+    required int index,
+    required String churchId,
+    required List<Post> posts,
+    required bool isWaiting,
+    required bool hasConnectionNotice,
+    required bool hasLoadIssue,
+  }) {
+    if (index == 0) return _buildStoriesSection(context, churchId);
+    if (index == 1) return _buildFeedScopeSummary(context);
+    if (index == 2) return const Divider(height: 1);
+
+    var contentIndex = index - 3;
+    if (hasConnectionNotice) {
+      if (contentIndex == 0) {
+        return _buildFeedConnectionNotice(context, hasLoadIssue);
+      }
+      contentIndex--;
+    }
+
+    if (isWaiting && posts.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.fromLTRB(12, 10, 12, 0),
+        child: AppSkeletonListItem(),
+      );
+    }
+
+    if (posts.isEmpty) return _buildEmptyFeedState(context);
+
+    final post = posts[contentIndex];
+    final isLast = contentIndex == posts.length - 1;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(12, contentIndex == 0 ? 10 : 0, 12, 0),
+      child: Padding(
+        padding: EdgeInsets.only(bottom: isLast ? 104 : 0),
+        child: _buildPostCard(
+          context,
+          post,
+          viewerChurchId: churchId,
+        ),
+      ),
+    );
+  }
+
+  List<String>? _feedChurchIds(String ownChurchId) {
+    if (_feedScope == 'all') return null;
+    if (_feedScope == 'custom') return _selectedFeedChurchIds;
+    return [ownChurchId];
+  }
+
+  Widget _buildFeedScopeSummary(BuildContext context) {
+    final theme = Theme.of(context);
+    final subtitle = switch (_feedScope) {
+      'all' => 'Showing all churches',
+      'custom' => _selectedFeedLabel ?? 'Custom church filter',
+      _ => 'Showing your church',
+    };
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+      color: theme.colorScheme.surface,
+      child: Row(
+        children: [
+          Icon(
+            _feedScope == 'all'
+                ? Icons.public_outlined
+                : _feedScope == 'custom'
+                    ? Icons.filter_alt_outlined
+                    : Icons.church_outlined,
+            size: 18,
+            color: theme.colorScheme.primary,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              subtitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFeedSettingsDrawer(BuildContext context, String ownChurchId) {
+    final theme = Theme.of(context);
+
+    void applyScope({
+      required String scope,
+      List<String>? churchIds,
+      String? label,
+    }) {
+      setState(() {
+        _feedScope = scope;
+        _selectedFeedChurchIds = churchIds;
+        _selectedFeedLabel = label;
+        _feedRefreshToken++;
+      });
+      unawaited(_saveFeedScopePreferences());
+      Navigator.maybePop(context);
+    }
+
+    return Drawer(
+      child: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+          children: [
+            Text(
+              'Feed Settings',
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 16),
+            _FeedScopeChip(
+              label: 'My Church',
+              selected: _feedScope == 'church',
+              icon: Icons.church_outlined,
+              onSelected: () => applyScope(scope: 'church'),
+            ),
+            const SizedBox(height: 10),
+            _FeedScopeChip(
+              label: 'All Churches',
+              selected: _feedScope == 'all',
+              icon: Icons.public_outlined,
+              onSelected: () => applyScope(scope: 'all'),
+            ),
+            const SizedBox(height: 10),
+            _FeedScopeChip(
+              label: _feedScope == 'custom'
+                  ? (_selectedFeedLabel ?? 'Filtered feed')
+                  : 'Filter churches',
+              selected: _feedScope == 'custom',
+              icon: Icons.filter_alt_outlined,
+              onSelected: () {
+                Navigator.maybePop(context);
+                _showFeedSearchSheet(ownChurchId);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showFeedSearchSheet(String ownChurchId) async {
+    final searchController = TextEditingController();
+    Timer? searchDebounce;
+    var initialLoadStarted = false;
+    var searchGeneration = 0;
+    var denominations = const <String>[];
+    var selectedDenomination = '';
+    var churches = const <Church>[];
+    var people = const <UserProfile>[];
+    var peopleExpanded = false;
+    var isLoading = true;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            Future<void> load({String? query}) async {
+              final generation = ++searchGeneration;
+              setSheetState(() => isLoading = true);
+              final nextDenominations =
+                  await _churchService.fetchDenominations();
+              final nextChurches = await _churchService.fetchChurches(
+                denomination:
+                    selectedDenomination.isEmpty ? null : selectedDenomination,
+                query: query,
+              );
+              final nextPeople = query == null || query.trim().length < 2
+                  ? const <UserProfile>[]
+                  : await _userService.searchPeople(query);
+              final mergedChurches = _mergeChurchResults(
+                directChurches: nextChurches,
+                people: nextPeople,
+                query: query,
+                selectedDenomination: selectedDenomination,
+              );
+              if (sheetContext.mounted && generation == searchGeneration) {
+                setSheetState(() {
+                  denominations = nextDenominations;
+                  churches = mergedChurches;
+                  people = nextPeople;
+                  isLoading = false;
+                });
+              }
+            }
+
+            if (!initialLoadStarted) {
+              initialLoadStarted = true;
+              unawaited(load());
+            }
+
+            Future<void> runSearch() async {
+              await load(query: searchController.text);
+            }
+
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 16,
+                right: 16,
+                top: 16,
+                bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+              ),
+              child: SizedBox(
+                height: MediaQuery.of(context).size.height * 0.82,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Search Feed',
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleLarge
+                                ?.copyWith(fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Close',
+                          icon: const Icon(Icons.close),
+                          onPressed: () => Navigator.pop(sheetContext),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: searchController,
+                      textInputAction: TextInputAction.search,
+                      onChanged: (value) {
+                        searchDebounce?.cancel();
+                        searchDebounce =
+                            Timer(const Duration(milliseconds: 280), () {
+                          if (sheetContext.mounted) load(query: value);
+                        });
+                      },
+                      onSubmitted: (_) => runSearch(),
+                      decoration: InputDecoration(
+                        labelText: 'Search churches or people',
+                        prefixIcon: const Icon(Icons.search),
+                        suffixIcon: IconButton(
+                          tooltip: 'Search',
+                          onPressed: runSearch,
+                          icon: const Icon(Icons.arrow_forward),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      value: selectedDenomination.isEmpty
+                          ? null
+                          : selectedDenomination,
+                      decoration: const InputDecoration(
+                        labelText: 'Denomination',
+                        prefixIcon: Icon(Icons.account_balance_outlined),
+                      ),
+                      items: [
+                        for (final denomination in denominations)
+                          DropdownMenuItem(
+                            value: denomination,
+                            child: Text(denomination),
+                          ),
+                      ],
+                      onChanged: (value) async {
+                        selectedDenomination = value ?? '';
+                        await load(query: searchController.text);
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: () {
+                              setState(() {
+                                _feedScope = 'church';
+                                _selectedFeedChurchIds = null;
+                                _selectedFeedLabel = null;
+                                _feedRefreshToken++;
+                              });
+                              unawaited(_saveFeedScopePreferences());
+                              Navigator.pop(sheetContext);
+                            },
+                            icon: const Icon(Icons.church_outlined),
+                            label: const Text('My Church'),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: FilledButton.icon(
+                            onPressed: () {
+                              final filteredIds = churches
+                                  .map((church) => church.placeId.isNotEmpty
+                                      ? church.placeId
+                                      : church.id)
+                                  .where((id) => id.isNotEmpty)
+                                  .toSet()
+                                  .toList();
+                              if (filteredIds.isEmpty) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      'Search or select at least one church first.',
+                                    ),
+                                  ),
+                                );
+                                return;
+                              }
+                              final cleanSearch = searchController.text.trim();
+                              setState(() {
+                                _feedScope = 'custom';
+                                _selectedFeedChurchIds = filteredIds;
+                                _selectedFeedLabel = filteredIds.length == 1
+                                    ? churches.first.name
+                                    : selectedDenomination.isNotEmpty
+                                        ? selectedDenomination
+                                        : cleanSearch.isNotEmpty
+                                            ? '$cleanSearch churches'
+                                            : 'Filtered churches';
+                                _feedRefreshToken++;
+                              });
+                              unawaited(_saveFeedScopePreferences());
+                              Navigator.pop(sheetContext);
+                            },
+                            icon: const Icon(Icons.filter_alt_outlined),
+                            label: const Text('Use Filter'),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Expanded(
+                      child: isLoading
+                          ? const Center(child: CircularProgressIndicator())
+                          : ListView(
+                              children: [
+                                Text(
+                                  'Churches',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .titleSmall
+                                      ?.copyWith(fontWeight: FontWeight.w800),
+                                ),
+                                const SizedBox(height: 8),
+                                if (churches.isEmpty)
+                                  const Padding(
+                                    padding: EdgeInsets.all(16),
+                                    child: Text('No churches found.'),
+                                  )
+                                else
+                                  for (final church in churches)
+                                    ListTile(
+                                      leading:
+                                          const Icon(Icons.church_outlined),
+                                      title: Text(church.name),
+                                      subtitle: Text([
+                                        church.denomination,
+                                        church.address,
+                                      ]
+                                          .where((value) =>
+                                              value.trim().isNotEmpty)
+                                          .join(' - ')),
+                                      onTap: () {
+                                        final id = church.placeId.isNotEmpty
+                                            ? church.placeId
+                                            : church.id;
+                                        setState(() {
+                                          _feedScope = id == ownChurchId
+                                              ? 'church'
+                                              : 'custom';
+                                          _selectedFeedChurchIds = [id];
+                                          _selectedFeedLabel = church.name;
+                                          _feedRefreshToken++;
+                                        });
+                                        unawaited(_saveFeedScopePreferences());
+                                        Navigator.pop(sheetContext);
+                                      },
+                                    ),
+                                if (people.isNotEmpty) ...[
+                                  const Divider(height: 28),
+                                  ListTile(
+                                    contentPadding: EdgeInsets.zero,
+                                    title: Text(
+                                      'People (${people.length})',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .titleSmall
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.w800,
+                                          ),
+                                    ),
+                                    subtitle: const Text(
+                                      'Expand to message or Bible Nudge members.',
+                                    ),
+                                    trailing: Icon(
+                                      peopleExpanded
+                                          ? Icons.keyboard_arrow_up
+                                          : Icons.keyboard_arrow_down,
+                                    ),
+                                    onTap: () {
+                                      setSheetState(() {
+                                        peopleExpanded = !peopleExpanded;
+                                      });
+                                    },
+                                  ),
+                                  if (peopleExpanded)
+                                    for (final person in people)
+                                      ListTile(
+                                        leading: CircleAvatar(
+                                          backgroundImage:
+                                              person.photoUrl.isNotEmpty
+                                                  ? NetworkImage(
+                                                      person.photoUrl,
+                                                    )
+                                                  : null,
+                                          child: person.photoUrl.isEmpty
+                                              ? Text(person.fullName.isEmpty
+                                                  ? '?'
+                                                  : person.fullName[0])
+                                              : null,
+                                        ),
+                                        title: Text(person.fullName.isEmpty
+                                            ? person.email
+                                            : person.fullName),
+                                        subtitle: Text(person.placeName.isEmpty
+                                            ? 'Member'
+                                            : person.placeName),
+                                        trailing: Wrap(
+                                          spacing: 2,
+                                          children: [
+                                            IconButton(
+                                              tooltip: 'Bible Nudge',
+                                              icon: const Icon(
+                                                Icons.menu_book_outlined,
+                                              ),
+                                              onPressed: () {
+                                                Navigator.pop(sheetContext);
+                                                _sendBibleNudge(person);
+                                              },
+                                            ),
+                                            IconButton(
+                                              tooltip: 'Message',
+                                              icon: const Icon(
+                                                Icons.chat_bubble_outline,
+                                              ),
+                                              onPressed: () {
+                                                Navigator.pop(sheetContext);
+                                                _openMessageWithUserProfile(
+                                                  person,
+                                                );
+                                              },
+                                            ),
+                                          ],
+                                        ),
+                                        onTap: () {
+                                          Navigator.pop(sheetContext);
+                                          _openMessageWithUserProfile(person);
+                                        },
+                                      ),
+                                ],
+                              ],
+                            ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+    searchDebounce?.cancel();
+    searchController.dispose();
+  }
+
+  List<Church> _mergeChurchResults({
+    required List<Church> directChurches,
+    required List<UserProfile> people,
+    required String? query,
+    required String selectedDenomination,
+  }) {
+    final byKey = <String, Church>{};
+
+    void addChurch(Church church) {
+      final id = church.placeId.trim().isNotEmpty
+          ? church.placeId.trim()
+          : church.id.trim();
+      final name = church.name.trim();
+      if (id.isEmpty && name.isEmpty) return;
+      final key = id.isNotEmpty ? id : name.toLowerCase();
+      byKey.putIfAbsent(key, () => church);
+    }
+
+    for (final church in directChurches) {
+      addChurch(church);
+    }
+
+    final cleanQuery = query?.trim().toLowerCase() ?? '';
+    final canDeriveFromPeople =
+        cleanQuery.length >= 2 && selectedDenomination.trim().isEmpty;
+
+    if (canDeriveFromPeople) {
+      for (final person in people) {
+        final placeId = person.placeId.trim();
+        final placeName = person.placeName.trim();
+        if (placeId.isEmpty || placeName.isEmpty) continue;
+        if (!placeName.toLowerCase().contains(cleanQuery)) continue;
+
+        addChurch(
+          Church(
+            id: placeId,
+            placeId: placeId,
+            name: placeName,
+            address: '',
+            denomination: '',
+            ownerUserId: '',
+            timezone: 'UTC',
+            status: 'active',
+            createdAt: DateTime.now(),
+          ),
+        );
+      }
+    }
+
+    final results = byKey.values.toList()
+      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    return results;
+  }
+
+  Future<void> _sendBibleNudge(UserProfile recipient) async {
+    final sender = context.read<UserRoleProvider>().userProfile;
+    if (sender == null) return;
+
+    final displayName =
+        recipient.fullName.isNotEmpty ? recipient.fullName : recipient.email;
+    final messageController = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Text('Bible Nudge $displayName'),
+          content: TextField(
+            controller: messageController,
+            maxLines: 3,
+            decoration: const InputDecoration(
+              labelText: 'Optional note',
+              hintText: 'Want to study a passage together?',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton.icon(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              icon: const Icon(Icons.menu_book_outlined),
+              label: const Text('Send Nudge'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true) {
+      messageController.dispose();
+      return;
+    }
+
+    try {
+      await _bibleNudgeService.sendNudge(
+        sender: sender,
+        recipient: recipient,
+        message: messageController.text,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Bible Nudge sent to $displayName.')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not send Bible Nudge: $error')),
+      );
+    } finally {
+      messageController.dispose();
+    }
+  }
+
+  Future<void> _openMessageWithUserProfile(UserProfile otherUser) async {
+    final currentUser = context.read<UserRoleProvider>().userProfile;
+    final currentAuthUser = _auth.currentUser;
+    if (currentUser == null || currentAuthUser == null) return;
+    if (otherUser.uid == currentAuthUser.id) {
+      Navigator.pushNamed(context, '/profile');
+      return;
+    }
+
+    try {
+      final conversation = await _messageService.getOrCreateConversation(
+        currentUser: currentUser,
+        otherUser: otherUser,
+      );
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => MessageThreadScreen(
+            conversation: conversation,
+            otherUser: otherUser,
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not open message: $error')),
+      );
+    }
   }
 
   Widget _buildFloatingComposeMenu(BuildContext context) {
@@ -1089,9 +1799,110 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
     );
   }
 
-  Widget _buildPostCard(BuildContext context, Post post) {
-    final isLiked = post.likes.contains(_auth.currentUser?.id);
+  void _queueChurchNameLoads(List<Post> posts, String ownChurchId) {
+    for (final post in posts) {
+      final postChurchId = post.placeId.trim();
+      if (postChurchId.isEmpty ||
+          postChurchId == ownChurchId ||
+          _churchNamesById.containsKey(postChurchId) ||
+          _loadingChurchNameIds.contains(postChurchId)) {
+        continue;
+      }
+
+      _loadingChurchNameIds.add(postChurchId);
+      unawaited(() async {
+        final church = await _churchService.getChurch(postChurchId);
+        if (!mounted) return;
+        setState(() {
+          _churchNamesById[postChurchId] =
+              church?.name.trim().isNotEmpty == true
+                  ? church!.name.trim()
+                  : _prettifyChurchIdentifier(postChurchId);
+          _loadingChurchNameIds.remove(postChurchId);
+        });
+      }());
+    }
+  }
+
+  String _compactChurchLabel(String churchName) {
+    final clean = _prettifyChurchIdentifier(churchName);
+    if (clean.length <= 24) return clean;
+    final words = clean
+        .replaceAll(RegExp(r'[^A-Za-z0-9 ]+'), ' ')
+        .split(RegExp(r'\s+'))
+        .where((word) =>
+            word.length > 2 &&
+            !{'the', 'and', 'of', 'for', 'church'}.contains(
+              word.toLowerCase(),
+            ))
+        .toList();
+    final acronym = words.take(5).map((word) => word[0].toUpperCase()).join();
+    return acronym.length >= 2 ? acronym : clean.substring(0, 24);
+  }
+
+  String _prettifyChurchIdentifier(String value) {
+    var clean = value.trim();
+    if (clean.isEmpty) return 'Church';
+    clean = clean.replaceFirst(RegExp(r'^(local|manual)_'), '');
+    clean = clean.replaceAll(RegExp(r'[_-]+'), ' ');
+    clean = clean.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (clean.startsWith('church ') || clean.length > 48) return 'Other Church';
+
+    final uppercaseWords = {'ntcog', 'cog', 'cogop', 'ja', 'jm'};
+    return clean.split(' ').map((word) {
+      final lower = word.toLowerCase();
+      if (uppercaseWords.contains(lower)) return lower.toUpperCase();
+      if (word.length <= 2) return lower;
+      return '${word[0].toUpperCase()}${word.substring(1).toLowerCase()}';
+    }).join(' ');
+  }
+
+  List<String> _effectivePostLikes(Post post) {
+    return _postLikeOverrides[post.id] ?? post.likes;
+  }
+
+  Future<void> _togglePostLike(Post post) async {
+    final uid = _auth.currentUser?.id ?? '';
+    if (uid.isEmpty) return;
+
+    final originalLikes = _effectivePostLikes(post);
+    final nextLikes = [...originalLikes];
+    if (nextLikes.contains(uid)) {
+      nextLikes.remove(uid);
+    } else {
+      nextLikes.add(uid);
+    }
+
+    setState(() => _postLikeOverrides[post.id] = nextLikes);
+
+    try {
+      final updatedPost = await _communityService.toggleLike(post.id, uid);
+      if (!mounted) return;
+      if (updatedPost != null) {
+        setState(() => _postLikeOverrides[post.id] = updatedPost.likes);
+      }
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _postLikeOverrides[post.id] = originalLikes);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not save like: $error')),
+      );
+    }
+  }
+
+  Widget _buildPostCard(
+    BuildContext context,
+    Post post, {
+    required String viewerChurchId,
+  }) {
+    final likes = _effectivePostLikes(post);
+    final isLiked = likes.contains(_auth.currentUser?.id);
     final canDelete = _canDeletePost(post);
+    final isOtherChurch =
+        post.placeId.trim().isNotEmpty && post.placeId != viewerChurchId;
+    final churchName = _churchNamesById[post.placeId] ??
+        _prettifyChurchIdentifier(post.placeId);
+    final churchLabel = _compactChurchLabel(churchName);
 
     return AppCard(
       margin: const EdgeInsets.only(bottom: 12),
@@ -1129,9 +1940,55 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            post.authorName,
-                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          Wrap(
+                            spacing: 6,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              Text(
+                                post.authorName,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              if (isOtherChurch)
+                                Tooltip(
+                                  message: churchName,
+                                  child: Container(
+                                    constraints:
+                                        const BoxConstraints(maxWidth: 132),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 3,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(999),
+                                      border: Border.all(
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .outlineVariant,
+                                      ),
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .surfaceContainerHighest
+                                          .withValues(alpha: 0.55),
+                                    ),
+                                    child: Text(
+                                      churchLabel,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .labelSmall
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.w700,
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .onSurfaceVariant,
+                                          ),
+                                    ),
+                                  ),
+                                ),
+                            ],
                           ),
                           Text(
                             timeago.format(post.timestamp),
@@ -1279,11 +2136,10 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                     size: 20,
                   ),
                   label: Text(
-                    '${post.likes.length}',
+                    '${likes.length}',
                     style: TextStyle(color: isLiked ? Colors.red : Colors.grey),
                   ),
-                  onPressed: () => _communityService.toggleLike(
-                      post.id, _auth.currentUser?.id ?? ''),
+                  onPressed: () => _togglePostLike(post),
                 ),
                 TextButton.icon(
                   icon: const Icon(Icons.comment_outlined,
@@ -2125,6 +2981,30 @@ class _StatusViewerDialogState extends State<_StatusViewerDialog> {
     final trimmed = name.trim();
     if (trimmed.isEmpty) return '?';
     return trimmed.characters.first.toUpperCase();
+  }
+}
+
+class _FeedScopeChip extends StatelessWidget {
+  const _FeedScopeChip({
+    required this.label,
+    required this.selected,
+    required this.onSelected,
+    this.icon,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onSelected;
+  final IconData? icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return ChoiceChip(
+      selected: selected,
+      avatar: icon == null ? null : Icon(icon, size: 16),
+      label: Text(label),
+      onSelected: (_) => onSelected(),
+    );
   }
 }
 

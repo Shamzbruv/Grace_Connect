@@ -22,6 +22,7 @@ enum AppPermission {
   manageLivestream,
   manageWorship,
   managePrayerRequests,
+  assignCareRequests,
   manualCheckIn,
 
   // Attendance & Insights
@@ -44,6 +45,7 @@ class RBACConfig {
       AppPermission.sendPushNotification,
       AppPermission.moderateCommunity,
       AppPermission.managePrayerRequests,
+      AppPermission.assignCareRequests,
       AppPermission.viewAttendanceInsights,
       AppPermission.viewPriorityList,
       AppPermission.managePriorityList,
@@ -60,6 +62,7 @@ class RBACConfig {
       AppPermission.sendPushNotification,
       AppPermission.moderateCommunity,
       AppPermission.managePrayerRequests,
+      AppPermission.assignCareRequests,
       AppPermission.viewAttendanceInsights,
       AppPermission.viewPriorityList,
       AppPermission.managePriorityList,
@@ -87,6 +90,7 @@ class RBACConfig {
       AppPermission.createEvents,
       AppPermission.moderateCommunity,
       AppPermission.managePrayerRequests,
+      AppPermission.assignCareRequests,
       AppPermission.viewAttendanceInsights,
       AppPermission.viewPriorityList,
       AppPermission.manageSchedule,
@@ -98,7 +102,6 @@ class RBACConfig {
       AppPermission.viewOperationalAnalytics,
       AppPermission.moderateCommunity,
       AppPermission.createEvents,
-      AppPermission.managePrayerRequests,
       AppPermission.viewAttendanceInsights,
       AppPermission.viewPriorityList,
       AppPermission.manageSchedule,
@@ -176,6 +179,7 @@ class RBACConfig {
     'prayer_ministry_leader': [
       AppPermission.managePrayerRequests,
       AppPermission.createAnnouncement,
+      AppPermission.assignCareRequests,
     ],
     'intercessor': [
       AppPermission.managePrayerRequests,

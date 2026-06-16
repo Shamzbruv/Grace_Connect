@@ -257,7 +257,7 @@ class _ConversationTile extends StatelessWidget {
                   subtitle: Text(
                     lastMessage?.isNotEmpty == true
                         ? lastMessage!
-                        : 'New message',
+                        : 'No visible messages',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
@@ -356,6 +356,7 @@ class _MemberMessagePickerState extends State<_MemberMessagePicker> {
   final UserService _userService = UserService();
   List<UserProfile> _results = [];
   bool _isSearching = false;
+  String? _startingMemberId;
 
   @override
   void dispose() {
@@ -372,19 +373,32 @@ class _MemberMessagePickerState extends State<_MemberMessagePicker> {
 
     setState(() => _isSearching = true);
     try {
-      final results = await _userService.searchMembers(
-        cleanQuery,
-        widget.currentUser.churchId,
-      );
+      final results = await _userService.searchPeople(cleanQuery);
       if (!mounted) return;
       setState(() {
         _results = results
             .where((member) =>
                 member.uid != widget.currentUser.uid && member.allowMessages)
-            .toList();
+            .toList()
+          ..sort((a, b) {
+            final aSameChurch = a.churchId == widget.currentUser.churchId;
+            final bSameChurch = b.churchId == widget.currentUser.churchId;
+            if (aSameChurch != bSameChurch) return aSameChurch ? -1 : 1;
+            return a.fullName.toLowerCase().compareTo(b.fullName.toLowerCase());
+          });
       });
     } finally {
       if (mounted) setState(() => _isSearching = false);
+    }
+  }
+
+  Future<void> _selectMember(UserProfile member) async {
+    if (_startingMemberId != null) return;
+    setState(() => _startingMemberId = member.uid);
+    try {
+      await widget.onSelected(member);
+    } finally {
+      if (mounted) setState(() => _startingMemberId = null);
     }
   }
 
@@ -423,7 +437,7 @@ class _MemberMessagePickerState extends State<_MemberMessagePicker> {
             controller: _searchController,
             autofocus: true,
             decoration: const InputDecoration(
-              hintText: 'Search members',
+              hintText: 'Search people',
               prefixIcon: Icon(Icons.search),
             ),
             onChanged: _search,
@@ -437,6 +451,7 @@ class _MemberMessagePickerState extends State<_MemberMessagePicker> {
               itemCount: _results.length,
               itemBuilder: (context, index) {
                 final member = _results[index];
+                final isStarting = _startingMemberId == member.uid;
                 final displayName =
                     member.fullName.isNotEmpty ? member.fullName : member.email;
                 return ListTile(
@@ -449,8 +464,24 @@ class _MemberMessagePickerState extends State<_MemberMessagePicker> {
                         : null,
                   ),
                   title: Text(displayName),
-                  subtitle: Text(member.email),
-                  onTap: () => widget.onSelected(member),
+                  subtitle: Text(
+                    [
+                      if (member.placeName.trim().isNotEmpty)
+                        member.placeName.trim(),
+                      member.email,
+                    ].join(' • '),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  trailing: isStarting
+                      ? const SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : null,
+                  enabled: _startingMemberId == null || isStarting,
+                  onTap: isStarting ? null : () => _selectMember(member),
                 );
               },
             ),

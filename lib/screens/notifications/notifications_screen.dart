@@ -3,8 +3,16 @@ import 'package:provider/provider.dart';
 import 'package:timeago/timeago.dart' as timeago;
 
 import '../../models/app_notification.dart';
+import '../../models/bible_nudge.dart';
+import '../../models/user_profile.dart';
 import '../../providers/user_role_provider.dart';
+import '../../services/bible_nudge_service.dart';
+import '../../services/community_service.dart';
+import '../../services/direct_message_service.dart';
 import '../../services/notification_service.dart';
+import '../../services/user_service.dart';
+import '../community/post_detail_screen.dart';
+import '../messages/message_thread_screen.dart';
 import '../../widgets/ui/app_scaffold.dart';
 
 class NotificationsScreen extends StatelessWidget {
@@ -14,6 +22,7 @@ class NotificationsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final user = context.watch<UserRoleProvider>().userProfile;
     final service = NotificationService();
+    final communityService = CommunityService();
 
     return AppScaffold(
       title: 'Notifications',
@@ -73,12 +82,12 @@ class NotificationsScreen extends StatelessWidget {
                     return _NotificationTile(
                       notification: notification,
                       onTap: () async {
-                        await service.markAsRead(notification.id);
-                        if (!context.mounted) return;
-                        final route = notification.route;
-                        if (route != null && route.isNotEmpty) {
-                          Navigator.pushNamed(context, route);
-                        }
+                        await _openNotification(
+                          context,
+                          service,
+                          communityService,
+                          notification,
+                        );
                       },
                     );
                   },
@@ -86,6 +95,157 @@ class NotificationsScreen extends StatelessWidget {
               },
             ),
     );
+  }
+
+  Future<void> _openNotification(
+    BuildContext context,
+    NotificationService notificationService,
+    CommunityService communityService,
+    AppNotification notification,
+  ) async {
+    await notificationService.markAsRead(notification.id);
+    if (!context.mounted) return;
+
+    final isPostNotification =
+        notification.type == 'like' || notification.type == 'comment';
+    final isCommunityEntity = notification.entityTable == 'community_posts' ||
+        notification.entityTable == 'community_comments';
+
+    if (isPostNotification || isCommunityEntity) {
+      try {
+        final post = await communityService.fetchPostForNotification(
+          entityTable: notification.entityTable,
+          entityId: notification.entityId,
+        );
+        if (!context.mounted) return;
+        if (post != null) {
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => PostDetailScreen(post: post),
+            ),
+          );
+          return;
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('That post is no longer available.')),
+        );
+        return;
+      } catch (error) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not open post: $error')),
+        );
+        return;
+      }
+    }
+
+    if (notification.type == 'bible_nudge_response' &&
+        notification.entityTable == 'bible_nudges' &&
+        notification.entityId?.isNotEmpty == true) {
+      await _openBibleNudgeMessageThread(context, notification);
+      return;
+    }
+
+    final route = notification.route;
+    if (route != null && route.isNotEmpty && context.mounted) {
+      Navigator.pushNamed(context, route);
+    }
+  }
+
+  Future<void> _openBibleNudgeMessageThread(
+    BuildContext context,
+    AppNotification notification,
+  ) async {
+    final currentUser = context.read<UserRoleProvider>().userProfile;
+    if (currentUser == null) return;
+
+    try {
+      final nudge =
+          await BibleNudgeService().getNudge(notification.entityId ?? '');
+      if (!context.mounted) return;
+      if (nudge != null && nudge.status != 'accepted') {
+        Navigator.pushNamed(context, notification.route ?? '/notifications');
+        return;
+      }
+
+      final otherUser = await _resolveBibleNudgeOtherUser(
+        currentUser: currentUser,
+        notification: notification,
+        nudge: nudge,
+      );
+      if (!context.mounted) return;
+      if (otherUser == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('That member profile could not be opened.'),
+          ),
+        );
+        return;
+      }
+
+      final conversation = await DirectMessageService().getOrCreateConversation(
+        currentUser: currentUser,
+        otherUser: otherUser,
+      );
+      if (!context.mounted) return;
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => MessageThreadScreen(
+            conversation: conversation,
+            otherUser: otherUser,
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not open message: $error')),
+      );
+    }
+  }
+
+  Future<UserProfile?> _resolveBibleNudgeOtherUser({
+    required UserProfile currentUser,
+    required AppNotification notification,
+    BibleNudge? nudge,
+  }) async {
+    final userService = UserService();
+    final candidateIds = <String>[
+      if (notification.actorId?.trim().isNotEmpty == true)
+        notification.actorId!.trim(),
+      if (nudge != null && currentUser.uid == nudge.senderId) nudge.recipientId,
+      if (nudge != null && currentUser.uid == nudge.recipientId) nudge.senderId,
+      if (nudge != null) nudge.recipientId,
+      if (nudge != null) nudge.senderId,
+    ];
+
+    for (final id in candidateIds) {
+      if (id.isEmpty || id == currentUser.uid) continue;
+      final profile = await userService.getUserProfile(id);
+      if (profile != null) return profile;
+    }
+
+    final candidateNames = <String>[
+      if (nudge?.recipientName.trim().isNotEmpty == true)
+        nudge!.recipientName.trim(),
+      if (nudge?.senderName.trim().isNotEmpty == true) nudge!.senderName.trim(),
+      if (notification.actorName.trim().isNotEmpty)
+        notification.actorName.trim(),
+      _nameFromBibleNudgeBody(notification.body),
+    ].where((name) => name.isNotEmpty).toSet();
+
+    for (final name in candidateNames) {
+      final profile = await userService.findBestPersonMatch(name);
+      if (profile != null && profile.uid != currentUser.uid) return profile;
+    }
+
+    return null;
+  }
+
+  String _nameFromBibleNudgeBody(String body) {
+    final acceptedIndex = body.toLowerCase().indexOf(' accepted');
+    if (acceptedIndex <= 0) return '';
+    return body.substring(0, acceptedIndex).trim();
   }
 }
 
@@ -157,6 +317,13 @@ class _NotificationTile extends StatelessWidget {
                         color: theme.colorScheme.onSurfaceVariant,
                       ),
                     ),
+                    if (notification.type == 'bible_nudge_request' &&
+                        notification.entityId?.isNotEmpty == true) ...[
+                      const SizedBox(height: 10),
+                      _BibleNudgeActions(
+                        notification: notification,
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -171,13 +338,106 @@ class _NotificationTile extends StatelessWidget {
     return switch (type) {
       'like' => Icons.favorite_outline,
       'comment' => Icons.mode_comment_outlined,
+      'announcement' => Icons.campaign_outlined,
       'pastor_event' => Icons.campaign_outlined,
       'prayer_request' => Icons.volunteer_activism_outlined,
       'counseling_request' => Icons.favorite_outline,
       'counseling_assignment' => Icons.support_agent_outlined,
       'family_request' => Icons.family_restroom_outlined,
       'family_response' => Icons.how_to_reg_outlined,
+      'bible_nudge_request' => Icons.menu_book_outlined,
+      'bible_nudge_response' => Icons.mark_chat_read_outlined,
       _ => Icons.notifications_outlined,
     };
+  }
+}
+
+class _BibleNudgeActions extends StatefulWidget {
+  const _BibleNudgeActions({required this.notification});
+
+  final AppNotification notification;
+
+  @override
+  State<_BibleNudgeActions> createState() => _BibleNudgeActionsState();
+}
+
+class _BibleNudgeActionsState extends State<_BibleNudgeActions> {
+  final BibleNudgeService _service = BibleNudgeService();
+  BibleNudge? _nudge;
+  bool _isLoading = true;
+  bool _isSaving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final nudge = await _service.getNudge(widget.notification.entityId ?? '');
+    if (!mounted) return;
+    setState(() {
+      _nudge = nudge;
+      _isLoading = false;
+    });
+  }
+
+  Future<void> _respond(bool accepted) async {
+    final nudge = _nudge;
+    if (nudge == null) return;
+    setState(() => _isSaving = true);
+    try {
+      await _service.respondToNudge(nudge: nudge, accepted: accepted);
+      await NotificationService().markAsRead(widget.notification.id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+              accepted ? 'Bible Nudge accepted.' : 'Bible Nudge declined.'),
+        ),
+      );
+      await _load();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not respond: $error')),
+      );
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final nudge = _nudge;
+    if (_isLoading) {
+      return const LinearProgressIndicator(minHeight: 2);
+    }
+    if (nudge == null || nudge.status != 'pending') {
+      return Text(
+        nudge == null
+            ? 'Bible Nudge unavailable.'
+            : 'Response: ${nudge.status}',
+        style: Theme.of(context).textTheme.bodySmall,
+      );
+    }
+
+    return Row(
+      children: [
+        Expanded(
+          child: OutlinedButton(
+            onPressed: _isSaving ? null : () => _respond(false),
+            child: const Text('Decline'),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: FilledButton(
+            onPressed: _isSaving ? null : () => _respond(true),
+            child: const Text('Accept'),
+          ),
+        ),
+      ],
+    );
   }
 }

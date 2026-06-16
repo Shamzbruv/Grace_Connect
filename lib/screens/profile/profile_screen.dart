@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../theme/app_colors.dart';
 import '../../providers/user_role_provider.dart';
+import '../../models/user_profile.dart';
 import 'edit_profile_screen.dart';
 import 'family_link_sheet.dart';
 import '../../models/family_relationship.dart';
@@ -396,7 +397,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                     builder: (context, snapshot) {
                       final relationships = snapshot.data ?? const [];
-                      return _buildFamilyCard(context, relationships);
+                      return _buildFamilyCard(
+                        context,
+                        userProfile,
+                        relationships,
+                      );
                     },
                   ),
                 ],
@@ -442,6 +447,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Widget _buildFamilyCard(
     BuildContext context,
+    UserProfile userProfile,
     List<FamilyRelationship> relationships,
   ) {
     final currentUserId =
@@ -486,6 +492,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       : '${accepted.length} official family link${accepted.length == 1 ? '' : 's'}',
                   style: theme.textTheme.bodyMedium
                       ?.copyWith(color: colorScheme.onSurfaceVariant),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  userProfile.showFamilyTree
+                      ? 'Visible based on your family privacy settings.'
+                      : 'Hidden from other members in your privacy settings.',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: userProfile.showFamilyTree
+                        ? colorScheme.onSurfaceVariant
+                        : colorScheme.error,
+                  ),
                 ),
               ],
             ),
@@ -596,15 +613,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final otherName = relationship.requesterId == currentUserId
         ? relationship.relatedName
         : relationship.requesterName;
-    final label = relationship.requesterId == currentUserId
-        ? relationship.labelForRequester()
-        : 'Family';
+    final label = relationship.labelForViewer(currentUserId);
+    final category = relationship.categoryForViewer(currentUserId);
 
     return ListTile(
       contentPadding: EdgeInsets.zero,
       leading: const CircleAvatar(child: Icon(Icons.family_restroom)),
       title: Text(otherName.isEmpty ? 'Family member' : otherName),
-      subtitle: Text(label),
+      subtitle: Text('$label - $category'),
       dense: true,
     );
   }

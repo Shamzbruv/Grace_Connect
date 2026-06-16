@@ -19,7 +19,7 @@ function ensureInit() {
 }
 onInit(() => ensureInit());
 
-const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { onCall, onRequest, HttpsError } = require("firebase-functions/v2/https");
 const { onDocumentCreated, onDocumentUpdated, onDocumentWritten } = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 
@@ -45,6 +45,129 @@ function getTransporter() {
 // Connectivity Check
 exports.ping = onCall(async () => {
   return { ok: true, message: "Grace Connect functions running (v2)" };
+});
+
+function normalizeRole(role) {
+  return String(role || "")
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, "and")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function canSendAnnouncements(roles) {
+  const allowedRoles = new Set([
+    "pastor",
+    "senior_pastor",
+    "assistant_pastor",
+    "acting_pastor",
+    "church_admin",
+    "admin",
+    "administrator",
+    "secretary",
+    "church_secretary",
+  ]);
+
+  return Array.isArray(roles) && roles.some((role) => allowedRoles.has(normalizeRole(role)));
+}
+
+async function getSupabaseUserProfile(supabaseToken) {
+  const userResponse = await fetch("https://nimgsgnkcvddomrgkawb.supabase.co/auth/v1/user", {
+    method: "GET",
+    headers: {
+      "apikey": "sb_publishable_-lsEclVqaNPAlO4h7z3vtw_Q8xZY3cN",
+      "Authorization": `Bearer ${supabaseToken}`,
+    },
+  });
+
+  if (!userResponse.ok) {
+    throw new HttpsError("unauthenticated", "Invalid Supabase token.");
+  }
+
+  const userData = await userResponse.json();
+  const uid = userData.id;
+  if (!uid) {
+    throw new HttpsError("unauthenticated", "Supabase user ID missing.");
+  }
+
+  const profileResponse = await fetch(
+    `https://nimgsgnkcvddomrgkawb.supabase.co/rest/v1/users?uid=eq.${uid}`,
+    {
+      method: "GET",
+      headers: {
+        "apikey": "sb_publishable_-lsEclVqaNPAlO4h7z3vtw_Q8xZY3cN",
+        "Authorization": `Bearer ${supabaseToken}`,
+        "Accept": "application/json",
+      },
+    },
+  );
+
+  if (!profileResponse.ok) {
+    throw new HttpsError("permission-denied", "Unable to verify user profile.");
+  }
+
+  const profiles = await profileResponse.json();
+  const profile = profiles && profiles[0];
+  if (!profile) {
+    throw new HttpsError("not-found", "User profile not found.");
+  }
+
+  return { uid, profile };
+}
+
+exports.sendTopicNotification = onRequest({ cors: true }, async (request, response) => {
+  ensureInit();
+
+  if (request.method !== "POST") {
+    response.status(405).json({ error: "POST required." });
+    return;
+  }
+
+  try {
+    const authHeader = request.get("Authorization") || "";
+    const supabaseToken = authHeader.startsWith("Bearer ")
+      ? authHeader.substring("Bearer ".length)
+      : "";
+
+    if (!supabaseToken) {
+      response.status(401).json({ error: "Missing authorization token." });
+      return;
+    }
+
+    const { profile } = await getSupabaseUserProfile(supabaseToken);
+    const { title, body, topic, route, type } = request.body || {};
+    const churchTopic = `church_${profile.placeId || ""}`;
+
+    if (!title || !body || !topic || topic !== churchTopic) {
+      response.status(400).json({ error: "Invalid notification payload." });
+      return;
+    }
+
+    if (!canSendAnnouncements(profile.roles || [])) {
+      response.status(403).json({ error: "User cannot send church-wide push notifications." });
+      return;
+    }
+
+    const messageId = await admin.messaging().send({
+      topic,
+      notification: {
+        title: String(title).slice(0, 120),
+        body: String(body).slice(0, 220),
+      },
+      data: {
+        type: String(type || "announcement"),
+        route: String(route || "/announcements"),
+        click_action: "FLUTTER_NOTIFICATION_CLICK",
+      },
+    });
+
+    response.json({ ok: true, messageId });
+  } catch (error) {
+    console.error("Topic notification failed:", error);
+    const status = error instanceof HttpsError && error.code === "permission-denied" ? 403 : 500;
+    response.status(status).json({ error: error.message || "Unable to send notification." });
+  }
 });
 
 // Support Ticket Handler (Sends Email)

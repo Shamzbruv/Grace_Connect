@@ -21,19 +21,29 @@ class _RemoteAttendanceScreenState extends State<RemoteAttendanceScreen> {
   String? _selectedReason;
 
   final List<String> _reasons = [
+    'Watching church live online',
     'Sick / Medical',
     'Traveling',
-    'Work Conflict',
+    'Work conflict',
     'Caring for Family',
     'Distance / Transportation',
     'Other',
   ];
 
+  @override
+  void dispose() {
+    _reasonController.dispose();
+    _engagementController.dispose();
+    super.dispose();
+  }
+
   Future<void> _submitAttendance() async {
     if (!_formKey.currentState!.validate()) return;
     if (_selectedReason == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select a reason for absence')),
+        const SnackBar(
+          content: Text('Please select why you are joining remotely'),
+        ),
       );
       return;
     }
@@ -100,18 +110,44 @@ class _RemoteAttendanceScreenState extends State<RemoteAttendanceScreen> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'Please let us know why you strictly cannot make it in person today, and answer the engagement question below.',
+                      'Remote attendance is only accepted during an active service. If the church is live, stay in the live screen so your watch time can be tracked. Your note below helps leaders confirm engagement and can be reviewed if something looks unusual.',
                       style: Theme.of(context).textTheme.bodyMedium,
                     ),
                     const SizedBox(height: 24),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.red.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                            color: Colors.red.withValues(alpha: 0.2)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.live_tv_outlined, color: Colors.red),
+                          const SizedBox(width: 10),
+                          const Expanded(
+                            child: Text(
+                              'If the church is live, use the live screen before checking in remotely.',
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: () =>
+                                Navigator.pushNamed(context, '/live_streaming'),
+                            child: const Text('Open Live'),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
 
-                    // Reason Dropdown
                     DropdownButtonFormField<String>(
                       value: _selectedReason,
                       decoration: const InputDecoration(
-                        labelText: 'Reason for Absence',
+                        labelText: 'Remote Attendance Reason',
                         border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.sick_outlined),
+                        prefixIcon: Icon(Icons.wifi_tethering),
                       ),
                       items: _reasons
                           .map(
@@ -141,9 +177,8 @@ class _RemoteAttendanceScreenState extends State<RemoteAttendanceScreen> {
                         ),
                       ),
 
-                    // Engagement Question
                     Text(
-                      'Engagement Verification',
+                      'Engagement Note',
                       style: GoogleFonts.poppins(
                           fontSize: 18, fontWeight: FontWeight.w600),
                     ),
@@ -153,8 +188,8 @@ class _RemoteAttendanceScreenState extends State<RemoteAttendanceScreen> {
                       decoration: BoxDecoration(
                         color: Colors.indigo.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(8),
-                        border:
-                            Border.all(color: Colors.indigo.withValues(alpha: 0.3)),
+                        border: Border.all(
+                            color: Colors.indigo.withValues(alpha: 0.3)),
                       ),
                       child: Row(
                         children: const [
@@ -162,7 +197,7 @@ class _RemoteAttendanceScreenState extends State<RemoteAttendanceScreen> {
                           SizedBox(width: 12),
                           Expanded(
                               child: Text(
-                                  'What is the main topic of today\'s sermon or reading?')),
+                                  'In one sentence, what sermon topic, scripture, or worship moment did you hear today?')),
                         ],
                       ),
                     ),
@@ -174,7 +209,7 @@ class _RemoteAttendanceScreenState extends State<RemoteAttendanceScreen> {
                         labelText: 'Your Answer',
                         border: OutlineInputBorder(),
                         hintText:
-                            'e.g. The Pastor spoke about faith and works...',
+                            'Example: The sermon focused on faith and obedience.',
                       ),
                       validator: (val) => val == null || val.length < 10
                           ? 'Please provide a clearer answer (min 10 chars)'

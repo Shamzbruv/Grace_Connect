@@ -11,10 +11,18 @@ class ChurchService {
 
   Future<Church?> getChurch(String churchId) async {
     try {
-      final doc = await _supabase
+      final cleanChurchId = churchId.trim();
+      if (cleanChurchId.isEmpty) return null;
+
+      var doc = await _supabase
           .from('churches')
           .select()
-          .eq('id', churchId)
+          .eq('id', cleanChurchId)
+          .maybeSingle();
+      doc ??= await _supabase
+          .from('churches')
+          .select()
+          .eq('placeId', cleanChurchId)
           .maybeSingle();
       if (doc != null) {
         return Church.fromMap(doc);
@@ -22,6 +30,58 @@ class ChurchService {
       return null;
     } catch (e) {
       return null;
+    }
+  }
+
+  Future<List<String>> fetchDenominations() async {
+    try {
+      final rows = await _supabase
+          .from('churches')
+          .select('denomination')
+          .order('denomination')
+          .limit(200);
+      return rows
+          .map<String>((row) => (row['denomination'] ?? '').toString().trim())
+          .where((denomination) => denomination.isNotEmpty)
+          .toSet()
+          .toList()
+        ..sort();
+    } catch (error) {
+      debugPrint('Could not fetch denominations: $error');
+      return const [];
+    }
+  }
+
+  Future<List<Church>> fetchChurches({
+    String? denomination,
+    String? query,
+    int limit = 50,
+  }) async {
+    try {
+      var builder = _supabase.from('churches').select();
+
+      final cleanDenomination = denomination?.trim();
+      if (cleanDenomination != null && cleanDenomination.isNotEmpty) {
+        builder = builder.eq('denomination', cleanDenomination);
+      }
+
+      final cleanQuery = query
+          ?.trim()
+          .replaceAll(RegExp(r'[%(),]'), ' ')
+          .replaceAll(RegExp(r'\s+'), ' ');
+      if (cleanQuery != null && cleanQuery.isNotEmpty) {
+        builder = builder.or(
+          'name.ilike.%$cleanQuery%,'
+          'address.ilike.%$cleanQuery%,'
+          'denomination.ilike.%$cleanQuery%',
+        );
+      }
+
+      final rows = await builder.order('name').limit(limit);
+      return rows.map<Church>((row) => Church.fromMap(row)).toList();
+    } catch (error) {
+      debugPrint('Could not fetch churches: $error');
+      return const [];
     }
   }
 
@@ -267,11 +327,28 @@ class ChurchService {
   // Transfer Ownership
   Future<void> transferOwnership(String churchId, String newOwnerUid) async {
     try {
-      await _supabase
+      final cleanChurchId = churchId.trim();
+      if (cleanChurchId.isEmpty || newOwnerUid.trim().isEmpty) {
+        throw Exception('Missing church or new owner.');
+      }
+
+      final updated = await _supabase
           .from('churches')
-          .update({'ownerUserId': newOwnerUid}).eq('placeId', churchId);
+          .update({'ownerUserId': newOwnerUid})
+          .eq('id', cleanChurchId)
+          .select('id');
+
+      if (updated.isEmpty) {
+        await _supabase
+            .from('churches')
+            .update({'ownerUserId': newOwnerUid})
+            .eq('placeId', cleanChurchId)
+            .select('id')
+            .single();
+      }
     } catch (e) {
       debugPrint('Supabase ownership transfer error: $e');
+      rethrow;
     }
   }
 

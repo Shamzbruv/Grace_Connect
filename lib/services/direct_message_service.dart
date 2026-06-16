@@ -10,32 +10,49 @@ import 'user_service.dart';
 class DirectMessageService {
   final SupabaseClient _supabase = Supabase.instance.client;
   static const String _chatMediaBucket = 'chat_media';
+  static const Duration _realtimeQuietTimeout = Duration(seconds: 18);
 
   String get _currentUid => _supabase.auth.currentUser?.id ?? '';
 
-  Stream<List<DirectConversation>> watchConversations() {
+  Future<List<DirectConversation>> fetchConversations() async {
+    final rows = await _supabase
+        .from('direct_conversations')
+        .select()
+        .order('last_message_at', ascending: false)
+        .limit(100);
+    return _normalizeConversations(rows);
+  }
+
+  Stream<List<DirectConversation>> watchConversations() async* {
+    var lastKnown = <DirectConversation>[];
+
+    try {
+      lastKnown = await fetchConversations();
+      yield lastKnown;
+    } catch (error) {
+      debugPrint('Could not load inbox before realtime: $error');
+    }
+
+    try {
+      await for (final conversations in _watchConversationsRealtime().timeout(
+        _realtimeQuietTimeout,
+        onTimeout: (sink) => sink.add(lastKnown),
+      )) {
+        lastKnown = conversations;
+        yield conversations;
+      }
+    } catch (error) {
+      debugPrint('Inbox realtime unavailable, keeping last known data: $error');
+      yield lastKnown;
+    }
+  }
+
+  Stream<List<DirectConversation>> _watchConversationsRealtime() {
     return _supabase
         .from('direct_conversations')
         .stream(primaryKey: ['id'])
         .order('last_message_at', ascending: false)
-        .map((rows) {
-          final conversationsById = <String, DirectConversation>{};
-          for (final row in rows) {
-            final conversation = DirectConversation.fromMap(row);
-            if (conversation.id.isNotEmpty) {
-              conversationsById[conversation.id] = conversation;
-            }
-          }
-          final conversations = conversationsById.values
-              .where((conversation) => !conversation.isHiddenFor(_currentUid))
-              .toList();
-          conversations.sort((a, b) {
-            final aDate = a.lastMessageAt ?? a.createdAt;
-            final bDate = b.lastMessageAt ?? b.createdAt;
-            return bDate.compareTo(aDate);
-          });
-          return conversations;
-        });
+        .map(_normalizeConversations);
   }
 
   Stream<int> watchUnreadCount() {
@@ -95,16 +112,18 @@ class DirectMessageService {
         });
   }
 
+  Stream<DirectMessage?> watchLatestVisibleMessage(String conversationId) {
+    return watchMessages(conversationId).map(
+      (messages) => messages.isEmpty ? null : messages.last,
+    );
+  }
+
   Future<DirectConversation> getOrCreateConversation({
     required UserProfile currentUser,
     required UserProfile otherUser,
   }) async {
     if (currentUser.uid == otherUser.uid) {
       throw Exception('You cannot message yourself.');
-    }
-    if (currentUser.churchId.isEmpty ||
-        currentUser.churchId != otherUser.churchId) {
-      throw Exception('Messages can only be started inside your church.');
     }
     if (!otherUser.allowMessages) {
       throw Exception('This member is not accepting messages right now.');
@@ -122,10 +141,22 @@ class DirectMessageService {
     }
 
     try {
+      final rpcConversation =
+          await _tryGetOrCreateConversationViaRpc(otherUser.uid);
+      if (rpcConversation != null) {
+        return rpcConversation;
+      }
+    } on PostgrestException catch (error) {
+      throw Exception(_conversationErrorMessage(error));
+    }
+
+    try {
       final inserted = await _supabase
           .from('direct_conversations')
           .insert({
-            'church_id': currentUser.churchId,
+            'church_id': currentUser.churchId.isNotEmpty
+                ? currentUser.churchId
+                : otherUser.churchId,
             'member_ids': [currentUser.uid, otherUser.uid],
             'participant_key': key,
             'created_by': currentUser.uid,
@@ -136,7 +167,9 @@ class DirectMessageService {
 
       return DirectConversation.fromMap(inserted);
     } on PostgrestException catch (error) {
-      if (error.code != '23505') rethrow;
+      if (error.code != '23505') {
+        throw Exception(_conversationErrorMessage(error));
+      }
 
       final conversation = await _supabase
           .from('direct_conversations')
@@ -145,6 +178,49 @@ class DirectMessageService {
           .single();
       return DirectConversation.fromMap(conversation);
     }
+  }
+
+  Future<DirectConversation?> _tryGetOrCreateConversationViaRpc(
+    String otherUserId,
+  ) async {
+    try {
+      final data = await _supabase.rpc(
+        'get_or_create_direct_conversation',
+        params: {'other_user_id': otherUserId},
+      );
+      if (data is Map<String, dynamic>) {
+        return DirectConversation.fromMap(data);
+      }
+      if (data is Map) {
+        return DirectConversation.fromMap(Map<String, dynamic>.from(data));
+      }
+      if (data is List && data.isNotEmpty) {
+        return DirectConversation.fromMap(
+          Map<String, dynamic>.from(data.first),
+        );
+      }
+    } on PostgrestException catch (error) {
+      if (_isMissingFunctionError(error)) return null;
+      rethrow;
+    }
+    return null;
+  }
+
+  bool _isMissingFunctionError(PostgrestException error) {
+    final message = error.message.toLowerCase();
+    return error.code == 'PGRST202' ||
+        message.contains('get_or_create_direct_conversation') &&
+            message.contains('not found');
+  }
+
+  String _conversationErrorMessage(PostgrestException error) {
+    final message = error.message.toLowerCase();
+    if (message.contains('row-level security') ||
+        message.contains('violates row-level security') ||
+        error.code == '42501') {
+      return 'Messaging is blocked by the current database policy. Apply the latest Supabase migration, then try again.';
+    }
+    return error.message;
   }
 
   Future<DirectConversation> getOrCreateConversationWithUserId({
@@ -327,6 +403,7 @@ class DirectMessageService {
     if (uid.isEmpty || message.senderId != uid) return;
 
     await _supabase.from('direct_messages').delete().eq('id', message.id);
+    await _refreshConversationPreview(message.conversationId);
   }
 
   Future<void> deleteConversationForMe(DirectConversation conversation) async {
@@ -359,6 +436,26 @@ class DirectMessageService {
     return '${sorted[0]}:${sorted[1]}';
   }
 
+  List<DirectConversation> _normalizeConversations(List<dynamic> rows) {
+    final conversationsById = <String, DirectConversation>{};
+    for (final row in rows) {
+      final conversation =
+          DirectConversation.fromMap(Map<String, dynamic>.from(row));
+      if (conversation.id.isNotEmpty) {
+        conversationsById[conversation.id] = conversation;
+      }
+    }
+    final conversations = conversationsById.values
+        .where((conversation) => !conversation.isHiddenFor(_currentUid))
+        .toList();
+    conversations.sort((a, b) {
+      final aDate = a.lastMessageAt ?? a.createdAt;
+      final bDate = b.lastMessageAt ?? b.createdAt;
+      return bDate.compareTo(aDate);
+    });
+    return conversations;
+  }
+
   String _previewForMessage(String text, String mediaType) {
     if (text.isNotEmpty) return text;
     return switch (mediaType) {
@@ -367,6 +464,55 @@ class DirectMessageService {
       'voice' || 'audio' => 'Voice message',
       _ => 'Attachment',
     };
+  }
+
+  String previewForMessage(DirectMessage message) {
+    return _previewForMessage(message.text.trim(), message.mediaType);
+  }
+
+  Future<void> _refreshConversationPreview(String conversationId) async {
+    if (conversationId.isEmpty) return;
+
+    try {
+      final now = DateTime.now().toUtc().toIso8601String();
+      final rows = await _supabase
+          .from('direct_messages')
+          .select()
+          .eq('conversation_id', conversationId)
+          .or('expires_at.is.null,expires_at.gt.$now')
+          .order('created_at', ascending: false)
+          .limit(1);
+
+      if (rows.isNotEmpty) {
+        final latest = DirectMessage.fromMap(
+          Map<String, dynamic>.from(rows.first),
+        );
+        await _supabase.from('direct_conversations').update({
+          'last_message': previewForMessage(latest),
+          'last_sender_id': latest.senderId,
+          'last_message_at': latest.createdAt.toUtc().toIso8601String(),
+        }).eq('id', conversationId);
+        return;
+      }
+
+      final conversation = await _supabase
+          .from('direct_conversations')
+          .select('created_at')
+          .eq('id', conversationId)
+          .maybeSingle();
+      final createdAt = DateTime.tryParse(
+            conversation?['created_at']?.toString() ?? '',
+          ) ??
+          DateTime.now().toUtc();
+
+      await _supabase.from('direct_conversations').update({
+        'last_message': null,
+        'last_sender_id': null,
+        'last_message_at': createdAt.toUtc().toIso8601String(),
+      }).eq('id', conversationId);
+    } catch (error) {
+      debugPrint('Could not refresh conversation preview: $error');
+    }
   }
 
   bool _isMissingColumnError(PostgrestException error) {

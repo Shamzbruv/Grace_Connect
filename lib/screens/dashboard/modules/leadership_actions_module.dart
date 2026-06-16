@@ -33,22 +33,21 @@ class LeadershipActionsModule extends DashboardModule {
                 ActionChip(
                   avatar: const Icon(Icons.person_add, size: 16),
                   label: const Text("Assign Role"),
-                  onPressed: () {
-                    // Navigate to Role Manager
-                  },
+                  onPressed: () =>
+                      Navigator.pushNamed(context, '/role_management'),
                 ),
                 ActionChip(
                   avatar: const Icon(Icons.volunteer_activism, size: 16),
                   label: const Text("Assign Prayer"),
-                  onPressed: () {
-                    // This creates a task from scratch? usually we assign from a list.
-                    // Navigate to Prayer Requests List to pick one.
-                  },
+                  onPressed: () => Navigator.pushNamed(context, '/prayers'),
                 ),
                 ActionChip(
                   avatar: const Icon(Icons.announcement, size: 16),
                   label: const Text("Post Announcement"),
-                  onPressed: () {},
+                  onPressed: () => Navigator.pushNamed(
+                    context,
+                    '/announcements',
+                  ),
                 ),
               ],
             ),

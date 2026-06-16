@@ -78,7 +78,8 @@ class AuthFlowService {
   }
 
   static bool isAuthCallbackUri(Uri uri) {
-    return uri.queryParameters.containsKey('auth_callback') ||
+    return _isKnownAuthCallbackUri(uri) ||
+        uri.queryParameters.containsKey('auth_callback') ||
         uri.queryParameters.containsKey('code') ||
         uri.queryParameters.containsKey('error') ||
         uri.queryParameters.containsKey('error_description') ||
@@ -87,14 +88,56 @@ class AuthFlowService {
         uri.fragment.contains('error_description');
   }
 
+  static bool isAuthCallbackRouteName(String routeName) {
+    final candidate = routeName.trim();
+    if (candidate.isEmpty || candidate == '/') return false;
+
+    final parsed = Uri.tryParse(candidate);
+    if (parsed != null && isAuthCallbackUri(parsed)) return true;
+
+    if (candidate.startsWith('/')) {
+      final resolved = Uri.base.resolve(candidate);
+      if (isAuthCallbackUri(resolved)) return true;
+    }
+
+    return candidate.contains('access_token') ||
+        candidate.contains('refresh_token') ||
+        candidate.contains('error_description') ||
+        candidate.contains('auth_callback') ||
+        candidate.contains('code=') ||
+        candidate.contains('login-callback') ||
+        candidate.contains('reset-callback') ||
+        candidate.contains(_appScheme);
+  }
+
   static bool isPasswordResetCallback(Uri uri) {
     final callbackType = uri.queryParameters['auth_callback'];
     final queryType = uri.queryParameters['type'];
     final fragment = uri.fragment.toLowerCase();
 
-    return callbackType == 'recovery' ||
+    return _isKnownPasswordResetCallbackUri(uri) ||
+        callbackType == 'recovery' ||
         queryType == 'recovery' ||
         fragment.contains('type=recovery');
+  }
+
+  static bool _isKnownAuthCallbackUri(Uri uri) {
+    final hasKnownCallbackName = _isKnownNativeCallbackName(uri.host) ||
+        uri.pathSegments.any(_isKnownNativeCallbackName);
+    if (!hasKnownCallbackName) return false;
+
+    return uri.scheme == _appScheme ||
+        uri.host.isEmpty ||
+        uri.host == Uri.base.host;
+  }
+
+  static bool _isKnownPasswordResetCallbackUri(Uri uri) {
+    return uri.host == 'reset-callback' ||
+        uri.pathSegments.contains('reset-callback');
+  }
+
+  static bool _isKnownNativeCallbackName(String value) {
+    return value == 'login-callback' || value == 'reset-callback';
   }
 
   static Future<AuthResponse> signUpWithEmail({

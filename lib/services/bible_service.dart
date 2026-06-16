@@ -28,6 +28,17 @@ class BibleReference {
 class BibleService {
   static const String _baseUrl = 'https://bible-api.com';
   static const Duration _timeout = Duration(seconds: 12);
+  static const Map<String, String> translations = {
+    'web': 'World English Bible',
+    'kjv': 'King James Version',
+    'bbe': 'Bible in Basic English',
+    'oeb-cw': 'Open English Bible, Commonwealth',
+    'webbe': 'World English Bible, British Edition',
+  };
+
+  static String translationName(String id) {
+    return translations[id] ?? id.toUpperCase();
+  }
 
   /// Fetches a specific chapter e.g. "John 3"
   /// Returns a map with 'reference' (String), 'text' (String), 'verses' (List)

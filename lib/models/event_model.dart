@@ -8,6 +8,8 @@ class EventModel {
   final String churchId;
   final String organizerId;
   final String sourceLabel;
+  final String? ministryId;
+  final String ministryName;
   final DateTime createdAt;
   final List<String> attendees;
 
@@ -21,6 +23,8 @@ class EventModel {
     required this.churchId,
     required this.organizerId,
     this.sourceLabel = 'Church Event',
+    this.ministryId,
+    this.ministryName = '',
     DateTime? createdAt,
     this.attendees = const [],
   }) : createdAt = createdAt ?? DateTime.now();
@@ -36,6 +40,8 @@ class EventModel {
       'churchId': churchId,
       'organizerId': organizerId,
       'sourceLabel': sourceLabel,
+      'ministry_id': ministryId,
+      'ministry_name': ministryName,
       'createdAt': createdAt.toIso8601String(),
       'attendees': attendees,
     };
@@ -53,6 +59,8 @@ class EventModel {
       churchId: data['churchId'] ?? '',
       organizerId: data['organizerId'] ?? '',
       sourceLabel: data['sourceLabel'] ?? 'Church Event',
+      ministryId: data['ministry_id']?.toString(),
+      ministryName: data['ministry_name']?.toString() ?? '',
       createdAt: data['createdAt'] != null
           ? DateTime.parse(data['createdAt'])
           : DateTime.now(),

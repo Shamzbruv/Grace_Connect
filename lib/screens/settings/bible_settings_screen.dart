@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../services/bible_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/ui/app_scaffold.dart';
 
@@ -12,11 +13,6 @@ class BibleSettingsScreen extends StatefulWidget {
 }
 
 class _BibleSettingsScreenState extends State<BibleSettingsScreen> {
-  static const Map<String, String> _translations = {
-    'web': 'World English Bible',
-    'kjv': 'King James Version',
-  };
-
   String _translation = 'web';
   double _fontSize = 18;
   bool _showVerseNumbers = true;
@@ -73,7 +69,7 @@ class _BibleSettingsScreenState extends State<BibleSettingsScreen> {
                     labelText: 'Preferred Translation',
                     border: OutlineInputBorder(),
                   ),
-                  items: _translations.entries
+                  items: BibleService.translations.entries
                       .map(
                         (entry) => DropdownMenuItem(
                           value: entry.key,

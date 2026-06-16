@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
-import '../../config/rbac_config.dart';
 import '../../models/service_schedule.dart';
 import '../../providers/user_role_provider.dart';
 import '../../widgets/ui/app_card.dart';
@@ -64,306 +63,34 @@ class _ScheduleManagementScreenState extends State<ScheduleManagementScreen> {
     final churchId = _currentUserPlaceId;
     if (churchId == null || churchId.isEmpty) return;
 
-    final nameController = TextEditingController(text: schedule?.name ?? '');
-    TimeOfDay startTime = _parseTimeOfDay(schedule?.startTime) ??
-        const TimeOfDay(hour: 9, minute: 0);
-    TimeOfDay endTime = _parseTimeOfDay(schedule?.endTime) ??
-        const TimeOfDay(hour: 11, minute: 0);
-    int selectedDay = schedule?.dayOfWeek ?? 7;
-    bool attendanceEnabled = schedule?.attendanceEnabled ?? true;
-    int opensBefore = schedule?.checkInOpensMinutesBefore ?? 30;
-    int closesAfter = schedule?.checkInClosesMinutesAfter ?? 30;
-    int dwellMinutes = schedule?.minimumDwellMinutes ?? 10;
-    bool isSaving = false;
-
-    await showModalBottomSheet<void>(
+    final message = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
       builder: (sheetContext) {
-        final theme = Theme.of(sheetContext);
-
-        return StatefulBuilder(
-          builder: (context, setSheetState) {
-            Future<void> save() async {
-              final serviceName = nameController.text.trim();
-              if (serviceName.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Add a service name.')),
-                );
-                return;
-              }
-
-              setSheetState(() => isSaving = true);
-              final nextSchedule = ServiceSchedule(
-                serviceId: schedule?.serviceId ?? const Uuid().v4(),
-                churchId: churchId,
-                name: serviceName,
-                dayOfWeek: selectedDay,
-                startTime: _formatTime(startTime),
-                endTime: _formatTime(endTime),
-                recurrence: 'weekly',
-                attendanceEnabled: attendanceEnabled,
-                checkInOpensMinutesBefore: opensBefore,
-                checkInClosesMinutesAfter: closesAfter,
-                minimumDwellMinutes: dwellMinutes,
-              );
-
-              try {
-                if (schedule == null) {
-                  await _supabase
-                      .from('service_schedules')
-                      .insert(nextSchedule.toMap());
-                } else {
-                  await _supabase
-                      .from('service_schedules')
-                      .update(nextSchedule.toMap())
-                      .eq('serviceId', schedule.serviceId);
-                }
-
-                if (!sheetContext.mounted) return;
-                Navigator.pop(sheetContext);
-                if (!mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(
-                      schedule == null
-                          ? 'Service schedule added.'
-                          : 'Service schedule updated.',
-                    ),
-                  ),
-                );
-              } catch (e) {
-                if (!context.mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Could not save schedule: $e')),
-                );
-              } finally {
-                if (context.mounted) {
-                  setSheetState(() => isSaving = false);
-                }
-              }
+        return _ScheduleEditorSheet(
+          churchId: churchId,
+          schedule: schedule,
+          onSave: (nextSchedule) async {
+            if (schedule == null) {
+              await _supabase
+                  .from('service_schedules')
+                  .insert(nextSchedule.toMap());
+            } else {
+              await _supabase
+                  .from('service_schedules')
+                  .update(nextSchedule.toMap())
+                  .eq('serviceId', schedule.serviceId);
             }
-
-            Future<void> pickStartTime() async {
-              final picked = await showTimePicker(
-                context: context,
-                initialTime: startTime,
-              );
-              if (picked != null) {
-                setSheetState(() => startTime = picked);
-              }
-            }
-
-            Future<void> pickEndTime() async {
-              final picked = await showTimePicker(
-                context: context,
-                initialTime: endTime,
-              );
-              if (picked != null) {
-                setSheetState(() => endTime = picked);
-              }
-            }
-
-            return Padding(
-              padding: EdgeInsets.only(
-                left: 20,
-                right: 20,
-                top: 20,
-                bottom: MediaQuery.of(context).viewInsets.bottom + 20,
-              ),
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      schedule == null
-                          ? 'Add Service Schedule'
-                          : 'Edit Service Schedule',
-                      style: theme.textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      'Auto-attendance checks these service windows before marking anyone present.',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                    const SizedBox(height: 18),
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.surfaceContainerHighest,
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.repeat_outlined,
-                            color: theme.colorScheme.primary,
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              'Repeats every week on the selected day.',
-                              style: theme.textTheme.bodySmall,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    TextField(
-                      controller: nameController,
-                      textInputAction: TextInputAction.done,
-                      decoration: const InputDecoration(
-                        labelText: 'Service Name',
-                        hintText: 'Sunday Worship',
-                        prefixIcon: Icon(Icons.church_outlined),
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    DropdownButtonFormField<int>(
-                      value: selectedDay,
-                      decoration: const InputDecoration(
-                        labelText: 'Day of Week',
-                        prefixIcon: Icon(Icons.calendar_month_outlined),
-                      ),
-                      items: _dayItems,
-                      onChanged: isSaving
-                          ? null
-                          : (value) {
-                              if (value != null) {
-                                setSheetState(() => selectedDay = value);
-                              }
-                            },
-                    ),
-                    const SizedBox(height: 14),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _TimeButton(
-                            label: 'Start',
-                            value: startTime.format(context),
-                            onTap: isSaving ? null : pickStartTime,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: _TimeButton(
-                            label: 'End',
-                            value: endTime.format(context),
-                            onTap: isSaving ? null : pickEndTime,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('Use for attendance'),
-                      subtitle: const Text(
-                        'Members can only mark present during this recurring service window.',
-                      ),
-                      value: attendanceEnabled,
-                      onChanged: isSaving
-                          ? null
-                          : (value) {
-                              setSheetState(() => attendanceEnabled = value);
-                            },
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _NumberMenu(
-                            label: 'Opens Before',
-                            value: opensBefore,
-                            values: const [0, 15, 30, 45, 60],
-                            suffix: 'min',
-                            onChanged: isSaving
-                                ? null
-                                : (value) {
-                                    if (value != null) {
-                                      setSheetState(() => opensBefore = value);
-                                    }
-                                  },
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: _NumberMenu(
-                            label: 'Closes After',
-                            value: closesAfter,
-                            values: const [0, 15, 30, 45, 60],
-                            suffix: 'min',
-                            onChanged: isSaving
-                                ? null
-                                : (value) {
-                                    if (value != null) {
-                                      setSheetState(() => closesAfter = value);
-                                    }
-                                  },
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    _NumberMenu(
-                      label: 'On-site time required before Present unlocks',
-                      value: dwellMinutes,
-                      values: const [5, 10, 15, 20, 30],
-                      suffix: 'min',
-                      onChanged: isSaving
-                          ? null
-                          : (value) {
-                              if (value != null) {
-                                setSheetState(() => dwellMinutes = value);
-                              }
-                            },
-                    ),
-                    const SizedBox(height: 22),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: isSaving
-                                ? null
-                                : () => Navigator.pop(sheetContext),
-                            child: const Text('Cancel'),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: FilledButton.icon(
-                            onPressed: isSaving ? null : save,
-                            icon: isSaving
-                                ? const SizedBox(
-                                    width: 16,
-                                    height: 16,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                    ),
-                                  )
-                                : const Icon(Icons.save_outlined),
-                            label: Text(schedule == null ? 'Add' : 'Save'),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            );
           },
         );
       },
     );
 
-    nameController.dispose();
+    if (!mounted || message == null) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
   }
 
   Future<void> _deleteSchedule(ServiceSchedule schedule) async {
@@ -417,10 +144,8 @@ class _ScheduleManagementScreenState extends State<ScheduleManagementScreen> {
   @override
   Widget build(BuildContext context) {
     final roleProvider = context.watch<UserRoleProvider>();
-    final permissions = RBACConfig.getPermissionsForRoles(
-        roleProvider.userProfile?.roles ?? []);
 
-    if (!permissions.contains(AppPermission.manageSchedule)) {
+    if (roleProvider.userProfile?.capabilities.canManageSchedules != true) {
       return const AppScaffold(
         title: 'Service Schedules',
         body:
@@ -524,6 +249,319 @@ String _dayToString(int day) {
       return 'Sunday';
     default:
       return 'Unknown';
+  }
+}
+
+class _ScheduleEditorSheet extends StatefulWidget {
+  const _ScheduleEditorSheet({
+    required this.churchId,
+    required this.schedule,
+    required this.onSave,
+  });
+
+  final String churchId;
+  final ServiceSchedule? schedule;
+  final Future<void> Function(ServiceSchedule schedule) onSave;
+
+  @override
+  State<_ScheduleEditorSheet> createState() => _ScheduleEditorSheetState();
+}
+
+class _ScheduleEditorSheetState extends State<_ScheduleEditorSheet> {
+  late final TextEditingController _nameController;
+  late TimeOfDay _startTime;
+  late TimeOfDay _endTime;
+  late int _selectedDay;
+  late bool _attendanceEnabled;
+  late int _opensBefore;
+  late int _closesAfter;
+  late int _dwellMinutes;
+  bool _isSaving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final schedule = widget.schedule;
+    _nameController = TextEditingController(text: schedule?.name ?? '');
+    _startTime = _ScheduleManagementScreenState._parseTimeOfDay(
+          schedule?.startTime,
+        ) ??
+        const TimeOfDay(hour: 9, minute: 0);
+    _endTime = _ScheduleManagementScreenState._parseTimeOfDay(
+          schedule?.endTime,
+        ) ??
+        const TimeOfDay(hour: 11, minute: 0);
+    _selectedDay = schedule?.dayOfWeek ?? 7;
+    _attendanceEnabled = schedule?.attendanceEnabled ?? true;
+    _opensBefore = schedule?.checkInOpensMinutesBefore ?? 30;
+    _closesAfter = schedule?.checkInClosesMinutesAfter ?? 30;
+    _dwellMinutes = schedule?.minimumDwellMinutes ?? 10;
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickStartTime() async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: _startTime,
+    );
+    if (!mounted || picked == null) return;
+    setState(() => _startTime = picked);
+  }
+
+  Future<void> _pickEndTime() async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: _endTime,
+    );
+    if (!mounted || picked == null) return;
+    setState(() => _endTime = picked);
+  }
+
+  Future<void> _save() async {
+    final serviceName = _nameController.text.trim();
+    if (serviceName.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Add a service name.')),
+      );
+      return;
+    }
+
+    setState(() => _isSaving = true);
+    final nextSchedule = ServiceSchedule(
+      serviceId: widget.schedule?.serviceId ?? const Uuid().v4(),
+      churchId: widget.churchId,
+      name: serviceName,
+      dayOfWeek: _selectedDay,
+      startTime: _ScheduleManagementScreenState._formatTime(_startTime),
+      endTime: _ScheduleManagementScreenState._formatTime(_endTime),
+      recurrence: 'weekly',
+      attendanceEnabled: _attendanceEnabled,
+      checkInOpensMinutesBefore: _opensBefore,
+      checkInClosesMinutesAfter: _closesAfter,
+      minimumDwellMinutes: _dwellMinutes,
+    );
+
+    var saved = false;
+    try {
+      await widget.onSave(nextSchedule);
+      saved = true;
+      if (!mounted) return;
+      Navigator.pop(
+        context,
+        widget.schedule == null
+            ? 'Service schedule added.'
+            : 'Service schedule updated.',
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not save schedule: $e')),
+      );
+    } finally {
+      if (mounted && !saved) setState(() => _isSaving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final schedule = widget.schedule;
+
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 20,
+        right: 20,
+        top: 20,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+      ),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              schedule == null
+                  ? 'Add Recurring Service'
+                  : 'Edit Recurring Service',
+              style: theme.textTheme.headlineSmall?.copyWith(
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Create weekly services like Sunday Service, Prayer Meeting, and Bible Study so members can mark attendance during the correct window.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 18),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.repeat_outlined,
+                    color: theme.colorScheme.primary,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Repeats every week on the selected day.',
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: _nameController,
+              enabled: !_isSaving,
+              textInputAction: TextInputAction.done,
+              decoration: const InputDecoration(
+                labelText: 'Service Name',
+                hintText: 'Sunday Service, Prayer Meeting, Bible Study',
+                prefixIcon: Icon(Icons.church_outlined),
+              ),
+            ),
+            const SizedBox(height: 14),
+            DropdownButtonFormField<int>(
+              value: _selectedDay,
+              decoration: const InputDecoration(
+                labelText: 'Day of Week',
+                prefixIcon: Icon(Icons.calendar_month_outlined),
+              ),
+              items: _ScheduleManagementScreenState._dayItems,
+              onChanged: _isSaving
+                  ? null
+                  : (value) {
+                      if (value != null) {
+                        setState(() => _selectedDay = value);
+                      }
+                    },
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Expanded(
+                  child: _TimeButton(
+                    label: 'Start',
+                    value: _startTime.format(context),
+                    onTap: _isSaving ? null : _pickStartTime,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _TimeButton(
+                    label: 'End',
+                    value: _endTime.format(context),
+                    onTap: _isSaving ? null : _pickEndTime,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Use for attendance'),
+              subtitle: const Text(
+                'Members can only mark present during this recurring service window.',
+              ),
+              value: _attendanceEnabled,
+              onChanged: _isSaving
+                  ? null
+                  : (value) {
+                      setState(() => _attendanceEnabled = value);
+                    },
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: _NumberMenu(
+                    label: 'Opens Before',
+                    value: _opensBefore,
+                    values: const [0, 15, 30, 45, 60],
+                    suffix: 'min',
+                    onChanged: _isSaving
+                        ? null
+                        : (value) {
+                            if (value != null) {
+                              setState(() => _opensBefore = value);
+                            }
+                          },
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _NumberMenu(
+                    label: 'Closes After',
+                    value: _closesAfter,
+                    values: const [0, 15, 30, 45, 60],
+                    suffix: 'min',
+                    onChanged: _isSaving
+                        ? null
+                        : (value) {
+                            if (value != null) {
+                              setState(() => _closesAfter = value);
+                            }
+                          },
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            _NumberMenu(
+              label: 'On-site time required before Present unlocks',
+              value: _dwellMinutes,
+              values: const [5, 10, 15, 20, 30],
+              suffix: 'min',
+              onChanged: _isSaving
+                  ? null
+                  : (value) {
+                      if (value != null) {
+                        setState(() => _dwellMinutes = value);
+                      }
+                    },
+            ),
+            const SizedBox(height: 22),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: _isSaving ? null : () => Navigator.pop(context),
+                    child: const Text('Cancel'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: _isSaving ? null : _save,
+                    icon: _isSaving
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.save_outlined),
+                    label: Text(schedule == null ? 'Add' : 'Save'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -721,14 +759,14 @@ class _EmptySchedules extends StatelessWidget {
             ),
             const SizedBox(height: 14),
             Text(
-              'No Service Schedules',
+              'No Recurring Services',
               style: theme.textTheme.titleLarge?.copyWith(
                 fontWeight: FontWeight.w800,
               ),
             ),
             const SizedBox(height: 8),
             Text(
-              'Add at least one weekly service so auto-attendance knows when check-ins should happen.',
+              'Add weekly services like Sunday Service, Prayer Meeting, or Bible Study so auto-attendance knows when check-ins should happen.',
               textAlign: TextAlign.center,
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,

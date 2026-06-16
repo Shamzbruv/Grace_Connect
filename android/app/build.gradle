@@ -28,8 +28,8 @@ android {
         applicationId "com.example.grace_connect"
         minSdkVersion 23
         targetSdkVersion 35
-        versionCode 5
-        versionName "1.0.4-beta"
+        versionCode 8
+        versionName "1.0.7-beta"
         multiDexEnabled true
     }
 

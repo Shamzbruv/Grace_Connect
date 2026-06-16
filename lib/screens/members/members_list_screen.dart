@@ -5,8 +5,11 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../theme/app_colors.dart';
 import '../../providers/user_role_provider.dart';
+import '../../models/family_relationship.dart';
 import '../../models/user_profile.dart';
 import '../../services/direct_message_service.dart';
+import '../../services/bible_nudge_service.dart';
+import '../../services/family_service.dart';
 import '../messages/message_thread_screen.dart';
 
 class MembersListScreen extends StatefulWidget {
@@ -20,6 +23,8 @@ class _MembersListScreenState extends State<MembersListScreen> {
   final TextEditingController _searchController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final DirectMessageService _messageService = DirectMessageService();
+  final BibleNudgeService _bibleNudgeService = BibleNudgeService();
+  final FamilyService _familyService = FamilyService();
 
   List<Map<String, dynamic>> _members = [];
   bool _isLoading = true;
@@ -159,18 +164,84 @@ class _MembersListScreenState extends State<MembersListScreen> {
     }
   }
 
+  Future<void> _sendBibleNudge(UserProfile recipient) async {
+    final sender =
+        Provider.of<UserRoleProvider>(context, listen: false).userProfile;
+    if (sender == null) return;
+
+    final messageController = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Text('Bible Nudge ${recipient.fullName}'),
+          content: TextField(
+            controller: messageController,
+            maxLines: 3,
+            decoration: const InputDecoration(
+              labelText: 'Optional note',
+              hintText: 'Example: Want to study John 15 this week?',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton.icon(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              icon: const Icon(Icons.menu_book_outlined),
+              label: const Text('Send Nudge'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true) {
+      messageController.dispose();
+      return;
+    }
+
+    try {
+      await _bibleNudgeService.sendNudge(
+        sender: sender,
+        recipient: recipient,
+        message: messageController.text,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Bible Nudge sent to ${recipient.fullName}.')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not send Bible Nudge: $error')),
+      );
+    } finally {
+      messageController.dispose();
+    }
+  }
+
   void _showMemberDetails(Map<String, dynamic> data) {
     final theme = Theme.of(context);
-    final currentUserId = Supabase.instance.client.auth.currentUser?.id;
-    final isPrivate =
-        data['isProfilePrivate'] == true && data['uid'] != currentUserId;
-    final fullName = (data['fullName'] as String?)?.trim();
+    final currentUser =
+        Provider.of<UserRoleProvider>(context, listen: false).userProfile;
+    final currentUserId =
+        currentUser?.uid ?? Supabase.instance.client.auth.currentUser?.id;
+    final memberProfile = UserProfile.fromMap(data);
+    final isOwnProfile = memberProfile.uid == currentUserId;
+    final isPrivate = memberProfile.isProfilePrivate && !isOwnProfile;
     final displayName =
-        fullName != null && fullName.isNotEmpty ? fullName : 'Member';
-    final bio = (data['bio'] as String?)?.trim() ?? '';
-    final canMessage = data['uid'] != currentUserId &&
-        data['allowMessages'] != false &&
-        !isPrivate;
+        memberProfile.fullName.isNotEmpty ? memberProfile.fullName : 'Member';
+    final bio = memberProfile.bio.trim();
+    final isSameChurch = (currentUser?.placeId ?? '').isNotEmpty &&
+        currentUser?.placeId == memberProfile.placeId;
+    final showContactInfo = isOwnProfile ||
+        (!isPrivate &&
+            memberProfile.canShowContactInfoTo(isSameChurch: isSameChurch));
+    final canMessage =
+        !isOwnProfile && memberProfile.allowMessages && !isPrivate;
 
     showModalBottomSheet(
       context: context,
@@ -191,103 +262,385 @@ class _MembersListScreenState extends State<MembersListScreen> {
                 decoration: BoxDecoration(
                     color: Colors.grey[300],
                     borderRadius: BorderRadius.circular(2))),
-            const SizedBox(height: 20),
-            CircleAvatar(
-              radius: 50,
-              backgroundImage:
-                  (data['photoUrl'] != null && data['photoUrl'] != '')
-                      ? NetworkImage(data['photoUrl'])
-                      : null,
-              child: (data['photoUrl'] == null || data['photoUrl'] == '')
-                  ? Text(displayName[0].toUpperCase(),
-                      style: const TextStyle(fontSize: 30))
-                  : null,
-            ),
-            const SizedBox(height: 16),
-            Text(displayName,
-                style: theme.textTheme.headlineSmall
-                    ?.copyWith(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            // Member Duration
-            if (data['joinDate'] != null)
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                    color: theme.colorScheme.secondaryContainer,
-                    borderRadius: BorderRadius.circular(16)),
-                child: Text(
-                  _calculateMemberDuration(data['joinDate']),
-                  style: TextStyle(
-                      color: theme.colorScheme.onSecondaryContainer,
-                      fontWeight: FontWeight.bold),
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(24, 20, 24, 8),
+                child: Column(
+                  children: [
+                    CircleAvatar(
+                      radius: 50,
+                      backgroundImage: memberProfile.photoUrl.isNotEmpty
+                          ? NetworkImage(memberProfile.photoUrl)
+                          : null,
+                      child: memberProfile.photoUrl.isEmpty
+                          ? Text(
+                              displayName[0].toUpperCase(),
+                              style: const TextStyle(fontSize: 30),
+                            )
+                          : null,
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      displayName,
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.secondaryContainer,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Text(
+                        _calculateMemberDuration(memberProfile.joinDate),
+                        style: TextStyle(
+                          color: theme.colorScheme.onSecondaryContainer,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    if (bio.isNotEmpty) ...[
+                      const SizedBox(height: 16),
+                      Text(
+                        bio,
+                        textAlign: TextAlign.center,
+                        maxLines: 4,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 24),
+                    if (isPrivate)
+                      _buildPrivacyNotice(
+                        context,
+                        'Private profile',
+                        'This member keeps profile details private.',
+                      )
+                    else ...[
+                      _buildMemberFamilyPreview(
+                        context,
+                        memberProfile,
+                        currentUserId,
+                      ),
+                      const SizedBox(height: 12),
+                      if (showContactInfo) ...[
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: const Icon(Icons.email_outlined),
+                          title: Text(memberProfile.email.isEmpty
+                              ? 'No email'
+                              : memberProfile.email),
+                          onTap: memberProfile.email.isEmpty
+                              ? null
+                              : () => launchUrl(
+                                    Uri.parse('mailto:${memberProfile.email}'),
+                                  ),
+                        ),
+                        if (memberProfile.phone.isNotEmpty)
+                          ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: const Icon(Icons.phone_outlined),
+                            title: Text(memberProfile.phone),
+                            onTap: () => launchUrl(
+                              Uri.parse('tel:${memberProfile.phone}'),
+                            ),
+                          ),
+                      ] else
+                        _buildPrivacyNotice(
+                          context,
+                          'Contact info hidden',
+                          'This member has turned off email and phone visibility.',
+                        ),
+                    ],
+                  ],
                 ),
               ),
-            if (bio.isNotEmpty) ...[
-              const SizedBox(height: 16),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 28),
-                child: Text(
-                  bio,
-                  textAlign: TextAlign.center,
-                  maxLines: 4,
-                  overflow: TextOverflow.ellipsis,
+            ),
+            _buildProfileActions(
+              memberProfile: memberProfile,
+              data: data,
+              canMessage: canMessage,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildProfileActions({
+    required UserProfile memberProfile,
+    required Map<String, dynamic> data,
+    required bool canMessage,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.all(24),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final twoColumn = canMessage && constraints.maxWidth >= 360;
+          final buttonWidth = twoColumn
+              ? (constraints.maxWidth - 12) / 2
+              : constraints.maxWidth;
+
+          final actions = <Widget>[
+            SizedBox(
+              width: canMessage ? buttonWidth : constraints.maxWidth,
+              child: OutlinedButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Close'),
+              ),
+            ),
+            if (canMessage)
+              SizedBox(
+                width: buttonWidth,
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.menu_book_outlined),
+                  label: const Text(
+                    'Bible Nudge',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  onPressed: () {
+                    Navigator.pop(context);
+                    _sendBibleNudge(memberProfile);
+                  },
+                ),
+              ),
+            if (canMessage)
+              SizedBox(
+                width: constraints.maxWidth,
+                child: FilledButton.icon(
+                  icon: const Icon(Icons.chat_bubble_outline),
+                  label: const Text(
+                    'Message',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  onPressed: () {
+                    Navigator.pop(context);
+                    _openMessageWithMember(data);
+                  },
+                ),
+              ),
+          ];
+
+          return Wrap(
+            spacing: 12,
+            runSpacing: 10,
+            children: actions,
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildMemberFamilyPreview(
+    BuildContext context,
+    UserProfile memberProfile,
+    String? currentUserId,
+  ) {
+    final theme = Theme.of(context);
+
+    if (!memberProfile.showFamilyTree) {
+      return _buildPrivacyNotice(
+        context,
+        'Family tree hidden',
+        'This member has turned off family tree visibility.',
+      );
+    }
+
+    return FutureBuilder<List<FamilyRelationship>>(
+      future: _familyService.visibleFamilyLinksForProfile(
+        profileUserId: memberProfile.uid,
+      ),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 12),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        if (snapshot.hasError) {
+          return _buildPrivacyNotice(
+            context,
+            'Family tree unavailable',
+            'Family connections could not be loaded right now.',
+          );
+        }
+
+        final relationships = snapshot.data ?? const <FamilyRelationship>[];
+        if (relationships.isEmpty) {
+          return _buildPrivacyNotice(
+            context,
+            'No visible family links',
+            'No approved family connections are visible on this profile.',
+          );
+        }
+
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surfaceContainerHighest
+                .withValues(alpha: 0.35),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.5),
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    Icons.account_tree_outlined,
+                    color: theme.colorScheme.primary,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Family Connections',
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              ...relationships.take(6).map(
+                    (relationship) => _buildVisibleFamilyRow(
+                      context,
+                      relationship,
+                      memberProfile,
+                      currentUserId,
+                    ),
+                  ),
+              if (relationships.length > 6)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(
+                    '+${relationships.length - 6} more family link${relationships.length - 6 == 1 ? '' : 's'}',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildVisibleFamilyRow(
+    BuildContext context,
+    FamilyRelationship relationship,
+    UserProfile profileOwner,
+    String? currentUserId,
+  ) {
+    final theme = Theme.of(context);
+    final otherName = relationship.requesterId == profileOwner.uid
+        ? relationship.relatedName
+        : relationship.requesterName;
+    final label = profileOwner.showFamilyRelationshipTypes
+        ? relationship.labelForViewer(profileOwner.uid)
+        : 'Family connection';
+    final category = profileOwner.showFamilyRelationshipTypes
+        ? relationship.categoryForViewer(profileOwner.uid)
+        : 'Private relationship type';
+    final isCurrentUser = currentUserId != null &&
+        (relationship.requesterId == currentUserId ||
+            relationship.relatedUserId == currentUserId);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          CircleAvatar(
+            radius: 16,
+            child: Icon(
+              isCurrentUser ? Icons.how_to_reg_outlined : Icons.family_restroom,
+              size: 16,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  otherName.isEmpty ? 'Family member' : otherName,
                   style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                Text(
+                  '$label - $category',
+                  style: theme.textTheme.bodySmall?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
-            const SizedBox(height: 24),
-            if (isPrivate)
-              const ListTile(
-                leading: Icon(Icons.lock_outline),
-                title: Text('This member keeps contact details private.'),
-              )
-            else ...[
-              ListTile(
-                leading: const Icon(Icons.email_outlined),
-                title: Text(data['email'] ?? 'No email'),
-                onTap: () => launchUrl(Uri.parse('mailto:${data["email"]}')),
-              ),
-              if (data['phone'] != null)
-                ListTile(
-                  leading: const Icon(Icons.phone_outlined),
-                  title: Text(data['phone']),
-                  onTap: () => launchUrl(Uri.parse('tel:${data["phone"]}')),
-                ),
-            ],
-
-            const Spacer(),
-            Padding(
-              padding: const EdgeInsets.all(24.0),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: const Text('Close'),
-                    ),
+  Widget _buildPrivacyNotice(
+    BuildContext context,
+    String title,
+    String message,
+  ) {
+    final theme = Theme.of(context);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.privacy_tip_outlined,
+            size: 20,
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
                   ),
-                  if (canMessage) ...[
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: FilledButton.icon(
-                        icon: const Icon(Icons.chat_bubble_outline),
-                        label: const Text('Message'),
-                        onPressed: () {
-                          Navigator.pop(context);
-                          _openMessageWithMember(data);
-                        },
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            )
-          ],
-        ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  message,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

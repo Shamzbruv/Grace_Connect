@@ -100,6 +100,7 @@ class _MoreTabScreen extends StatelessWidget {
     final canManagePrayers = capabilities?.canAssignPrayers == true ||
         capabilities?.canViewSensitivePrayers == true;
     final canManageRoles = capabilities?.canManageRoles ?? false;
+    final canManageSchedules = capabilities?.canManageSchedules ?? false;
 
     final actions = [
       const _MoreAction('Member View', '/member_view', Icons.home_outlined),
@@ -108,7 +109,16 @@ class _MoreTabScreen extends StatelessWidget {
       const _MoreAction(
           'Attendance', '/attendance', Icons.checklist_rtl_outlined),
       const _MoreAction(
+          'Transfer', '/church_transfer', Icons.compare_arrows_outlined),
+      if (canManageSchedules)
+        const _MoreAction(
+          'Schedules',
+          '/schedule_management',
+          Icons.event_available_outlined,
+        ),
+      const _MoreAction(
           'Testimonies', '/testimonies', Icons.auto_awesome_outlined),
+      const _MoreAction('Ministries', '/ministries', Icons.groups_outlined),
       _MoreAction(
         canManagePrayers ? 'Prayer Requests' : 'Prayers',
         '/prayers',

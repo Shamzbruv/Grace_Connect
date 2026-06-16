@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:provider/provider.dart';
-import 'package:google_sign_in/google_sign_in.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../widgets/app_scaffold.dart';
@@ -166,36 +164,8 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  Future<void> _handleGoogleLogin() async {
-    setState(() => _isLoading = true);
-    try {
-      final GoogleSignInAccount? googleUser = await GoogleSignIn().signIn();
-      if (googleUser != null) {
-        final GoogleSignInAuthentication googleAuth =
-            await googleUser.authentication;
-
-        final AuthResponse res =
-            await Supabase.instance.client.auth.signInWithIdToken(
-          provider: OAuthProvider.google,
-          idToken: googleAuth.idToken!,
-          accessToken: googleAuth.accessToken,
-        );
-
-        await _fetchUserProfile(res.user);
-      } else {
-        setState(() => _isLoading = false);
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Google Sign-In Error: $e')));
-      }
-      setState(() => _isLoading = false);
-    }
-  }
-
   /// Fetches the user profile from the Supabase `users` table.
-  /// Falls back to complete_profile screen if no profile found (e.g. first Google sign-in).
+  /// Falls back to complete_profile screen if no profile is found.
   Future<void> _fetchUserProfile(User? user) async {
     if (user == null) return;
     try {
@@ -315,13 +285,6 @@ class _LoginScreenState extends State<LoginScreen> {
                       onPressed: _handleLogin,
                       isLoading: _isLoading,
                       icon: Icons.arrow_forward,
-                    ),
-                    const SizedBox(height: 16),
-                    AppButton(
-                      text: 'Sign in with Google',
-                      isSecondary: true,
-                      onPressed: _handleGoogleLogin,
-                      icon: FontAwesomeIcons.google,
                     ),
                   ],
                 ),

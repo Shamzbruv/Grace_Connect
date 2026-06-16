@@ -73,6 +73,8 @@ class StatCard extends StatelessWidget {
             const SizedBox(height: 12),
             Text(
               value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: GoogleFonts.outfit(
                 fontSize: 24,
                 fontWeight: FontWeight.bold,
@@ -82,6 +84,8 @@ class StatCard extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               label,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
               style: GoogleFonts.outfit(
                 fontSize: 12,
                 color: colorScheme.onSurfaceVariant,

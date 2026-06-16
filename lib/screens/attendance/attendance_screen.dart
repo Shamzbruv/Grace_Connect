@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
@@ -11,6 +14,7 @@ import '../../theme/app_colors.dart';
 import '../../widgets/ui/app_card.dart';
 
 import '../../widgets/ui/app_loader.dart';
+import 'church_location_picker_screen.dart';
 import 'remote_attendance_screen.dart';
 
 class AttendanceScreen extends StatefulWidget {
@@ -22,21 +26,34 @@ class AttendanceScreen extends StatefulWidget {
 
 class _AttendanceScreenState extends State<AttendanceScreen> {
   final AttendanceService _attendanceService = AttendanceService();
-  String _filter = 'All'; // All, Weekly, Monthly, Yearly
+  String _filter = 'All';
   bool _autoCheckIn = true;
   bool _showDiagnostics = false;
   bool _isSetupLoading = false;
-  bool _isSavingLocation = false;
   bool _isPromptLoading = false;
   bool _isMarkingPresent = false;
   String? _loadedChurchId;
+  String? _attendanceStreamUserId;
+  Stream<List<AttendanceRecord>>? _attendanceHistoryStream;
   AttendanceSetupStatus? _setupStatus;
   AttendanceCheckInPrompt? _checkInPrompt;
+  Timer? _promptRefreshTimer;
 
   @override
   void initState() {
     super.initState();
     _loadAutoCheckInPreference();
+    _promptRefreshTimer = Timer.periodic(const Duration(seconds: 45), (_) {
+      final churchId = _loadedChurchId;
+      if (churchId == null || !mounted || _isPromptLoading) return;
+      unawaited(_refreshCheckInPrompt(churchId));
+    });
+  }
+
+  @override
+  void dispose() {
+    _promptRefreshTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadAutoCheckInPreference() async {
@@ -44,7 +61,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     final enabled = prefs.getBool('auto_check_in') ?? true;
     if (!mounted) return;
     setState(() => _autoCheckIn = enabled);
-    if (enabled) {
+    if (enabled && !kIsWeb) {
       await _attendanceService.initialize();
     }
   }
@@ -54,7 +71,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('auto_check_in', value);
 
-    if (value) {
+    if (value && !kIsWeb) {
       await _attendanceService.initialize();
     } else {
       _attendanceService.stopMonitoring();
@@ -132,26 +149,12 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     }
   }
 
-  Future<void> _saveChurchLocation(String churchId) async {
-    setState(() => _isSavingLocation = true);
-    try {
-      await _attendanceService.saveChurchLocationFromCurrentPosition(churchId);
-      await _refreshSetupStatus(churchId);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Church location saved for check-ins.')),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not save church location: $e')),
-      );
-    } finally {
-      if (mounted) setState(() => _isSavingLocation = false);
-    }
-  }
-
   bool _canManageAttendanceSetup(UserProfile user) {
+    if (user.capabilities.canManageSchedules ||
+        user.capabilities.canManageMembersBasic) {
+      return true;
+    }
+
     const allowedRoles = {
       'pastor',
       'senior_pastor',
@@ -176,6 +179,15 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         .any(allowedRoles.contains);
   }
 
+  Stream<List<AttendanceRecord>> _historyStream(String userId) {
+    if (_attendanceStreamUserId != userId || _attendanceHistoryStream == null) {
+      _attendanceStreamUserId = userId;
+      _attendanceHistoryStream =
+          _attendanceService.getAttendanceHistory(userId);
+    }
+    return _attendanceHistoryStream!;
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = Provider.of<UserRoleProvider>(context).user;
@@ -191,6 +203,13 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         backgroundColor: Colors.transparent,
         elevation: 0,
         actions: [
+          if (_canManageAttendanceSetup(user))
+            IconButton(
+              tooltip: 'Service Schedules',
+              onPressed: () =>
+                  Navigator.pushNamed(context, '/schedule_management'),
+              icon: const Icon(Icons.event_available_outlined),
+            ),
           TextButton.icon(
             onPressed: () {
               Navigator.push(
@@ -208,7 +227,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         ],
       ),
       body: StreamBuilder<List<AttendanceRecord>>(
-        stream: _attendanceService.getAttendanceHistory(user.uid),
+        stream: _historyStream(user.uid),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const AppLoader();
@@ -223,18 +242,18 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           final filteredRecords = _filterRecords(records);
           final stats = _calculateStats(filteredRecords);
 
-          return Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          return RefreshIndicator(
+            onRefresh: () async {
+              await _refreshSetupStatus(user.churchId);
+              await _refreshCheckInPrompt(user.churchId);
+            },
+            child: ListView(
+              padding: const EdgeInsets.all(16.0),
               children: [
-                // GPS Status Card
-                _buildGpsStatusCard(context, user),
-                const SizedBox(height: 16),
                 _buildActiveServiceCard(context, user),
                 const SizedBox(height: 16),
-
-                // Stats Row
+                _buildGpsStatusCard(context, user),
+                const SizedBox(height: 16),
                 Row(
                   children: [
                     Expanded(
@@ -250,13 +269,16 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                             context, 'Absent', stats['absent']!, Colors.red)),
                   ],
                 ),
-                const SizedBox(height: 24),
-
-                // Filters
+                const SizedBox(height: 16),
+                _buildAttendanceAnalysis(context, filteredRecords, stats),
+                const SizedBox(height: 16),
+                _buildAttendanceCalendar(context, filteredRecords),
+                const SizedBox(height: 20),
                 SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   child: Row(
-                    children: ['All', 'This Month', 'This Year'].map((filter) {
+                    children: ['All', 'This Week', 'This Month', 'This Year']
+                        .map((filter) {
                       final isSelected = _filter == filter;
                       return Padding(
                         padding: const EdgeInsets.only(right: 8.0),
@@ -282,35 +304,29 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                   ),
                 ),
                 const SizedBox(height: 16),
-
-                // List
-                Expanded(
-                  child: filteredRecords.isEmpty
-                      ? Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.history_toggle_off,
-                                  size: 48,
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .onSurface
-                                      .withValues(alpha: 0.2)),
-                              const SizedBox(height: 16),
-                              Text('No attendance records found.',
-                                  style:
-                                      Theme.of(context).textTheme.bodyMedium),
-                            ],
-                          ),
-                        )
-                      : ListView.builder(
-                          itemCount: filteredRecords.length,
-                          itemBuilder: (context, index) {
-                            final record = filteredRecords[index];
-                            return _buildRecordCard(context, record);
-                          },
-                        ),
-                ),
+                if (filteredRecords.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 48),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.history_toggle_off,
+                            size: 48,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurface
+                                .withValues(alpha: 0.2)),
+                        const SizedBox(height: 16),
+                        Text('No attendance records found.',
+                            style: Theme.of(context).textTheme.bodyMedium),
+                      ],
+                    ),
+                  )
+                else
+                  ...filteredRecords.map(
+                    (record) => _buildRecordCard(context, record),
+                  ),
+                const SizedBox(height: 32),
               ],
             ),
           );
@@ -426,19 +442,21 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                     ),
                     if (canManageSetup)
                       FilledButton.icon(
-                        onPressed: _isSavingLocation
-                            ? null
-                            : () => _saveChurchLocation(user.churchId),
-                        icon: _isSavingLocation
-                            ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Icon(Icons.my_location),
-                        label: const Text('Set Location'),
+                        onPressed: () async {
+                          final updated = await Navigator.push<bool>(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) =>
+                                  const ChurchLocationPickerScreen(),
+                            ),
+                          );
+                          if (updated == true && context.mounted) {
+                            await _refreshSetupStatus(user.churchId);
+                            await _refreshCheckInPrompt(user.churchId);
+                          }
+                        },
+                        icon: const Icon(Icons.add_location_alt_outlined),
+                        label: const Text('Pin Location'),
                       ),
                     if (canManageSetup)
                       OutlinedButton.icon(
@@ -502,6 +520,14 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     final isInside = prompt?.isInsideGeofence == true;
 
     return AppCard(
+      color: hasActive
+          ? theme.colorScheme.primaryContainer.withValues(alpha: 0.18)
+          : null,
+      border: Border.all(
+        color: hasActive
+            ? theme.colorScheme.primary.withValues(alpha: 0.35)
+            : theme.dividerColor.withValues(alpha: 0.14),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -519,7 +545,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                   hasActive ? serviceName : 'No Service In Session',
                   style: GoogleFonts.poppins(
                     fontWeight: FontWeight.w700,
-                    fontSize: 16,
+                    fontSize: 17,
                   ),
                 ),
               ),
@@ -533,13 +559,33 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            prompt?.message ?? 'Checking active service and church location...',
+            hasActive
+                ? (prompt?.message ??
+                    'Checking active service and church location...')
+                : (prompt?.message ??
+                    'No recurring service is in session right now.'),
             style: theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
             ),
           ),
           if (prompt != null && hasActive) ...[
             const SizedBox(height: 12),
+            _buildCheckInStep(
+              context,
+              label: 'Service in session',
+              isComplete: true,
+            ),
+            _buildCheckInStep(
+              context,
+              label: 'Inside church radius',
+              isComplete: isInside,
+            ),
+            _buildCheckInStep(
+              context,
+              label: 'Property stay verified',
+              isComplete: isVerified || prompt.canMarkPresent,
+            ),
+            const SizedBox(height: 10),
             LinearProgressIndicator(
               minHeight: 6,
               value: prompt.requiredDwellMinutes == 0
@@ -561,6 +607,17 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                       : 'Geofence verification required before check-in.',
               style: theme.textTheme.labelMedium,
             ),
+            if (!isVerified && !prompt.canMarkPresent) ...[
+              const SizedBox(height: 6),
+              Text(
+                isInside
+                    ? 'Stay on the church property until verification completes, then tap Mark Present.'
+                    : 'When you arrive at church, keep the app open and tap Refresh so Mark Present can unlock.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
           ],
           const SizedBox(height: 12),
           Row(
@@ -582,6 +639,17 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
               ),
               const SizedBox(width: 8),
               IconButton.outlined(
+                tooltip: 'Join live or remote service',
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const RemoteAttendanceScreen(),
+                  ),
+                ),
+                icon: const Icon(Icons.wifi_tethering),
+              ),
+              const SizedBox(width: 8),
+              IconButton.outlined(
                 tooltip: 'Refresh',
                 onPressed: _isPromptLoading
                     ? null
@@ -592,6 +660,272 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildCheckInStep(
+    BuildContext context, {
+    required String label,
+    required bool isComplete,
+  }) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        children: [
+          Icon(
+            isComplete ? Icons.check_circle : Icons.radio_button_unchecked,
+            size: 18,
+            color: isComplete ? Colors.green : theme.colorScheme.outline,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              label,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: isComplete
+                    ? theme.colorScheme.onSurface
+                    : theme.colorScheme.onSurfaceVariant,
+                fontWeight: isComplete ? FontWeight.w700 : FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAttendanceAnalysis(
+    BuildContext context,
+    List<AttendanceRecord> records,
+    Map<String, int> stats,
+  ) {
+    final theme = Theme.of(context);
+    final remote = records.where((record) => record.method == 'remote').length;
+    final lateRecords = records
+        .where(
+            (record) => record.status == 'late' && record.minutesLate != null)
+        .toList();
+    final avgLate = lateRecords.isEmpty
+        ? 0
+        : (lateRecords.fold<int>(
+                    0, (total, record) => total + (record.minutesLate ?? 0)) /
+                lateRecords.length)
+            .round();
+    final attendedServices = records
+        .where((record) => record.present)
+        .map((record) => record.serviceName?.trim())
+        .whereType<String>()
+        .where((name) => name.isNotEmpty)
+        .toSet()
+        .take(3)
+        .join(', ');
+
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.insights_outlined, color: theme.colorScheme.primary),
+              const SizedBox(width: 8),
+              Text(
+                'Attendance Analysis',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _buildAnalysisPill(
+                  context, '${stats['present'] ?? 0}', 'present'),
+              _buildAnalysisPill(context, '$remote', 'remote'),
+              _buildAnalysisPill(context, '$avgLate min', 'avg late'),
+              _buildAnalysisPill(
+                context,
+                '${stats['absent'] ?? 0}',
+                'absent',
+              ),
+            ],
+          ),
+          if (attendedServices.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Text(
+              'Services attended: $attendedServices',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAnalysisPill(BuildContext context, String value, String label) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.7),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: RichText(
+        text: TextSpan(
+          style: theme.textTheme.labelMedium,
+          children: [
+            TextSpan(
+              text: value,
+              style: TextStyle(
+                color: theme.colorScheme.primary,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            TextSpan(text: ' $label'),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAttendanceCalendar(
+    BuildContext context,
+    List<AttendanceRecord> records,
+  ) {
+    final theme = Theme.of(context);
+    final now = DateTime.now();
+    final firstDay = DateTime(now.year, now.month, 1);
+    final daysInMonth = DateTime(now.year, now.month + 1, 0).day;
+    final leadingSlots = firstDay.weekday % 7;
+    final byDay = <int, AttendanceRecord>{};
+    for (final record in records) {
+      if (record.timestamp.year == now.year &&
+          record.timestamp.month == now.month) {
+        byDay[record.timestamp.day] = record;
+      }
+    }
+
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.calendar_month_outlined,
+                  color: theme.colorScheme.primary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  DateFormat('MMMM yyyy').format(now),
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              Text(
+                'Calendar View',
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: const [
+              _WeekdayLabel('S'),
+              _WeekdayLabel('M'),
+              _WeekdayLabel('T'),
+              _WeekdayLabel('W'),
+              _WeekdayLabel('T'),
+              _WeekdayLabel('F'),
+              _WeekdayLabel('S'),
+            ],
+          ),
+          const SizedBox(height: 8),
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: leadingSlots + daysInMonth,
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 7,
+              mainAxisSpacing: 6,
+              crossAxisSpacing: 6,
+            ),
+            itemBuilder: (context, index) {
+              if (index < leadingSlots) return const SizedBox.shrink();
+              final day = index - leadingSlots + 1;
+              final record = byDay[day];
+              final color = record == null
+                  ? theme.colorScheme.surfaceContainerHighest
+                  : _colorForRecord(record);
+              final isToday = day == now.day;
+
+              return Tooltip(
+                message: record == null
+                    ? 'No record'
+                    : '${record.serviceName ?? 'Service'} - ${_labelForRecord(record)}',
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color:
+                        color.withValues(alpha: record == null ? 0.35 : 0.18),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: isToday
+                          ? theme.colorScheme.primary
+                          : color.withValues(
+                              alpha: record == null ? 0.18 : 0.7),
+                    ),
+                  ),
+                  child: Center(
+                    child: Text(
+                      '$day',
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: record == null
+                            ? theme.colorScheme.onSurfaceVariant
+                            : color,
+                        fontWeight:
+                            record == null ? FontWeight.w500 : FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 10,
+            runSpacing: 6,
+            children: [
+              _buildLegend(context, Colors.green, 'On time'),
+              _buildLegend(context, Colors.orange, 'Late'),
+              _buildLegend(context, Colors.purple, 'Remote'),
+              _buildLegend(context, Colors.redAccent, 'Absent'),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLegend(BuildContext context, Color color, String label) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 5),
+        Text(label, style: Theme.of(context).textTheme.labelSmall),
+      ],
     );
   }
 
@@ -724,11 +1058,16 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
             size: 20,
           ),
         ),
-        title:
-            Text(dateStr, style: const TextStyle(fontWeight: FontWeight.bold)),
+        title: Text(
+          record.serviceName?.trim().isNotEmpty == true
+              ? record.serviceName!
+              : dateStr,
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (record.serviceName?.trim().isNotEmpty == true) Text(dateStr),
             Text(isAbsent
                 ? 'Marked absent at $timeStr'
                 : 'Checked in at $timeStr'),
@@ -749,7 +1088,11 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
 
   List<AttendanceRecord> _filterRecords(List<AttendanceRecord> records) {
     final now = DateTime.now();
-    if (_filter == 'This Month') {
+    if (_filter == 'This Week') {
+      final startOfWeek = DateTime(now.year, now.month, now.day)
+          .subtract(Duration(days: now.weekday - 1));
+      return records.where((r) => !r.timestamp.isBefore(startOfWeek)).toList();
+    } else if (_filter == 'This Month') {
       return records
           .where((r) =>
               r.timestamp.month == now.month && r.timestamp.year == now.year)
@@ -776,5 +1119,41 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       }
     }
     return {'present': present, 'late': late, 'absent': absent};
+  }
+
+  Color _colorForRecord(AttendanceRecord record) {
+    if (!record.present || record.status == 'absent') return Colors.redAccent;
+    if (record.method == 'remote') return Colors.purple;
+    if (record.status == 'late') return Colors.orange;
+    return Colors.green;
+  }
+
+  String _labelForRecord(AttendanceRecord record) {
+    if (!record.present || record.status == 'absent') return 'Absent';
+    if (record.method == 'remote') return 'Remote present';
+    if (record.status == 'late') {
+      return '${record.minutesLate ?? 0} min late';
+    }
+    return 'On time';
+  }
+}
+
+class _WeekdayLabel extends StatelessWidget {
+  const _WeekdayLabel(this.label);
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Text(
+        label,
+        textAlign: TextAlign.center,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+              fontWeight: FontWeight.w800,
+            ),
+      ),
+    );
   }
 }

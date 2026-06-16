@@ -19,17 +19,71 @@ class UserService {
   }
 
   Future<UserProfile?> getUserProfile(String uid) async {
+    final cleanUid = uid.trim();
+    if (cleanUid.isEmpty) return null;
+
     try {
-      final doc =
-          await _supabase.from('users').select().eq('uid', uid).maybeSingle();
+      final doc = await _supabase
+          .from('users')
+          .select()
+          .eq('uid', cleanUid)
+          .maybeSingle();
       if (doc != null) {
         return UserProfile.fromMap(doc);
       }
+
+      if (_looksLikeUuid(cleanUid)) {
+        final idDoc = await _supabase
+            .from('users')
+            .select()
+            .eq('id', cleanUid)
+            .maybeSingle();
+        if (idDoc != null) {
+          return UserProfile.fromMap(idDoc);
+        }
+      }
+
+      if (cleanUid.contains('@')) {
+        final emailDoc = await _supabase
+            .from('users')
+            .select()
+            .ilike('email', cleanUid)
+            .maybeSingle();
+        if (emailDoc != null) {
+          return UserProfile.fromMap(emailDoc);
+        }
+      }
+
       return null;
     } catch (e) {
       debugPrint('Failed to fetch user profile: $e');
       return null;
     }
+  }
+
+  Future<UserProfile?> findBestPersonMatch(String query) async {
+    final cleanQuery = query.trim();
+    if (cleanQuery.isEmpty) return null;
+
+    final direct = await getUserProfile(cleanQuery);
+    if (direct != null) return direct;
+
+    final results = await searchPeople(cleanQuery);
+    if (results.isEmpty) return null;
+
+    final lower = cleanQuery.toLowerCase();
+    return results.firstWhere(
+      (person) =>
+          person.fullName.toLowerCase() == lower ||
+          person.email.toLowerCase() == lower,
+      orElse: () => results.first,
+    );
+  }
+
+  bool _looksLikeUuid(String value) {
+    return RegExp(
+      r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
+    ).hasMatch(value);
   }
 
   Future<void> updateProfile(UserProfile profile) async {
@@ -53,6 +107,39 @@ class UserService {
         .or('fullName.ilike.%$cleanQuery%,email.ilike.%$cleanQuery%')
         .order('fullName')
         .limit(10);
+    return snapshot.map((doc) => UserProfile.fromMap(doc)).toList();
+  }
+
+  Future<List<UserProfile>> searchPeople(String query) async {
+    final cleanQuery = query.trim().replaceAll(',', ' ');
+    if (cleanQuery.length < 2) return [];
+
+    try {
+      final rows = await _supabase.rpc(
+        'search_people_global',
+        params: {
+          'search_query': cleanQuery,
+          'result_limit': 30,
+        },
+      );
+      return (rows as List)
+          .map((doc) => UserProfile.fromMap(Map<String, dynamic>.from(doc)))
+          .toList();
+    } catch (error) {
+      debugPrint('Global people search fallback: $error');
+    }
+
+    final safeQuery = cleanQuery
+        .replaceAll(RegExp(r'[%(),]'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ');
+    final snapshot = await _supabase
+        .from('users')
+        .select()
+        .or('fullName.ilike.%$safeQuery%,'
+            'email.ilike.%$safeQuery%,'
+            'placeName.ilike.%$safeQuery%')
+        .order('fullName')
+        .limit(30);
     return snapshot.map((doc) => UserProfile.fromMap(doc)).toList();
   }
 

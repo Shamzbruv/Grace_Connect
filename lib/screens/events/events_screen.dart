@@ -10,7 +10,9 @@ import '../../widgets/ui/app_button.dart';
 import '../../widgets/ui/app_text_field.dart';
 import '../../widgets/ui/app_loader.dart';
 import '../../services/event_service.dart';
+import '../../services/ministry_service.dart';
 import '../../models/event_model.dart';
+import '../../models/ministry.dart';
 
 class EventsScreen extends StatefulWidget {
   const EventsScreen({
@@ -26,6 +28,7 @@ class EventsScreen extends StatefulWidget {
 
 class _EventsScreenState extends State<EventsScreen> {
   final EventService _eventService = EventService();
+  final MinistryService _ministryService = MinistryService();
   final TextEditingController _titleController = TextEditingController();
   final TextEditingController _descriptionController = TextEditingController();
   final TextEditingController _locationController = TextEditingController();
@@ -34,6 +37,9 @@ class _EventsScreenState extends State<EventsScreen> {
   User? _currentUser;
   bool _isLoading = true;
   bool _isAddingEvent = false;
+  bool _canAddMinistryEvent = false;
+  List<MinistryManager> _managedMinistries = [];
+  String? _selectedMinistryId;
   DateTime _selectedDate = DateTime.now();
   TimeOfDay _selectedTime = TimeOfDay.now();
 
@@ -59,12 +65,23 @@ class _EventsScreenState extends State<EventsScreen> {
             _isLoading = false;
           });
         }
+        await _loadMinistryAccess();
       } catch (e) {
         if (mounted) setState(() => _isLoading = false);
       }
     } else {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  Future<void> _loadMinistryAccess() async {
+    final managedMinistries = await _ministryService.fetchMyManagedMinistries();
+    if (!mounted) return;
+    setState(() {
+      _managedMinistries = managedMinistries;
+      _canAddMinistryEvent =
+          managedMinistries.any((manager) => manager.canCreateEvents);
+    });
   }
 
   @override
@@ -88,6 +105,18 @@ class _EventsScreenState extends State<EventsScreen> {
     }
   }
 
+  MinistryManager? _selectedMinistryForEvent() {
+    final selectedId = _selectedMinistryId;
+    if (selectedId == null) return null;
+
+    for (final manager in _managedMinistries) {
+      if (manager.ministryId == selectedId) {
+        return manager;
+      }
+    }
+    return null;
+  }
+
   Future<void> _addEvent() async {
     if (_isAddingEvent) return;
 
@@ -103,12 +132,22 @@ class _EventsScreenState extends State<EventsScreen> {
 
     setState(() => _isAddingEvent = true);
     final roleProvider = Provider.of<UserRoleProvider>(context, listen: false);
-    final sourceLabel = roleProvider.hasRole('Pastor') ||
-            roleProvider.hasRole('Senior Pastor') ||
-            roleProvider.hasRole('Assistant Pastor') ||
-            roleProvider.hasRole('Acting Pastor')
-        ? "From the Pastor's Desk"
-        : 'Church Event';
+    final selectedMinistry = _selectedMinistryForEvent();
+    if (!roleProvider.canManageEvents && selectedMinistry == null) {
+      setState(() => _isAddingEvent = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Choose a ministry for this event.')),
+      );
+      return;
+    }
+    final sourceLabel = selectedMinistry != null
+        ? 'From ${selectedMinistry.ministryName}'
+        : roleProvider.hasRole('Pastor') ||
+                roleProvider.hasRole('Senior Pastor') ||
+                roleProvider.hasRole('Assistant Pastor') ||
+                roleProvider.hasRole('Acting Pastor')
+            ? "From the Pastor's Desk"
+            : 'Church Event';
 
     final newEvent = EventModel(
       id: '', // Service handles ID
@@ -126,6 +165,8 @@ class _EventsScreenState extends State<EventsScreen> {
       churchId: _churchId!,
       organizerId: _currentUser!.id,
       sourceLabel: sourceLabel,
+      ministryId: selectedMinistry?.ministryId,
+      ministryName: selectedMinistry?.ministryName ?? '',
       attendees: [],
     );
 
@@ -135,6 +176,7 @@ class _EventsScreenState extends State<EventsScreen> {
       _titleController.clear();
       _descriptionController.clear();
       _locationController.clear();
+      _selectedMinistryId = null;
 
       if (mounted) {
         Navigator.pop(context);
@@ -155,6 +197,14 @@ class _EventsScreenState extends State<EventsScreen> {
   void _showAddEventDialog() {
     _selectedDate = DateTime.now();
     _selectedTime = TimeOfDay.now();
+    final roleProvider = Provider.of<UserRoleProvider>(context, listen: false);
+    final ministryEventAccess =
+        _managedMinistries.where((manager) => manager.canCreateEvents).toList();
+    _selectedMinistryId = roleProvider.canManageEvents
+        ? null
+        : ministryEventAccess.isNotEmpty
+            ? ministryEventAccess.first.ministryId
+            : null;
 
     showDialog(
       context: context,
@@ -190,6 +240,35 @@ class _EventsScreenState extends State<EventsScreen> {
                   label: 'Location',
                   hint: 'Main sanctuary, online, etc.',
                 ),
+                if (roleProvider.canManageEvents ||
+                    ministryEventAccess.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  DropdownButtonFormField<String>(
+                    value: _selectedMinistryId ?? 'church',
+                    decoration: const InputDecoration(
+                      labelText: 'Event Source',
+                      prefixIcon: Icon(Icons.groups_outlined),
+                    ),
+                    items: [
+                      if (roleProvider.canManageEvents)
+                        const DropdownMenuItem(
+                          value: 'church',
+                          child: Text('Church-wide event'),
+                        ),
+                      ...ministryEventAccess.map(
+                        (manager) => DropdownMenuItem(
+                          value: manager.ministryId,
+                          child: Text(manager.ministryName),
+                        ),
+                      ),
+                    ],
+                    onChanged: (value) {
+                      setDialogState(() {
+                        _selectedMinistryId = value == 'church' ? null : value;
+                      });
+                    },
+                  ),
+                ],
                 const SizedBox(height: 16),
                 Row(
                   children: [
@@ -263,7 +342,7 @@ class _EventsScreenState extends State<EventsScreen> {
   @override
   Widget build(BuildContext context) {
     final roleProvider = Provider.of<UserRoleProvider>(context);
-    final canAddEvent = roleProvider.canManageEvents;
+    final canAddEvent = roleProvider.canManageEvents || _canAddMinistryEvent;
 
     return AppScaffold(
       title: 'Events',

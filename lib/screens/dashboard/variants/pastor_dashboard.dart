@@ -79,9 +79,9 @@ class _PastorDashboardState extends State<PastorDashboard> {
         const SizedBox(height: 12),
         ActionCard(
           title: "From the Pastor's Desk",
-          description: 'Create an event or church-wide update',
+          description: 'Create and review church-wide announcements',
           icon: Icons.campaign_outlined,
-          onTap: () => Navigator.pushNamed(context, '/events'),
+          onTap: () => Navigator.pushNamed(context, '/announcements'),
         ),
         const SizedBox(height: 12),
         ActionCard(
@@ -89,6 +89,13 @@ class _PastorDashboardState extends State<PastorDashboard> {
           description: 'Review and respond to prayer needs',
           icon: Icons.volunteer_activism_outlined,
           onTap: () => Navigator.pushNamed(context, '/prayers'),
+        ),
+        const SizedBox(height: 12),
+        ActionCard(
+          title: 'Service Schedules',
+          description: 'Set recurring services for auto-attendance',
+          icon: Icons.event_available_outlined,
+          onTap: () => Navigator.pushNamed(context, '/schedule_management'),
         ),
         const SizedBox(height: 12),
         ActionCard(
@@ -106,6 +113,13 @@ class _PastorDashboardState extends State<PastorDashboard> {
             onTap: () => Navigator.pushNamed(context, '/role_management'),
           ),
         ],
+        const SizedBox(height: 12),
+        ActionCard(
+          title: 'Ministries',
+          description: 'Create ministries and assign managers',
+          icon: Icons.groups_outlined,
+          onTap: () => Navigator.pushNamed(context, '/ministries'),
+        ),
         const SizedBox(height: 24),
         Text(
           'Church Overview',
@@ -130,7 +144,7 @@ class _PastorDashboardState extends State<PastorDashboard> {
               physics: const NeverScrollableScrollPhysics(),
               mainAxisSpacing: 12,
               crossAxisSpacing: 12,
-              childAspectRatio: 1.35,
+              childAspectRatio: 1.08,
               children: [
                 _buildMiniCard(
                   context,
@@ -177,7 +191,7 @@ class _PastorDashboardState extends State<PastorDashboard> {
   ) {
     final theme = Theme.of(context);
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: theme.cardTheme.color,
         borderRadius: BorderRadius.circular(16),
@@ -193,31 +207,45 @@ class _PastorDashboardState extends State<PastorDashboard> {
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Icon(icon, color: theme.colorScheme.primary),
-          const SizedBox(height: 8),
-          Text(
-            value,
-            style: theme.textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          Text(
-            title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 3),
-          Text(
-            description,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
+          const SizedBox(height: 6),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    value,
+                    style: theme.textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                Text(
+                  title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    height: 1.05,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  description,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                    height: 1.05,
+                  ),
+                ),
+              ],
             ),
           ),
         ],

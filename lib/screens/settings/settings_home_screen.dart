@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/user_role_provider.dart';
+import '../../services/ministry_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/ui/app_scaffold.dart';
 import '../../widgets/ui/app_card.dart';
@@ -19,6 +20,7 @@ class SettingsHomeScreen extends StatelessWidget {
     final bool isFinance = capabilities?.canManageFinance == true ||
         roles.map(_normalizeRole).any({'pastor', 'senior_pastor'}.contains);
     final bool isDeveloper = roleProvider.isDeveloper;
+    final ministryAccessFuture = MinistryService().managesAnyMinistry();
 
     return AppScaffold(
       title: 'Settings',
@@ -74,6 +76,13 @@ class SettingsHomeScreen extends StatelessWidget {
                   const Divider(height: 1),
                   _buildSettingsTile(
                       context,
+                      Icons.campaign_outlined,
+                      'Announcements',
+                      'Church and ministry updates',
+                      '/announcements'),
+                  const Divider(height: 1),
+                  _buildSettingsTile(
+                      context,
                       Icons.book_outlined,
                       'Bible & Study',
                       'Plans, Study Partners',
@@ -82,27 +91,53 @@ class SettingsHomeScreen extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 24),
-            if (isStaff) ...[
-              _buildSectionHeader(context, 'Staff & Administration'),
-              AppCard(
-                child: Column(
+            FutureBuilder<bool>(
+              future: ministryAccessFuture,
+              builder: (context, snapshot) {
+                final hasMinistryAccess = snapshot.data ?? false;
+                if (!isStaff && !hasMinistryAccess) {
+                  return const SizedBox.shrink();
+                }
+
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    _buildSettingsTile(
-                        context,
-                        Icons.church_outlined,
-                        'Church Settings',
-                        'Profile, Schedules, Approval',
-                        '/settings/church_admin'),
-                    if (isFinance) ...[
-                      const Divider(height: 1),
-                      _buildSettingsTile(context, Icons.attach_money, 'Finance',
-                          'Reports, Categories', '/settings/finance'),
-                    ],
+                    _buildSectionHeader(context, 'Staff & Administration'),
+                    AppCard(
+                      child: Column(
+                        children: [
+                          if (isStaff) ...[
+                            _buildSettingsTile(
+                                context,
+                                Icons.church_outlined,
+                                'Church Settings',
+                                'Profile, Schedules, Approval',
+                                '/settings/church_admin'),
+                            const Divider(height: 1),
+                          ],
+                          _buildSettingsTile(
+                              context,
+                              Icons.groups_outlined,
+                              'Ministries',
+                              'Ministry teams and managers',
+                              '/ministries'),
+                          if (isFinance) ...[
+                            const Divider(height: 1),
+                            _buildSettingsTile(
+                                context,
+                                Icons.attach_money,
+                                'Finance',
+                                'Reports, Categories',
+                                '/settings/finance'),
+                          ],
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 24),
                   ],
-                ),
-              ),
-              const SizedBox(height: 24),
-            ],
+                );
+              },
+            ),
             _buildSectionHeader(context, 'Support'),
             AppCard(
               child: Column(

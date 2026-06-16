@@ -46,6 +46,13 @@ class UserCapabilities {
 
   // Factory to create from list of role IDs
   factory UserCapabilities.fromRoleIds(List<String> roleIds) {
+    return UserCapabilities.fromRoleIdsAndPrivileges(roleIds, const []);
+  }
+
+  factory UserCapabilities.fromRoleIdsAndPrivileges(
+    List<String> roleIds,
+    List<String> privilegeIds,
+  ) {
     // Start with all false
     bool createEvents = false;
     bool editEvents = false;
@@ -99,17 +106,15 @@ class UserCapabilities {
 
       if (_matches(role,
           ['assistant_pastor', 'church_admin', 'admin', 'administrator'])) {
-        assignPrayers = true;
         moderatePosts = true;
       }
 
       if (_matches(role, ['prayer_ministry_leader'])) {
-        assignPrayers = true;
-        viewSensitivePrayers = true;
+        viewAssignedCareCases = true;
       }
 
       if (_matches(role, ['intercessor', 'prayer_warrior', 'elder'])) {
-        viewSensitivePrayers = true;
+        viewAssignedCareCases = true;
       }
 
       if (_matches(role, [
@@ -117,13 +122,11 @@ class UserCapabilities {
         'deacon',
         'deaconess',
         'elder',
-        'admin',
-        'church_admin',
-        'pastor',
-        'senior_pastor',
-        'assistant_pastor',
-        'acting_pastor'
       ])) {
+        viewAssignedCareCases = true;
+      }
+
+      if (_matches(role, ['pastor', 'senior_pastor', 'acting_pastor'])) {
         manageCareCases = true;
         viewAssignedCareCases = true;
       }
@@ -158,11 +161,83 @@ class UserCapabilities {
         manageMediaUploads = true;
       }
 
-      // Add Ministry Leaders (can create events for own ministry - handled by app logic usually,
-      // but strictly speaking they have 'create event' power generally in this simple model,
-      // or we rely on the specific 'canCreateEvents' flag being true)
-      if (role.contains('_ministry_leader') || role.contains('_director')) {
-        createEvents = true;
+      // Ministry titles are intentionally separate from app access. The role
+      // editor can suggest privileges for leaders, but actual access comes
+      // from the explicit appPrivileges grant saved on the user profile.
+    }
+
+    for (final privilege in privilegeIds) {
+      switch (privilege.trim()) {
+        case 'approveMembers':
+          manageMembersBasic = true;
+          break;
+        case 'manageChurchSettings':
+          manageMembersBasic = true;
+          break;
+        case 'manageRoles':
+          manageRoles = true;
+          break;
+        case 'viewOperationalAnalytics':
+          approveHighImpact = true;
+          break;
+        case 'viewFinanceDashboard':
+          viewFinance = true;
+          break;
+        case 'manageFinances':
+          viewFinance = true;
+          manageFinance = true;
+          break;
+        case 'approveFinanceReports':
+          viewFinance = true;
+          manageFinance = true;
+          break;
+        case 'createAnnouncement':
+          publishAnnouncements = true;
+          break;
+        case 'sendPushNotification':
+          publishAnnouncements = true;
+          break;
+        case 'pinPost':
+          publishAnnouncements = true;
+          moderatePosts = true;
+          break;
+        case 'moderateCommunity':
+          moderatePosts = true;
+          break;
+        case 'createEvents':
+          createEvents = true;
+          editEvents = true;
+          break;
+        case 'manageSundaySchool':
+          createEvents = true;
+          editEvents = true;
+          break;
+        case 'manageLivestream':
+          manageMediaUploads = true;
+          break;
+        case 'manageWorship':
+          manageServiceChecklists = true;
+          break;
+        case 'managePrayerRequests':
+          viewAssignedCareCases = true;
+          break;
+        case 'assignCareRequests':
+          assignPrayers = true;
+          manageCareCases = true;
+          viewAssignedCareCases = true;
+          break;
+        case 'manualCheckIn':
+        case 'viewAttendanceInsights':
+          manageSchedules = true;
+          break;
+        case 'viewPriorityList':
+        case 'managePriorityList':
+          manageCareCases = true;
+          viewAssignedCareCases = true;
+          break;
+        case 'manageSchedule':
+          manageSchedules = true;
+          break;
       }
     }
 

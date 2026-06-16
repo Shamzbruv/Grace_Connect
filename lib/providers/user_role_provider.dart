@@ -1,9 +1,9 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/user_profile.dart';
+import '../services/attendance_service.dart';
 import '../services/notification_service.dart';
 
 class UserRoleProvider with ChangeNotifier {
@@ -111,6 +111,9 @@ class UserRoleProvider with ChangeNotifier {
       unawaited(NotificationService().syncSubscriptions(profile.churchId));
     }
     NotificationService().watchForegroundNotifications(profile.uid);
+    if (!kIsWeb && !AttendanceService().isMonitoring) {
+      unawaited(AttendanceService().initialize());
+    }
     notifyListeners();
   }
 

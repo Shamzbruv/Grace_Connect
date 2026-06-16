@@ -32,6 +32,22 @@ class RoleService {
     }
   }
 
+  Future<void> updatePrivileges(
+    String targetUid,
+    Set<String> privileges,
+    String churchId,
+  ) async {
+    try {
+      await _supabase.rpc('assign_member_privileges', params: {
+        'target_uid': targetUid,
+        'privilege_names': privileges.toList()..sort(),
+        'church_id': churchId,
+      });
+    } catch (e) {
+      throw Exception('Failed to update privileges: $e');
+    }
+  }
+
   // Stream of audit logs for the church
   Stream<List<Map<String, dynamic>>> getAuditLogs(String churchId) {
     return _supabase

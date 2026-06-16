@@ -47,6 +47,34 @@ class FamilyService {
         .toList();
   }
 
+  Future<List<FamilyRelationship>> visibleFamilyLinksForProfile({
+    required String profileUserId,
+  }) async {
+    if (profileUserId.isEmpty) return [];
+
+    dynamic rows;
+    try {
+      rows = await _supabase.rpc(
+        'get_visible_family_relationships',
+        params: {'profile_user_id': profileUserId},
+      );
+    } catch (error) {
+      debugPrint('Family visibility RPC unavailable, using fallback: $error');
+      rows = await _supabase
+          .from('family_relationships')
+          .select()
+          .eq('status', 'accepted')
+          .or('requester_id.eq.$profileUserId,related_user_id.eq.$profileUserId')
+          .order('requested_at', ascending: false)
+          .limit(20);
+    }
+
+    return (rows as List<dynamic>)
+        .map((row) => FamilyRelationship.fromMap(row as Map<String, dynamic>))
+        .where((relationship) => relationship.isAccepted)
+        .toList();
+  }
+
   Future<void> requestFamilyLink({
     required UserProfile requester,
     required FamilyMemberSummary relatedMember,

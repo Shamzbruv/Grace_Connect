@@ -102,6 +102,14 @@ class AdminDashboard extends StatelessWidget {
             onTap: () => Navigator.pushNamed(context, '/role_management'),
           ),
         if (userProfile.canManageRoles) const SizedBox(height: 12),
+        if (userProfile.canManageRoles)
+          ActionCard(
+            title: 'Ministries',
+            description: 'Create ministries and assign managers',
+            icon: Icons.groups_outlined,
+            onTap: () => Navigator.pushNamed(context, '/ministries'),
+          ),
+        if (userProfile.canManageRoles) const SizedBox(height: 12),
         if (userProfile.canViewFinance)
           ActionCard(
             title: 'Finance Overview',
@@ -125,11 +133,20 @@ class AdminDashboard extends StatelessWidget {
                   builder: (_) => const AdminStreamSettingsScreen())),
         ),
         const SizedBox(height: 12),
+        if (userProfile.capabilities.canManageSchedules)
+          ActionCard(
+            title: 'Service Schedules',
+            description: 'Create recurring services for attendance',
+            icon: Icons.event_available_outlined,
+            onTap: () => Navigator.pushNamed(context, '/schedule_management'),
+          ),
+        if (userProfile.capabilities.canManageSchedules)
+          const SizedBox(height: 12),
         ActionCard(
           title: 'Create Announcement',
-          description: 'Post updates to the church feed',
-          icon: Icons.post_add,
-          onTap: () => Navigator.pushNamed(context, '/community'),
+          description: 'Send church-wide updates',
+          icon: Icons.campaign_outlined,
+          onTap: () => Navigator.pushNamed(context, '/announcements'),
         ),
         const SizedBox(height: 12),
         ActionCard(

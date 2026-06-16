@@ -79,14 +79,17 @@ class _DonationsScreenState extends State<DonationsScreen> {
     }
   }
 
-  bool _canManageGiving(List<String> roles) {
+  bool _canManageGiving(UserRoleProvider roleProvider) {
+    final user = roleProvider.userProfile;
+    if (user?.capabilities.canManageFinance == true) return true;
+
     const allowed = {
       'pastor',
       'senior_pastor',
       'treasurer',
       'financial_secretary',
     };
-    return roles.map(_normalizeRole).any(allowed.contains);
+    return user?.roles.map(_normalizeRole).any(allowed.contains) == true;
   }
 
   String _normalizeRole(String role) {
@@ -102,8 +105,8 @@ class _DonationsScreenState extends State<DonationsScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final user = context.watch<UserRoleProvider>().userProfile;
-    final canManageGiving = _canManageGiving(user?.roles ?? const []);
+    final roleProvider = context.watch<UserRoleProvider>();
+    final canManageGiving = _canManageGiving(roleProvider);
 
     return Scaffold(
       appBar: AppBar(

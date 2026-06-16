@@ -3,8 +3,10 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../../models/prayer_request.dart';
+import '../../models/user_profile.dart';
 import '../../providers/user_role_provider.dart';
 import '../../services/prayer_service.dart';
+import '../../services/user_service.dart';
 import '../../widgets/ui/app_button.dart';
 import '../../widgets/ui/app_card.dart';
 import '../../widgets/ui/app_scaffold.dart';
@@ -88,11 +90,18 @@ class _PrayersScreenState extends State<PrayersScreen> {
   Widget build(BuildContext context) {
     final provider = context.watch<UserRoleProvider>();
     final user = provider.userProfile;
-    final canManagePrayers = user?.capabilities.canAssignPrayers == true ||
-        user?.capabilities.canViewSensitivePrayers == true;
+    final canAssignPrayers = user?.capabilities.canAssignPrayers == true;
+    final canViewAssignedPrayers =
+        user?.capabilities.canViewAssignedCareCases == true ||
+            user?.isPrayerWarrior == true;
 
-    if (canManagePrayers) {
-      return _PrayerAdminView(service: _service, churchId: user?.churchId);
+    if (canAssignPrayers || canViewAssignedPrayers) {
+      return _PrayerAdminView(
+        service: _service,
+        churchId: user?.churchId,
+        user: user,
+        canManageAssignments: canAssignPrayers,
+      );
     }
 
     return AppScaffold(
@@ -195,10 +204,14 @@ class _PrayerAdminView extends StatelessWidget {
   const _PrayerAdminView({
     required this.service,
     required this.churchId,
+    required this.user,
+    required this.canManageAssignments,
   });
 
   final PrayerService service;
   final String? churchId;
+  final UserProfile? user;
+  final bool canManageAssignments;
 
   @override
   Widget build(BuildContext context) {
@@ -210,10 +223,20 @@ class _PrayerAdminView extends StatelessWidget {
       );
     }
 
+    final effectiveUser = user;
+    if (effectiveUser == null) {
+      return const AppScaffold(
+        title: 'Prayer Requests',
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
     return AppScaffold(
-      title: 'Prayer Requests',
+      title: canManageAssignments ? 'Prayer Requests' : 'Assigned Prayers',
       body: StreamBuilder<List<PrayerRequest>>(
-        stream: service.getChurchRequests(effectiveChurchId),
+        stream: canManageAssignments
+            ? service.getChurchRequests(effectiveChurchId)
+            : service.getAssignedRequests(effectiveChurchId, effectiveUser.uid),
         builder: (context, snapshot) {
           if (snapshot.hasError) {
             return Center(
@@ -226,7 +249,13 @@ class _PrayerAdminView extends StatelessWidget {
 
           final requests = snapshot.data!;
           if (requests.isEmpty) {
-            return const Center(child: Text('No prayer requests yet.'));
+            return Center(
+              child: Text(
+                canManageAssignments
+                    ? 'No prayer requests yet.'
+                    : 'No prayer requests have been assigned to you yet.',
+              ),
+            );
           }
 
           return ListView.separated(
@@ -236,6 +265,7 @@ class _PrayerAdminView extends StatelessWidget {
             itemBuilder: (context, index) => _PrayerRequestCard(
               request: requests[index],
               showActions: true,
+              canManageAssignments: canManageAssignments,
             ),
           );
         },
@@ -248,10 +278,12 @@ class _PrayerRequestCard extends StatelessWidget {
   const _PrayerRequestCard({
     required this.request,
     required this.showActions,
+    this.canManageAssignments = false,
   });
 
   final PrayerRequest request;
   final bool showActions;
+  final bool canManageAssignments;
 
   @override
   Widget build(BuildContext context) {
@@ -304,8 +336,109 @@ class _PrayerRequestCard extends StatelessWidget {
               if (request.isAnonymous) const _StatusChip(label: 'Anonymous'),
             ],
           ),
+          if (canManageAssignments) ...[
+            const SizedBox(height: 14),
+            _PrayerAssignmentControl(request: request),
+          ] else if (request.assignedToHelperId != null) ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Icon(
+                  Icons.verified_user_outlined,
+                  size: 18,
+                  color: theme.colorScheme.primary,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'Assigned to you',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
+    );
+  }
+}
+
+class _PrayerAssignmentControl extends StatelessWidget {
+  const _PrayerAssignmentControl({required this.request});
+
+  final PrayerRequest request;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return StreamBuilder<List<UserProfile>>(
+      stream: UserService().getMembers(request.churchId),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return Text(
+            'Could not load members for assignment.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.error,
+            ),
+          );
+        }
+
+        final members = (snapshot.data ?? const <UserProfile>[]).toList()
+          ..sort((a, b) => a.fullName.compareTo(b.fullName));
+        final selectedValue =
+            members.any((member) => member.uid == request.assignedToHelperId)
+                ? request.assignedToHelperId!
+                : '';
+
+        return DropdownButtonFormField<String>(
+          value: selectedValue,
+          isExpanded: true,
+          decoration: InputDecoration(
+            labelText: 'Assigned helper',
+            prefixIcon: const Icon(Icons.support_agent_outlined),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+          ),
+          items: [
+            const DropdownMenuItem(
+              value: '',
+              child: Text('Unassigned'),
+            ),
+            ...members.map(
+              (member) => DropdownMenuItem(
+                value: member.uid,
+                child: Text(
+                  member.fullName.isEmpty ? member.email : member.fullName,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ),
+          ],
+          onChanged: snapshot.hasData
+              ? (value) async {
+                  final helperId =
+                      value == null || value.isEmpty ? null : value;
+                  if (helperId == request.assignedToHelperId) return;
+
+                  await PrayerService().assignHelper(request.id, helperId);
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        helperId == null
+                            ? 'Prayer helper removed'
+                            : 'Prayer helper assigned',
+                      ),
+                    ),
+                  );
+                }
+              : null,
+        );
+      },
     );
   }
 }
