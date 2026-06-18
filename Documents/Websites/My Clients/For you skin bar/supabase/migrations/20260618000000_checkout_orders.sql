@@ -18,12 +18,13 @@ create table orders (
   delivery_notes text,
 
   subtotal numeric(10,2) not null,
-  shipping numeric(10,2) default 0,
+  shipping_amount numeric(10,2) default 0,
+  shipping_status text default 'confirmed',
   total numeric(10,2) not null,
   currency text default 'JMD',
 
   payment_method text default 'WiPay',
-  payment_status text default 'pending',
+  payment_status text default 'pending confirmation',
   order_status text default 'received',
 
   notes text,

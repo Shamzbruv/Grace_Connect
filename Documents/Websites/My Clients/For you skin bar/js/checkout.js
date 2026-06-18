@@ -84,11 +84,11 @@ document.addEventListener('DOMContentLoaded', () => {
     
     if (method === 'Overseas') {
         shippingEl.innerText = 'To be confirmed';
+        totalEl.innerText = 'Pending confirmation';
     } else {
         shippingEl.innerText = shipping === 0 ? (method === 'Pickup' ? 'J$0' : 'Free') : 'J$' + shipping.toLocaleString();
+        totalEl.innerText = 'J$' + total.toLocaleString();
     }
-    
-    totalEl.innerText = 'J$' + total.toLocaleString();
   }
 
   function toggleCountryFields() {
