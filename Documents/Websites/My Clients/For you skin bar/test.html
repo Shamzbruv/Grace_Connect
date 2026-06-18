@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+<body>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script>
+    const SUPABASE_URL = 'https://xftnfbeembjrhezvzquu.supabase.co';
+    const SUPABASE_ANON_KEY = 'sb_publishable_G6Y_BilXMYBxKY99SeIARQ_rl_ZMsgt';
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    
+    supabase.from('products').select('*, categories(name), product_images(image_url)').eq('status', 'active').then(res => {
+      document.body.innerHTML = '<pre>' + JSON.stringify(res, null, 2) + '</pre>';
+    });
+  </script>
+</body>
+</html>

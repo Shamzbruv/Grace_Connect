@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Product Details | Foryou Skin Bar</title>
+  <meta name="description" content="Discover our natural, handmade Jamaican skincare products.">
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+  <link rel="stylesheet" href="css/styles.css">
+  <script src="https://cdn.tailwindcss.com?plugins=typography"></script>  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            stone: {
+              50: '#F8F5EF',
+              100: '#EBE3D5',
+              200: '#D1C5B5',
+              300: '#B8AFA4',
+              400: '#8A7D6E',
+              500: '#6B5D50',
+              600: '#5A4C3A',
+              700: '#3A2E27',
+              800: '#3A2E27',
+              900: '#2C211B',
+            },
+            amber: {
+              50: '#F8F5EF',
+              100: '#F3E6C7',
+              200: '#E1C77D',
+              300: '#C89B3C',
+              400: '#C89B3C',
+              500: '#C89B3C',
+              600: '#B0852F',
+              700: '#C89B3C',
+              800: '#B0852F',
+              900: '#5A6B53',
+            },
+            sage: {
+              50: '#DDE5D7',
+              100: '#C7D2C0',
+              200: '#AEBDA6',
+              300: '#93A389',
+              400: '#7F9077',
+              500: '#6E7F67',
+              600: '#5A6B53',
+              700: '#465640',
+              800: '#354232',
+              900: '#253025',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <link rel="icon" type="image/png" sizes="32x32" href="assets/brand/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="assets/brand/favicon-16.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="assets/brand/apple-touch-icon.png">
+  <link rel="stylesheet" href="css/brand-theme.css">
+</head>
+<body class="antialiased bg-[#F8F5EF] text-stone-800">
+
+  <!-- Announcement bar -->
+  <div class="bg-amber-900/90 text-white text-center py-2.5 text-sm font-medium tracking-wide">
+    🌿 Free Shipping on orders over J$10,000 &nbsp;|&nbsp; ✨ Handcrafted with Love in Jamaica
+  </div>
+
+  <!-- Sticky Nav -->
+  <nav class="glass-nav sticky top-0 z-50 px-6 md:px-12 py-4 flex flex-wrap items-center justify-between">
+    <div class="flex items-center gap-2">
+      <a href="index.html"><img src="assets/brand/logo.png" alt="Foryou Skin Bar Logo" class="h-20 md:h-24 w-auto object-contain"></a>
+    </div>
+    <div class="hidden md:flex items-center gap-7 text-sm font-medium text-white">
+      <a href="index.html" class="hover:text-amber-800 transition">Home</a>
+      <a href="shop.html" class="text-white transition">Shop</a>
+      <a href="about.html" class="hover:text-amber-800 transition">About</a>
+      <a href="blog.html" class="hover:text-amber-800 transition">Blog</a>
+      <a href="ingredients.html" class="hover:text-amber-800 transition">Ingredients</a>
+      <a href="quiz.html" class="hover:text-amber-800 transition">Skin Quiz</a>
+      <a href="faq.html" class="hover:text-amber-800 transition">FAQ</a>
+      <a href="contact.html" class="hover:text-amber-800 transition">Contact</a>
+    </div>
+    <div class="flex items-center gap-4">
+      <button id="cartIconBtn" class="relative">
+        <i class="fas fa-bag-shopping text-white text-xl"></i>
+        <span id="cartCount" class="absolute -top-2 -right-3 bg-amber-700 text-white text-[11px] w-5 h-5 rounded-full flex items-center justify-center" style="display:none;">0</span>
+      </button>
+      <button id="mobileMenuBtn" class="md:hidden text-2xl"><i class="fas fa-bars"></i></button>
+    </div>
+  </nav>
+
+  <main class="px-6 md:px-16 max-w-7xl mx-auto py-12">
+    <!-- Breadcrumb -->
+    <div class="mb-8 text-sm text-stone-500">
+      <a href="index.html" class="hover:text-amber-800">Home</a>
+      <span class="mx-2">›</span>
+      <a href="shop.html" class="hover:text-amber-800">Shop</a>
+      <span class="mx-2">›</span>
+      <span id="breadcrumbName" class="text-stone-800">Product</span>
+    </div>
+
+    <!-- Product Detail -->
+    <div class="grid md:grid-cols-2 gap-12" id="productDetails">
+      <div class="text-center py-20 text-stone-200">Loading product...</div>
+    </div>
+
+    <!-- You May Also Like -->
+    <section class="mt-20 pt-12 border-t border-stone-100">
+      <h3 class="serif-heading text-3xl mb-8">You May Also Like</h3>
+      <div id="relatedProducts" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-7">
+        <!-- Rendered via JS -->
+      </div>
+    </section>
+  </main>
+
+  <!-- Mobile Menu Drawer -->
+  <div id="mobileMenuDrawer" class="mobile-menu-drawer fixed top-0 left-0 w-72 sm:w-80 h-full bg-white shadow-2xl z-[100] flex flex-col p-6 text-stone-800">
+    <div class="flex justify-between items-center mb-8 pb-4 border-b border-stone-100">
+      <img src="assets/brand/logo.png" alt="Foryou Skin Bar Logo" class="h-14 w-auto object-contain">
+      <button id="closeMobileMenuBtn" class="text-stone-500 hover:text-amber-800 p-2"><i class="fas fa-times text-xl"></i></button>
+    </div>
+    <div class="flex flex-col gap-5 text-stone-700 font-medium">
+      <a href="index.html" class="text-lg hover:text-amber-800 transition flex items-center gap-3"><i class="fas fa-home w-5"></i>Home</a>
+      <a href="shop.html" class="text-lg text-amber-800 transition flex items-center gap-3"><i class="fas fa-bag-shopping w-5"></i>Shop</a>
+      <a href="about.html" class="text-lg hover:text-amber-800 transition flex items-center gap-3"><i class="fas fa-heart w-5"></i>About</a>
+      <a href="blog.html" class="text-lg hover:text-amber-800 transition flex items-center gap-3"><i class="fas fa-newspaper w-5"></i>Blog</a>
+      <a href="ingredients.html" class="text-lg hover:text-amber-800 transition flex items-center gap-3"><i class="fas fa-leaf w-5"></i>Ingredients</a>
+      <a href="quiz.html" class="text-lg hover:text-amber-800 transition flex items-center gap-3"><i class="fas fa-magic w-5"></i>Skin Quiz</a>
+      <a href="faq.html" class="text-lg hover:text-amber-800 transition flex items-center gap-3"><i class="fas fa-question-circle w-5"></i>FAQ</a>
+      <a href="contact.html" class="text-lg hover:text-amber-800 transition flex items-center gap-3"><i class="fas fa-envelope w-5"></i>Contact</a>
+    </div>
+    <div class="mt-auto pt-6 border-t border-stone-100">
+      <a href="https://wa.me/18763094374" target="_blank" class="flex items-center gap-2 text-green-700 font-medium"><i class="fab fa-whatsapp text-xl"></i>Chat on WhatsApp</a>
+    </div>
+  </div>
+
+  <!-- Cart Drawer -->
+  <div id="cartDrawer" class="cart-drawer fixed top-0 right-0 w-full max-w-md h-full bg-white shadow-2xl z-[100] p-6 flex flex-col text-stone-800">
+    <div class="flex justify-between items-center border-b border-stone-100 pb-4 mb-4">
+      <h3 class="font-bold text-xl">Your Cart</h3>
+      <button id="closeCartBtn" class="text-stone-400 hover:text-stone-800"><i class="fas fa-times text-lg"></i></button>
+    </div>
+    <div id="cartItemsList" class="flex-1 overflow-y-auto"></div>
+    <div id="cartFooter" class="border-t border-stone-100 pt-4 mt-4">
+      <div id="shippingProgress" class="mb-3"></div>
+      <div class="flex justify-between font-bold text-lg mb-4"><span>Total</span><span id="cartTotal">J$0</span></div>
+      <a href="checkout.html" class="btn-primary text-white w-full py-3 rounded-full block text-center font-semibold">Checkout →</a>
+    </div>
+  </div>
+  <div id="cartOverlay" class="fixed inset-0 bg-black/30 hidden z-[90]"></div>
+
+  <footer class="bg-stone-900 text-stone-300 px-6 py-12 mt-10">
+    <div class="max-w-7xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-8">
+      <div class="col-span-2 md:col-span-1">
+        <img src="assets/brand/logo.png" alt="Foryou Skin Bar" class="h-12 w-auto brightness-0 invert opacity-80 mb-3">
+        <p class="text-sm">Jamaican handmade skincare for real skin goals. Natural, cruelty-free, and crafted with love.</p>
+        <div class="flex gap-4 mt-4">
+          <a href="https://instagram.com/foryouskinbar" target="_blank" class="text-stone-400 hover:text-white transition"><i class="fab fa-instagram text-xl"></i></a>
+          <a href="https://facebook.com/foryouskinbar" target="_blank" class="text-stone-400 hover:text-white transition"><i class="fab fa-facebook text-xl"></i></a>
+          <a href="https://tiktok.com/@foryouskinbar" target="_blank" class="text-stone-400 hover:text-white transition"><i class="fab fa-tiktok text-xl"></i></a>
+          <a href="https://wa.me/18763094374" target="_blank" class="text-stone-400 hover:text-white transition"><i class="fab fa-whatsapp text-xl"></i></a>
+        </div>
+      </div>
+      <div>
+        <h4 class="font-bold text-white mb-3">Shop</h4>
+        <ul class="text-sm space-y-2">
+          <li><a href="shop.html" class="hover:text-white transition">All Products</a></li>
+          <li><a href="shop.html?concern=dark-spots" class="hover:text-white transition">Dark Spot Care</a></li>
+          <li><a href="shop.html?concern=acne" class="hover:text-white transition">Acne Care</a></li>
+          <li><a href="shop.html?category=Body+Care" class="hover:text-white transition">Body Care</a></li>
+          <li><a href="quiz.html" class="hover:text-white transition">Skin Quiz</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4 class="font-bold text-white mb-3">Support</h4>
+        <ul class="text-sm space-y-2">
+          <li><a href="faq.html" class="hover:text-white transition">FAQ</a></li>
+          <li><a href="shipping-returns.html" class="hover:text-white transition">Shipping & Returns</a></li>
+          <li><a href="contact.html" class="hover:text-white transition">Contact Us</a></li>
+          <li><a href="https://wa.me/18763094374" target="_blank" class="hover:text-white transition">WhatsApp Chat</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4 class="font-bold text-white mb-3">Join Glow Letters</h4>
+        <p class="text-sm mb-3">Get skincare tips, exclusive offers, and new product alerts.</p>
+        <form id="newsletterForm" class="flex">
+          <input type="email" placeholder="Your email" class="p-2.5 rounded-l-lg w-full text-stone-800 text-sm" required>
+          <button type="submit" class="bg-amber-700 hover:bg-amber-800 px-4 rounded-r-lg text-white transition">→</button>
+        </form>
+        <div class="flex gap-3 mt-4 text-xs text-stone-500">
+          <a href="privacy.html" class="hover:text-white transition">Privacy</a>
+          <span>·</span>
+          <a href="terms.html" class="hover:text-white transition">Terms</a>
+        </div>
+      </div>
+    </div>
+    <div class="max-w-7xl mx-auto mt-8 pt-6 border-t border-stone-700/50 text-center text-xs text-stone-500">
+      <p>© 2026 For You Skin Bar. All rights reserved. Handmade in Jamaica 🇯🇲</p>
+      <p class="mt-1">Results may vary. Always patch test before full use. Not intended to diagnose or treat any medical condition.</p>
+    </div>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/supabase-public-client.js?v=5"></script>
+  <script src="js/analytics.js"></script>
+  <script src="js/products.js?v=6"></script>
+  <script src="js/cart.js"></script>
+  <script src="js/main.js"></script>
+  <script>
+    (async function() {
+      await window.loadProductsData();
+
+      const escapeHTML = (value = '') => String(value).replace(/[&<>'"]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
+      const money = (value) => 'J$' + Number(value || 0).toLocaleString();
+      const absoluteImageUrl = (image) => !image ? '' : (image.startsWith('http') ? image : `${window.location.origin}/${image.replace(/^\//, '')}`);
+
+      function stripToText(value = '') {
+        const holder = document.createElement('div');
+        holder.innerHTML = String(value)
+          .replace(/<br\s*\/?>/gi, '\n')
+          .replace(/<\/p>/gi, '\n')
+          .replace(/<\/li>/gi, '\n')
+          .replace(/<li[^>]*>/gi, '• ');
+        return (holder.textContent || holder.innerText || '')
+          .replace(/\u00a0/g, ' ')
+          .replace(/[ \t]+/g, ' ')
+          .replace(/\n{2,}/g, '\n')
+          .trim();
+      }
+
+      function compactText(value = '', wordLimit = 36) {
+        const words = stripToText(value).split(/\s+/).filter(Boolean);
+        if (words.length <= wordLimit) return words.join(' ');
+        return words.slice(0, wordLimit).join(' ') + '…';
+      }
+
+      function scanItems(value = '', maxItems = 4) {
+        const text = stripToText(value);
+        if (!text) return [];
+        let parts = text
+          .split(/(?:\n|•|\*|;|\s+-\s+)/)
+          .map(item => item.replace(/^[-–—:,.\s]+|[-–—:,.\s]+$/g, '').trim())
+          .filter(item => item.length > 2);
+
+        if (parts.length <= 1) {
+          parts = text
+            .split(/(?<=[.!?])\s+/)
+            .map(item => item.trim())
+            .filter(item => item.length > 2);
+        }
+
+        const seen = new Set();
+        return parts
+          .map(item => item.length > 145 ? item.slice(0, 142).trim() + '…' : item)
+          .filter(item => {
+            const key = item.toLowerCase();
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          })
+          .slice(0, maxItems);
+      }
+
+      function detailCard(title, body, icon = 'fa-circle-info', maxItems = 4) {
+        const items = scanItems(body, maxItems);
+        if (!items.length) return '';
+        return `<div class="product-detail-card p-6">
+          <h3 class="text-amber-800 font-bold mb-4 flex items-center gap-2 text-lg"><i class="fas ${icon}"></i>${escapeHTML(title)}</h3>
+          <ul class="space-y-3 text-sm leading-relaxed">
+            ${items.map(item => `<li class="flex gap-3"><i class="fas fa-check text-amber-700 mt-1"></i><span>${escapeHTML(item)}</span></li>`).join('')}
+          </ul>
+        </div>`;
+      }
+
+      function paragraphCard(title, body, icon = 'fa-align-left', wordLimit = 42) {
+        const text = compactText(body, wordLimit);
+        if (!text) return '';
+        return `<div class="product-detail-card p-6 lg:col-span-2">
+          <h3 class="text-amber-800 font-bold mb-3 flex items-center gap-2 text-lg"><i class="fas ${icon}"></i>${escapeHTML(title)}</h3>
+          <p class="text-sm leading-relaxed">${escapeHTML(text)}</p>
+        </div>`;
+      }
+
+      function buildResultsBlock(product) {
+        const concernLabels = (product.skinConcern || []).map(c => c.replace(/-/g, ' ').replace(/\b\w/g, ch => ch.toUpperCase()));
+        const resultItems = [...concernLabels, ...scanItems(product.bestForHtml || product.bestFor || product.shortDescription || product.description, 5)]
+          .filter(Boolean)
+          .filter((item, index, arr) => arr.findIndex(other => other.toLowerCase() === item.toLowerCase()) === index)
+          .slice(0, 5);
+        if (!resultItems.length) return '';
+        return `<div class="product-detail-card p-6">
+          <h3 class="text-amber-800 font-bold mb-4 flex items-center gap-2 text-lg"><i class="fas fa-star"></i>Results</h3>
+          <div class="grid gap-3">
+            ${resultItems.map(item => `<div class="product-result-chip rounded-2xl px-4 py-3 text-sm font-medium flex items-center gap-3"><i class="fas fa-circle-check"></i><span>${escapeHTML(item)}</span></div>`).join('')}
+          </div>
+        </div>`;
+      }
+
+      function getSelectedVariant(product) {
+        const select = document.getElementById(`variant-${product.id}`);
+        if (!select || !select.options.length) return null;
+        const option = select.options[select.selectedIndex];
+        return {
+          name: option.getAttribute('data-name') || option.value,
+          price: Number(option.getAttribute('data-price') || product.price || 0),
+          compareAtPrice: option.getAttribute('data-compare-price'),
+          sku: option.getAttribute('data-sku') || '',
+          stock: option.getAttribute('data-stock'),
+          image: option.getAttribute('data-image') || ''
+        };
+      }
+
+      window.switchProductImage = function(imageUrl) {
+        const main = document.getElementById('mainProductImage');
+        if (main && imageUrl) main.src = imageUrl;
+      };
+
+      window.updateSelectedVariant = function(productId) {
+        const product = window.productsData.find(p => p.id === productId);
+        if (!product) return;
+        const selected = getSelectedVariant(product);
+        const price = selected ? selected.price : product.price;
+        const priceEl = document.getElementById('product-price');
+        const skuEl = document.getElementById('skuLine');
+        const stockEl = document.getElementById('stockLine');
+        const comparePriceEl = document.getElementById('compare-price');
+        if (priceEl) priceEl.innerText = money(price);
+        if (skuEl) skuEl.innerText = selected?.sku || product.sku || 'No SKU set';
+        if (stockEl) {
+          const stock = selected ? selected.stock : product.stockQuantity;
+          if (stock !== null && stock !== undefined && stock !== '') {
+            stockEl.innerText = Number(stock) > 0 ? `${stock} in stock` : (product.allowBackorder ? 'Available for backorder' : 'Out of stock');
+          }
+        }
+        if (comparePriceEl) {
+          const comparePrice = selected && selected.compareAtPrice ? Number(selected.compareAtPrice) : product.compareAtPrice;
+          if (comparePrice && comparePrice > price) {
+            comparePriceEl.innerText = money(comparePrice);
+            comparePriceEl.style.display = 'block';
+          } else {
+            comparePriceEl.style.display = 'none';
+          }
+        }
+        if (selected?.image) window.switchProductImage(selected.image);
+      };
+
+
+      window.changeProductQuantity = function(delta) {
+        const input = document.getElementById('productQuantity');
+        if (!input) return;
+        const current = Math.max(1, parseInt(input.value, 10) || 1);
+        input.value = Math.max(1, current + delta);
+      };
+
+      // Get product ID from URL
+      const urlParams = new URLSearchParams(window.location.search);
+      let productId = urlParams.get('id');
+      if (!productId && window.productsData && window.productsData.length > 0) productId = window.productsData[0].id;
+
+      const product = window.productsData.find(p => p.id === productId);
+
+      if (product) {
+        document.title = `${product.name} | Foryou Skin Bar`;
+        document.getElementById('breadcrumbName').innerText = product.name;
+
+        const variants = product.variants || [];
+        const firstVariant = variants.length ? variants[0] : null;
+        const displayPrice = firstVariant ? firstVariant.price : product.price;
+        const displaySku = firstVariant?.sku || product.sku || 'No SKU set';
+        const displayStock = firstVariant ? firstVariant.stock : product.stockQuantity;
+        const images = product.images && product.images.length ? product.images : [product.image];
+
+        const variantHtml = variants.length > 0 ? `
+          <div class="mb-6">
+            <label class="block text-sm font-bold text-stone-800 mb-2">Choose Option</label>
+            <select onchange="window.updateSelectedVariant('${product.id}')" class="w-full text-sm border border-stone-200 rounded-xl p-3 text-stone-800 bg-white outline-none focus:border-amber-800 transition-colors" id="variant-${product.id}">
+              ${variants.map(v => `<option value="${escapeHTML(v.name)}" data-name="${escapeHTML(v.name)}" data-price="${v.price}" data-compare-price="${v.compareAtPrice || ''}" data-sku="${escapeHTML(v.sku || '')}" data-stock="${v.stock ?? ''}" data-image="${escapeHTML(v.image || '')}">${escapeHTML(v.name)}</option>`).join('')}
+            </select>
+          </div>` : '';
+
+        const galleryHtml = images.length > 1 ? `
+          <div class="grid grid-cols-5 gap-2 mt-3">
+            ${images.map(img => `<button type="button" onclick="window.switchProductImage(this.dataset.image)" data-image="${escapeHTML(img)}" class="rounded-xl border border-stone-100 bg-white overflow-hidden hover:ring-2 hover:ring-amber-500 transition"><img src="${escapeHTML(img)}" alt="${escapeHTML(product.name)}" class="w-full h-20 object-cover"></button>`).join('')}
+          </div>` : '';
+
+        const customSectionsHtml = (product.infoSections || [])
+          .map(section => detailCard(section.title, section.body, 'fa-layer-group'))
+          .join('');
+
+        const detailsBlockHtml = [
+          paragraphCard('Product Description', product.shortDescription || product.description, 'fa-align-left', 48),
+          buildResultsBlock(product),
+          detailCard('Best For', product.bestForHtml || product.bestFor, 'fa-star', 4),
+          detailCard('Key Ingredients', product.ingredientsHtml || (product.ingredients || []).join('\n'), 'fa-leaf', 6),
+          detailCard('How To Use', product.howToUseHtml || product.howToUse, 'fa-hands-bubbles', 5),
+          detailCard('Return / Refund Policy', product.returnPolicyHtml, 'fa-rotate-left', 4),
+          customSectionsHtml
+        ].filter(Boolean).join('');
+
+        document.getElementById('productDetails').innerHTML = `
+          <div class="relative">
+            ${product.badge ? `<span class="absolute top-6 left-6 bg-amber-800 text-white text-sm font-bold px-4 py-1.5 rounded-full z-10 shadow-md">${escapeHTML(product.badge)}</span>` : ''}
+            <img id="mainProductImage" src="${escapeHTML(images[0])}" alt="${escapeHTML(product.name)}" class="rounded-3xl w-full shadow-lg object-cover max-h-[600px] bg-white border border-stone-100 text-stone-800">
+            ${galleryHtml}
+          </div>
+          <div class="product-buy-panel p-6 md:p-8 flex flex-col justify-center animate-fade-in">
+            <span class="text-xs bg-amber-100 px-3 py-1 rounded-full w-fit mb-4 font-bold uppercase tracking-wider text-amber-900">${escapeHTML(product.category)}</span>
+            <h1 class="serif-heading text-4xl md:text-5xl mb-4 text-stone-900 leading-tight">${escapeHTML(product.name)}</h1>
+            <div class="mb-5">
+              <p id="product-price" class="text-3xl font-bold text-amber-800">${money(displayPrice)}</p>
+              <p id="compare-price" class="text-stone-500 text-sm line-through mt-1" style="display: ${(firstVariant ? firstVariant.compareAtPrice : product.compareAtPrice) ? 'block' : 'none'}">${money(firstVariant ? firstVariant.compareAtPrice : product.compareAtPrice || 0)}</p>
+            </div>
+            ${variantHtml}
+            <div class="mb-5 max-w-xs">
+              <label class="block text-sm font-bold text-stone-800 mb-2">Quantity</label>
+              <div class="quantity-selector inline-flex items-center rounded-full border border-amber-100 bg-white overflow-hidden shadow-sm">
+                <button type="button" onclick="window.changeProductQuantity(-1)" class="w-11 h-11 flex items-center justify-center font-bold text-lg" aria-label="Decrease quantity">−</button>
+                <input id="productQuantity" type="number" min="1" value="1" class="w-16 h-11 text-center bg-white border-x border-amber-100 font-bold outline-none" aria-label="Product quantity">
+                <button type="button" onclick="window.changeProductQuantity(1)" class="w-11 h-11 flex items-center justify-center font-bold text-lg" aria-label="Increase quantity">+</button>
+              </div>
+            </div>
+            <button onclick="window.addToCartWithVariant('${product.id}')" class="btn-primary text-white py-4 px-8 rounded-full font-semibold text-lg w-full shadow-md hover:shadow-lg transition-all flex justify-center items-center gap-2 mb-6">
+              <i class="fas fa-cart-plus"></i> Add to Cart
+            </button>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+              ${displaySku ? `<div class="bg-amber-50 rounded-2xl p-3"><strong>SKU:</strong><br><span id="skuLine">${escapeHTML(displaySku)}</span></div>` : ''}
+              ${product.size ? `<div class="bg-amber-50 rounded-2xl p-3"><strong>Size:</strong><br>${escapeHTML(product.size)}</div>` : ''}
+              ${displayStock !== undefined && displayStock !== null ? `<div class="bg-amber-50 rounded-2xl p-3"><strong>Availability:</strong><br><span id="stockLine">${Number(displayStock) > 0 ? `${displayStock} in stock` : (product.allowBackorder ? 'Available for backorder' : 'Out of stock')}</span></div>` : ''}
+              ${product.routineStep ? `<div class="bg-amber-50 rounded-2xl p-3"><strong>Routine Step:</strong><br><span class="capitalize">${escapeHTML(product.routineStep)}</span></div>` : ''}
+            </div>
+
+            <div class="mt-7 pt-6 border-t border-amber-100">
+              <ul class="grid grid-cols-2 gap-4 text-sm">
+                <li class="flex items-center gap-2"><i class="fas fa-truck text-amber-700 w-5"></i> Ships in 1-3 days</li>
+                <li class="flex items-center gap-2"><i class="fas fa-leaf text-amber-700 w-5"></i> Handcrafted</li>
+                <li class="flex items-center gap-2"><i class="fas fa-shield-alt text-amber-700 w-5"></i> Natural & Cruelty-Free</li>
+                <li class="flex items-center gap-2"><i class="fas fa-heart text-amber-700 w-5"></i> Made with Love</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="md:col-span-2 mt-4">
+            <div class="mb-6 text-center md:text-left">
+              <p class="text-xs uppercase tracking-[0.24em] text-amber-800 font-bold mb-2">Quick Product Guide</p>
+              <h2 class="serif-heading text-3xl md:text-4xl text-stone-900">Description, results, and how to use</h2>
+            </div>
+            <div class="grid lg:grid-cols-2 gap-5">
+              ${detailsBlockHtml || paragraphCard('Product Description', product.description || product.shortDescription, 'fa-align-left', 60)}
+            </div>
+          </div>
+        `;
+
+        let related = [];
+        if (product.relatedProducts && product.relatedProducts.length > 0) {
+          related = product.relatedProducts.map(id => window.productsData.find(p => p.id === id)).filter(Boolean).slice(0, 4);
+        } else {
+          related = window.productsData.filter(p => p.category === product.category && p.id !== product.id).slice(0, 4);
+          if (related.length < 4) {
+            const others = window.productsData.filter(p => p.id !== product.id && !related.find(r => r.id === p.id));
+            related = [...related, ...others].slice(0, 4);
+          }
+        }
+
+        const relatedGrid = document.getElementById('relatedProducts');
+        if (related.length > 0) {
+          relatedGrid.innerHTML = related.map(p => `
+            <div class="product-card p-4 rounded-2xl bg-white border border-amber-50 text-stone-800">
+              <a href="product.html?id=${p.id}">
+                <img src="${escapeHTML(p.image)}" alt="${escapeHTML(p.name)}" class="rounded-xl w-full h-56 object-cover hover:scale-[1.05] transition-transform duration-500">
+              </a>
+              <div class="mt-4 flex flex-col h-[150px]">
+                <span class="text-[10px] uppercase font-bold tracking-wider text-amber-700">${escapeHTML(p.category)}</span>
+                <a href="product.html?id=${p.id}"><h3 class="font-bold mt-1 hover:text-amber-800 transition line-clamp-2">${escapeHTML(p.name)}</h3></a>
+                <p class="text-amber-800 font-bold text-lg mt-auto pb-3">${money(p.price)}</p>
+                <button onclick="window.cartManager && window.cartManager.addItem(window.productsData.find(pd=>pd.id=='${p.id}'))" class="bg-amber-800 text-white w-full py-2 rounded-xl text-sm font-bold hover:bg-amber-900 transition shadow-sm"><i class="fas fa-cart-plus mr-1"></i> Add</button>
+              </div>
+            </div>
+          `).join('');
+        }
+
+        const script = document.createElement('script');
+        script.type = 'application/ld+json';
+        script.text = JSON.stringify({
+          "@context": "https://schema.org/",
+          "@type": "Product",
+          "name": product.name,
+          "image": images.map(absoluteImageUrl),
+          "description": product.description || product.shortDescription,
+          "sku": product.sku || product.id.toString(),
+          "brand": product.brand ? { "@type": "Brand", "name": product.brand } : undefined,
+          "offers": {
+            "@type": "Offer",
+            "priceCurrency": "JMD",
+            "price": displayPrice,
+            "availability": displayStock === 0 && !product.allowBackorder ? "https://schema.org/OutOfStock" : "https://schema.org/InStock",
+            "url": window.location.href
+          }
+        });
+        document.head.appendChild(script);
+      } else {
+        document.getElementById('productDetails').innerHTML = '<div class="col-span-2 text-center py-20"><h2 class="serif-heading text-3xl mb-4">Product not found</h2><a href="shop.html" class="text-amber-800 underline">← Back to Shop</a></div>';
+      }
+    })();
+  </script>
+</body>
+</html>

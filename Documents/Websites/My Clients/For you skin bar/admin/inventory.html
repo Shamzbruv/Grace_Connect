@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Inventory - For You Skin Bar Admin</title>
+    
+  <link rel="icon" type="image/png" sizes="32x32" href="../assets/brand/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="../assets/brand/favicon-16.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="../assets/brand/apple-touch-icon.png">
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            stone: {
+              50: '#F8F5EF',
+              100: '#EBE3D5',
+              200: '#D1C5B5',
+              300: '#B8AFA4',
+              400: '#8A7D6E',
+              500: '#6B5D50',
+              600: '#5A4C3A',
+              700: '#3A2E27',
+              800: '#3A2E27',
+              900: '#2C211B',
+            },
+            amber: {
+              50: '#F8F5EF',
+              100: '#F3E6C7',
+              200: '#E1C77D',
+              300: '#C89B3C',
+              400: '#C89B3C',
+              500: '#C89B3C',
+              600: '#B0852F',
+              700: '#C89B3C',
+              800: '#B0852F',
+              900: '#8B5A2B',
+            }
+          },
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            serif: ['"Cormorant Garamond"', 'serif'],
+          }
+        }
+      }
+    }
+  </script>
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        body { font-family: system-ui, -apple-system, sans-serif; }
+    </style>
+</head>
+<body class="bg-stone-50 font-sans">
+    <div class="flex h-screen overflow-hidden"><div class="w-64 bg-stone-900 text-white py-5 flex flex-col shrink-0 h-screen sticky top-0">
+        <h2 class="px-5 text-2xl font-serif mb-8 text-amber-200">For You Admin</h2>
+        <a href="index.html" class="block text-stone-300 hover:bg-stone-800 hover:text-white px-5 py-3 transition">Dashboard</a>
+        <a href="orders.html" class="block text-stone-300 hover:bg-stone-800 hover:text-white px-5 py-3 transition">Orders</a>
+        <a href="products.html" class="block text-stone-300 hover:bg-stone-800 hover:text-white px-5 py-3 transition">Products</a>
+        <a href="inventory.html" class="block bg-stone-800 text-white border-l-4 border-amber-800 px-4 py-3">Inventory</a>
+        <a href="customers.html" class="block text-stone-300 hover:bg-stone-800 hover:text-white px-5 py-3 transition">Customers</a>
+        <a href="discounts.html" class="block text-stone-300 hover:bg-stone-800 hover:text-white px-5 py-3 transition">Discounts</a>
+        <a href="blog.html" class="block text-stone-300 hover:bg-stone-800 hover:text-white px-5 py-3 transition">Blog & Content</a>
+        <a href="settings.html" class="block text-stone-300 hover:bg-stone-800 hover:text-white px-5 py-3 transition">Settings</a>
+        <div class="mt-auto border-t border-stone-800 pt-3">
+            <a href="#" id="logoutBtn" class="block text-stone-300 hover:bg-stone-800 hover:text-white px-5 py-3 transition">Logout</a>
+        </div>
+    </div>
+    
+    <div class="flex-1 p-8 overflow-y-auto relative">
+        <div class="flex justify-between items-center mb-8">
+            <h1 class="text-2xl font-bold text-stone-800">Inventory Management</h1>
+            <div class="relative w-64">
+                <i class="fas fa-search absolute left-3 top-3 text-stone-400"></i>
+                <input type="text" id="searchInput" placeholder="Search products..." class="w-full pl-10 pr-4 py-2 border border-stone-200 rounded-lg text-sm focus:outline-none focus:border-amber-800 focus:ring-1 focus:ring-amber-800">
+            </div>
+        </div>
+
+        <!-- Inventory Table -->
+        <div class="bg-white rounded-xl shadow-sm border border-stone-200 overflow-hidden">
+            <table class="w-full text-left border-collapse">
+                <thead>
+                    <tr class="bg-stone-50 border-b border-stone-200 text-stone-600 font-semibold text-sm">
+                        <th class="p-4 w-16">Image</th>
+                        <th class="p-4">Product Name</th>
+                        <th class="p-4">Category</th>
+                        <th class="p-4">Price</th>
+                        <th class="p-4 w-48 text-right">Stock Quantity</th>
+                    </tr>
+                </thead>
+                <tbody id="inventoryTableBody" class="divide-y divide-stone-100 text-sm">
+                    <tr><td colspan="5" class="p-8 text-center text-stone-500">Loading inventory...</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Toast Notification -->
+        <div id="toast" class="fixed bottom-5 right-5 transform transition-all duration-300 translate-y-20 opacity-0 bg-stone-800 text-white px-6 py-4 rounded-xl shadow-2xl flex items-center gap-3 z-50">
+            <i id="toastIcon" class="fas fa-check-circle text-green-400 text-xl"></i>
+            <span id="toastMessage" class="font-medium">Stock Updated!</span>
+        </div>
+    </div>
+
+    <script type="module">
+        import { supabase, checkAuth } from './js/supabase-client.js';
+        
+        let allProducts = [];
+
+        async function init() {
+            await checkAuth();
+            loadInventory();
+        }
+
+        function showToast(message, type = 'success') {
+            const toast = document.getElementById('toast');
+            const toastMessage = document.getElementById('toastMessage');
+            const toastIcon = document.getElementById('toastIcon');
+            toastMessage.innerText = message;
+            if (type === 'error') {
+                toastIcon.className = 'fas fa-exclamation-circle text-red-400 text-xl';
+            } else {
+                toastIcon.className = 'fas fa-check-circle text-green-400 text-xl';
+            }
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            toast.classList.add('translate-y-0', 'opacity-100');
+            setTimeout(() => {
+                toast.classList.add('translate-y-20', 'opacity-0');
+                toast.classList.remove('translate-y-0', 'opacity-100');
+            }, 3000);
+        }
+        
+        async function loadInventory() {
+            const tbody = document.getElementById('inventoryTableBody');
+            const { data, error } = await supabase.from('products').select('*, categories(name), product_images(image_url, sort_order, is_primary), product_variants(*)').order('name', { ascending: true });
+            
+            if (error) {
+                tbody.innerHTML = `<tr><td colspan="5" class="p-4 text-red-500">Error: ${error.message}</td></tr>`;
+                return;
+            }
+            
+            allProducts = data;
+            renderInventory(allProducts);
+        }
+
+        function renderInventory(products) {
+            const tbody = document.getElementById('inventoryTableBody');
+            if (products.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="5" class="p-8 text-center text-stone-500">No products found.</td></tr>`;
+                return;
+            }
+            
+            tbody.innerHTML = products.map(p => {
+                const stock = p.stock_quantity || 0;
+                let stockColor = 'text-green-600 border-stone-300';
+                if (stock === 0) stockColor = 'text-red-600 border-red-300 bg-red-50';
+                else if (stock < 5) stockColor = 'text-amber-600 border-amber-300 bg-amber-50';
+
+                const images = (p.product_images || []).sort((a,b) => {
+                    if (a.is_primary && !b.is_primary) return -1;
+                    if (!a.is_primary && b.is_primary) return 1;
+                    return (a.sort_order || 0) - (b.sort_order || 0);
+                });
+                const imageUrl = images.length ? images[0].image_url : 'https://placehold.co/100x100/eeeeee/cccccc?text=No+Img';
+                const variantCount = (p.product_variants || []).length;
+                return `
+                <tr class="hover:bg-stone-50 transition">
+                    <td class="p-4"><img src="${imageUrl}" class="w-12 h-12 object-cover rounded shadow-sm"></td>
+                    <td class="p-4">
+                        <div class="font-bold text-stone-800">${p.name}</div>
+                        ${variantCount ? `<div class="text-xs text-sage-700 mt-1">${variantCount} variants managed in Products</div>` : ''}
+                    </td>
+                    <td class="p-4 text-stone-600 capitalize">${p.categories?.name || 'Uncategorized'}</td>
+                    <td class="p-4 text-stone-600">J$${Number(p.price_jmd || 0).toLocaleString()}</td>
+                    <td class="p-4 text-right">
+                        <input type="number" min="0" value="${stock}" 
+                               data-id="${p.id}" 
+                               class="stock-input w-24 p-2 text-right border rounded font-bold focus:outline-none focus:ring-2 focus:ring-amber-800 ${stockColor}"
+                               onchange="window.updateStock('${p.id}', this.value)">
+                    </td>
+                </tr>
+                `;
+            }).join('');
+        }
+
+        window.updateStock = async (id, newStock) => {
+            newStock = parseInt(newStock);
+            if (isNaN(newStock) || newStock < 0) return;
+            
+            const { error } = await supabase.from('products').update({ stock_quantity: newStock }).eq('id', id);
+            
+            if (error) {
+                showToast(error.message, 'error');
+            } else {
+                showToast('Stock updated successfully!');
+                // Update local array so search doesn't revert it
+                const p = allProducts.find(x => x.id === id);
+                if(p) p.stock_quantity = newStock;
+                
+                // Re-render to update colors
+                const query = document.getElementById('searchInput').value.toLowerCase();
+                const filtered = allProducts.filter(p => p.name.toLowerCase().includes(query));
+                renderInventory(filtered);
+            }
+        };
+
+        document.getElementById('searchInput').addEventListener('input', (e) => {
+            const query = e.target.value.toLowerCase();
+            const filtered = allProducts.filter(p => p.name.toLowerCase().includes(query));
+            renderInventory(filtered);
+        });
+        
+        document.getElementById('logoutBtn').addEventListener('click', async (e) => {
+            e.preventDefault();
+            await supabase.auth.signOut();
+            window.location.href = '/admin/login.html';
+        });
+        
+        init();
+    </script>
+</div>
+</body>
+</html>

@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Products - For You Skin Bar Admin</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="../assets/brand/favicon-32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="../assets/brand/favicon-16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="../assets/brand/apple-touch-icon.png">
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              stone: {50:'#F8F5EF',100:'#EBE3D5',200:'#D1C5B5',300:'#B8AFA4',400:'#8A7D6E',500:'#6B5D50',600:'#5A4C3A',700:'#3A2E27',800:'#3A2E27',900:'#2C211B'},
+              amber: {50:'#F8F5EF',100:'#F3E6C7',200:'#E1C77D',300:'#C89B3C',400:'#C89B3C',500:'#C89B3C',600:'#B0852F',700:'#C89B3C',800:'#B0852F',900:'#8B5A2B'},
+              sage: {50:'#DDE5D7',100:'#C7D2C0',200:'#AEBDA6',300:'#93A389',400:'#7F9077',500:'#6E7F67',600:'#5A6B53',700:'#465640',800:'#354232',900:'#253025'}
+            },
+            fontFamily: { sans:['Inter','sans-serif'], serif:['"Cormorant Garamond"','serif'] }
+          }
+        }
+      }
+    </script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+</head>
+<body class="bg-stone-50 font-sans">
+    <div class="flex h-screen overflow-hidden">
+        <aside class="w-64 bg-stone-900 text-white py-5 flex flex-col shrink-0 h-screen sticky top-0">
+            <h2 class="px-5 text-2xl font-serif mb-8 text-amber-200">For You Admin</h2>
+            <a href="index.html" class="block text-stone-300 hover:bg-stone-800 hover:text-white px-5 py-3 transition">Dashboard</a>
+            <a href="orders.html" class="block text-stone-300 hover:bg-stone-800 hover:text-white px-5 py-3 transition">Orders</a>
+            <a href="products.html" class="block bg-stone-800 text-white border-l-4 border-amber-800 px-4 py-3">Products</a>
+            <a href="inventory.html" class="block text-stone-300 hover:bg-stone-800 hover:text-white px-5 py-3 transition">Inventory</a>
+            <a href="customers.html" class="block text-stone-300 hover:bg-stone-800 hover:text-white px-5 py-3 transition">Customers</a>
+            <a href="discounts.html" class="block text-stone-300 hover:bg-stone-800 hover:text-white px-5 py-3 transition">Discounts</a>
+            <a href="blog.html" class="block text-stone-300 hover:bg-stone-800 hover:text-white px-5 py-3 transition">Blog & Content</a>
+            <a href="settings.html" class="block text-stone-300 hover:bg-stone-800 hover:text-white px-5 py-3 transition">Settings</a>
+            <div class="mt-auto border-t border-stone-800 pt-3">
+                <a href="#" id="logoutBtn" class="block text-stone-300 hover:bg-stone-800 hover:text-white px-5 py-3 transition">Logout</a>
+            </div>
+        </aside>
+
+        <main class="flex-1 overflow-y-auto p-8">
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+                <div>
+                    <h1 class="text-2xl font-bold text-stone-800">Products</h1>
+                    <p class="text-sm text-stone-500 mt-1">Manage product details, variants, images, discounts, inventory, and page sections from one place.</p>
+                </div>
+                <button class="bg-amber-800 text-white px-4 py-2 rounded-lg shadow hover:bg-amber-900 transition font-medium" onclick="window.openProductModal()"><i class="fas fa-plus mr-2"></i>Add Product</button>
+            </div>
+
+            <div class="bg-white rounded-xl shadow-sm border border-stone-200 overflow-hidden">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="bg-stone-50 text-gray-700 border-b border-gray-200">
+                            <th class="p-4 font-semibold text-sm">Image</th>
+                            <th class="p-4 font-semibold text-sm">Product</th>
+                            <th class="p-4 font-semibold text-sm">Category</th>
+                            <th class="p-4 font-semibold text-sm">Price</th>
+                            <th class="p-4 font-semibold text-sm">Variants</th>
+                            <th class="p-4 font-semibold text-sm">Stock</th>
+                            <th class="p-4 font-semibold text-sm">Status</th>
+                            <th class="p-4 font-semibold text-sm text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="productsTableBody" class="divide-y divide-gray-200">
+                        <tr><td colspan="8" class="p-4 text-stone-500">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </main>
+    </div>
+
+    <div id="productModal" class="fixed inset-0 bg-black/60 hidden z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[92vh] overflow-y-auto flex flex-col">
+            <div class="p-6 border-b border-gray-100 flex justify-between items-center sticky top-0 bg-white z-10">
+                <div>
+                    <h2 class="text-xl font-bold text-stone-800" id="modalTitle">Add Product</h2>
+                    <p class="text-xs text-stone-500 mt-1">Everything saved here feeds the Supabase-powered shop and product page.</p>
+                </div>
+                <button onclick="window.closeProductModal()" class="text-gray-400 hover:text-stone-800"><i class="fas fa-times text-xl"></i></button>
+            </div>
+
+            <form id="productForm" class="p-6 space-y-6">
+                <input type="hidden" id="productId" name="id">
+
+                <section class="rounded-xl border border-stone-200 p-5 bg-stone-50/70">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="font-bold text-stone-800"><i class="fas fa-box-open text-amber-800 mr-2"></i>Basic Product Setup</h3>
+                        <span class="text-xs text-stone-500">Required store information</span>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <div class="md:col-span-2">
+                            <label class="block text-sm font-bold text-gray-700 mb-1">Product Name *</label>
+                            <input type="text" id="productName" required class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:border-amber-800 focus:outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-bold text-gray-700 mb-1">Status</label>
+                            <select id="productStatus" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm">
+                                <option value="draft">Draft / Hidden</option>
+                                <option value="active">Active / Visible</option>
+                                <option value="archived">Archived</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-bold text-gray-700 mb-1">Badge / Ribbon</label>
+                            <input type="text" id="productBadge" placeholder="New, Best Seller, Sale" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:border-amber-800 focus:outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-bold text-gray-700 mb-1">Category</label>
+                            <input type="text" id="productCategoryName" list="categoryList" placeholder="Body Care" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:border-amber-800 focus:outline-none">
+                            <datalist id="categoryList"></datalist>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-bold text-gray-700 mb-1">SKU</label>
+                            <input type="text" id="productSku" placeholder="FY-SCRUB-001" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:border-amber-800 focus:outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-bold text-gray-700 mb-1">Brand</label>
+                            <input type="text" id="productBrand" placeholder="For You Skin Bar" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:border-amber-800 focus:outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-bold text-gray-700 mb-1">Size / Weight</label>
+                            <input type="text" id="productSize" placeholder="250g / 8oz" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:border-amber-800 focus:outline-none">
+                        </div>
+                    </div>
+                </section>
+
+                <section class="rounded-xl border border-amber-200 p-5 bg-amber-50/50">
+                    <h3 class="font-bold text-amber-900 mb-4"><i class="fas fa-tags mr-2"></i>Pricing & Product-Level Discount</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-5 gap-4">
+                        <div>
+                            <label class="block text-sm font-bold text-gray-700 mb-1">Price (JMD) *</label>
+                            <input type="number" min="0" step="0.01" id="productPrice" required class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:border-amber-800 focus:outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-bold text-gray-700 mb-1">Compare At Price</label>
+                            <input type="number" min="0" step="0.01" id="compareAtPrice" placeholder="Original price" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:border-amber-800 focus:outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-bold text-gray-700 mb-1">Cost Price</label>
+                            <input type="number" min="0" step="0.01" id="costPrice" placeholder="Internal only" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:border-amber-800 focus:outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-bold text-gray-700 mb-1">Discount Type</label>
+                            <select id="discountMode" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm">
+                                <option value="">None</option>
+                                <option value="PERCENT">Percent Off</option>
+                                <option value="AMOUNT">Fixed JMD Off</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-bold text-gray-700 mb-1">Discount Value</label>
+                            <input type="number" min="0" step="0.01" id="discountValue" placeholder="10 or 500" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:border-amber-800 focus:outline-none">
+                        </div>
+                    </div>
+                </section>
+
+                <section class="rounded-xl border border-blue-200 p-5 bg-blue-50/50">
+                    <h3 class="font-bold text-blue-900 mb-4"><i class="fas fa-warehouse mr-2"></i>Inventory Controls</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                        <label class="flex items-center gap-2 text-sm font-bold text-gray-700 cursor-pointer md:col-span-1">
+                            <input type="checkbox" id="trackInventory" class="w-4 h-4 accent-amber-800">
+                            Track inventory for this product
+                        </label>
+                        <div>
+                            <label class="block text-sm font-bold text-gray-700 mb-1">Stock Quantity</label>
+                            <input type="number" min="0" id="stockQuantity" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:border-amber-800 focus:outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-bold text-gray-700 mb-1">Low Stock Alert</label>
+                            <input type="number" min="0" id="lowStockThreshold" placeholder="5" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:border-amber-800 focus:outline-none">
+                        </div>
+                        <label class="flex items-center gap-2 text-sm font-bold text-gray-700 cursor-pointer">
+                            <input type="checkbox" id="allowBackorder" class="w-4 h-4 accent-amber-800">
+                            Allow backorder
+                        </label>
+                    </div>
+                </section>
+
+                <section class="rounded-xl border border-stone-200 p-5 bg-white">
+                    <h3 class="font-bold text-stone-800 mb-4"><i class="fas fa-align-left text-amber-800 mr-2"></i>Description</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-bold text-gray-700 mb-1">Short Description</label>
+                            <textarea id="shortDescription" rows="3" class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:border-amber-800 focus:outline-none" placeholder="Small summary for cards/search"></textarea>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-bold text-gray-700 mb-1">Full Product Description</label>
+                            <textarea id="productDescription" rows="3" class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:border-amber-800 focus:outline-none" placeholder="Full product description"></textarea>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="rounded-xl border border-green-200 p-5 bg-green-50/50">
+                    <h3 class="font-bold text-green-900 mb-4"><i class="fas fa-star mr-2"></i>Product Page Content Blocks</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block font-bold text-green-800 mb-1 text-sm">Benefits</label>
+                            <textarea id="productBenefits" rows="5" class="w-full px-4 py-3 rounded-lg border border-green-200 focus:outline-none focus:ring-2 focus:ring-green-400 text-sm bg-white" placeholder="Benefit 1\nBenefit 2"></textarea>
+                        </div>
+                        <div>
+                            <label class="block font-bold text-amber-800 mb-1 text-sm">Ingredients</label>
+                            <textarea id="productIngredients" rows="5" class="w-full px-4 py-3 rounded-lg border border-amber-200 focus:outline-none focus:ring-2 focus:ring-amber-400 text-sm bg-white" placeholder="Shea Butter, Coconut Oil, Vitamin E"></textarea>
+                        </div>
+                        <div>
+                            <label class="block font-bold text-blue-800 mb-1 text-sm">How To Use / Instructions</label>
+                            <textarea id="productHowToUse" rows="5" class="w-full px-4 py-3 rounded-lg border border-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-400 text-sm bg-white" placeholder="Apply to damp skin after showering..."></textarea>
+                        </div>
+                        <div>
+                            <label class="block font-bold text-stone-800 mb-1 text-sm">Return / Refund Policy</label>
+                            <textarea id="returnPolicy" rows="5" class="w-full px-4 py-3 rounded-lg border border-stone-200 focus:outline-none focus:ring-2 focus:ring-stone-400 text-sm bg-white" placeholder="Returns, exchanges, refund notes..."></textarea>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="rounded-xl border border-purple-200 p-5 bg-purple-50/50">
+                    <div class="flex items-center justify-between gap-4 mb-3">
+                        <div>
+                            <h3 class="font-bold text-purple-900"><i class="fas fa-layer-group mr-2"></i>Custom Product Page Sections</h3>
+                            <p class="text-xs text-purple-700 mt-1">Use this for extra CSV details such as warnings, policies, bundle contents, special instructions, or FAQs.</p>
+                        </div>
+                        <button type="button" onclick="window.addInfoSectionRow()" class="px-3 py-2 bg-purple-700 text-white rounded-lg text-sm hover:bg-purple-800"><i class="fas fa-plus mr-1"></i>Add Section</button>
+                    </div>
+                    <div id="infoSections" class="space-y-3"></div>
+                </section>
+
+                <section class="rounded-xl border border-sage-200 p-5 bg-sage-50/70">
+                    <div class="flex items-center justify-between gap-4 mb-3">
+                        <div>
+                            <h3 class="font-bold text-sage-900"><i class="fas fa-sliders-h mr-2"></i>Product Variants / Options</h3>
+                            <p class="text-xs text-sage-700 mt-1">Add sizes, scents, colors, bundles, or any option that changes price/SKU/stock.</p>
+                        </div>
+                        <button type="button" onclick="window.addVariantRow()" class="px-3 py-2 bg-sage-700 text-white rounded-lg text-sm hover:bg-sage-800"><i class="fas fa-plus mr-1"></i>Add Variant</button>
+                    </div>
+                    <div class="hidden md:grid grid-cols-12 gap-2 text-xs font-bold text-sage-900 mb-2 px-2">
+                        <span class="col-span-3">Variant Name</span><span class="col-span-2">Price</span><span class="col-span-2">SKU</span><span class="col-span-1">Stock</span><span class="col-span-3">Image URL</span><span class="col-span-1 text-right">Remove</span>
+                    </div>
+                    <div id="variantRows" class="space-y-2"></div>
+                </section>
+
+                <section class="rounded-xl border border-stone-200 p-5 bg-white">
+                    <h3 class="font-bold text-stone-800 mb-4"><i class="fas fa-images text-amber-800 mr-2"></i>Images</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-bold text-gray-700 mb-1">Upload Product Image</label>
+                            <input type="file" id="productImage" accept="image/*" class="w-full text-sm border border-stone-200 rounded-lg p-2 bg-stone-50">
+                            <p class="text-xs text-stone-500 mt-1">Uploaded image will be added to the image list.</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-bold text-gray-700 mb-1">Image URLs</label>
+                            <textarea id="imageUrls" rows="4" class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:border-amber-800 focus:outline-none" placeholder="One image URL per line. First image is primary."></textarea>
+                        </div>
+                    </div>
+                </section>
+
+                <div class="mt-6 pt-4 border-t border-gray-100 flex justify-end gap-3 sticky bottom-0 bg-white py-4">
+                    <button type="button" onclick="window.closeProductModal()" class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition font-medium">Cancel</button>
+                    <button type="submit" id="saveProductBtn" class="bg-amber-800 text-white px-6 py-2 rounded-lg hover:bg-amber-900 transition font-medium"><i class="fas fa-save mr-2"></i>Save Product</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="toast" class="fixed bottom-5 right-5 transform transition-all duration-300 translate-y-20 opacity-0 bg-stone-800 text-white px-6 py-4 rounded-xl shadow-2xl flex items-center gap-3 z-50">
+        <i id="toastIcon" class="fas fa-check-circle text-green-400 text-xl"></i>
+        <span id="toastMessage" class="font-medium">Success!</span>
+    </div>
+
+    <script type="module">
+        import { supabase, checkAuth, formatCurrency } from './js/supabase-client.js';
+
+        let currentProducts = [];
+        let categories = [];
+
+        const $ = (id) => document.getElementById(id);
+        const slugify = (value) => String(value || '').toLowerCase().trim().replace(/&/g, 'and').replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+        const numberOrNull = (value) => value === '' || value === null || value === undefined ? null : Number(value);
+        const intOrZero = (value) => Number.isFinite(parseInt(value, 10)) ? parseInt(value, 10) : 0;
+        const escapeHtml = (value = '') => String(value).replace(/[&<>'"]/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
+
+        window.closeProductModal = function() {
+            $('productModal').classList.add('hidden');
+        };
+
+        async function loadCategories() {
+            const { data, error } = await supabase.from('categories').select('id,name,slug').order('name', { ascending: true });
+            if (!error && data) categories = data;
+            $('categoryList').innerHTML = categories.map(c => `<option value="${escapeHtml(c.name)}"></option>`).join('');
+        }
+
+        async function ensureCategory(categoryName) {
+            const name = String(categoryName || '').trim();
+            if (!name) return null;
+            const existing = categories.find(c => c.name.toLowerCase() === name.toLowerCase());
+            if (existing) return existing.id;
+
+            let baseSlug = slugify(name);
+            let slug = baseSlug || `category-${Date.now()}`;
+            let attempt = 1;
+            while (true) {
+                const { data, error } = await supabase
+                    .from('categories')
+                    .insert({ name, slug, is_active: true })
+                    .select('id,name,slug')
+                    .single();
+                if (!error && data) {
+                    categories.push(data);
+                    await loadCategories();
+                    return data.id;
+                }
+                if (!String(error?.message || '').toLowerCase().includes('duplicate')) {
+                    throw new Error('Failed to create category: ' + error.message);
+                }
+                attempt += 1;
+                slug = `${baseSlug}-${attempt}`;
+            }
+        }
+
+        function clearDynamicRows() {
+            $('variantRows').innerHTML = '';
+            $('infoSections').innerHTML = '';
+        }
+
+        window.addVariantRow = function(variant = {}) {
+            const row = document.createElement('div');
+            row.className = 'variant-row grid grid-cols-1 md:grid-cols-12 gap-2 bg-white rounded-xl border border-sage-100 p-3 items-start';
+            row.innerHTML = `
+                <input type="text" data-field="name" value="${escapeHtml(variant.name || '')}" placeholder="8oz / Vanilla / Bundle" class="md:col-span-3 border border-stone-200 rounded-lg p-2 text-sm">
+                <input type="number" min="0" step="0.01" data-field="price_jmd" value="${variant.price_jmd ?? ''}" placeholder="Price" class="md:col-span-2 border border-stone-200 rounded-lg p-2 text-sm">
+                <input type="text" data-field="sku" value="${escapeHtml(variant.sku || '')}" placeholder="Variant SKU" class="md:col-span-2 border border-stone-200 rounded-lg p-2 text-sm">
+                <input type="number" min="0" data-field="stock_quantity" value="${variant.stock_quantity ?? 0}" placeholder="Stock" class="md:col-span-1 border border-stone-200 rounded-lg p-2 text-sm">
+                <input type="url" data-field="image_url" value="${escapeHtml(variant.image_url || '')}" placeholder="Optional image URL" class="md:col-span-3 border border-stone-200 rounded-lg p-2 text-sm">
+                <button type="button" class="md:col-span-1 text-red-500 hover:bg-red-50 rounded-lg p-2 text-sm" onclick="this.closest('.variant-row').remove()"><i class="fas fa-trash"></i></button>
+                <label class="md:col-span-12 flex items-center gap-2 text-xs text-sage-800 mt-1"><input type="checkbox" data-field="is_active" ${variant.is_active === false ? '' : 'checked'} class="accent-sage-700"> Show this variant on the product page</label>
+            `;
+            $('variantRows').appendChild(row);
+        };
+
+        window.addInfoSectionRow = function(section = {}) {
+            const row = document.createElement('div');
+            row.className = 'info-section-row grid grid-cols-1 md:grid-cols-12 gap-2 bg-white rounded-xl border border-purple-100 p-3 items-start';
+            row.innerHTML = `
+                <input type="text" data-field="title" value="${escapeHtml(section.title || '')}" placeholder="Section title e.g. Return Policy" class="md:col-span-3 border border-stone-200 rounded-lg p-2 text-sm">
+                <textarea data-field="body" rows="3" placeholder="Section content" class="md:col-span-8 border border-stone-200 rounded-lg p-2 text-sm">${escapeHtml(section.body || '')}</textarea>
+                <button type="button" class="md:col-span-1 text-red-500 hover:bg-red-50 rounded-lg p-2 text-sm" onclick="this.closest('.info-section-row').remove()"><i class="fas fa-trash"></i></button>
+                <label class="md:col-span-12 flex items-center gap-2 text-xs text-purple-800 mt-1"><input type="checkbox" data-field="is_visible" ${section.is_visible === false ? '' : 'checked'} class="accent-purple-700"> Show this section on the product page</label>
+            `;
+            $('infoSections').appendChild(row);
+        };
+
+        function collectVariants(productId) {
+            return Array.from(document.querySelectorAll('.variant-row')).map((row, index) => {
+                const get = (field) => row.querySelector(`[data-field="${field}"]`);
+                const name = get('name').value.trim();
+                if (!name) return null;
+                return {
+                    product_id: productId,
+                    name,
+                    sku: get('sku').value.trim() || null,
+                    price_jmd: numberOrNull(get('price_jmd').value),
+                    stock_quantity: intOrZero(get('stock_quantity').value),
+                    image_url: get('image_url').value.trim() || null,
+                    is_active: get('is_active').checked,
+                    sort_order: index
+                };
+            }).filter(Boolean);
+        }
+
+        function collectInfoSections(productId) {
+            return Array.from(document.querySelectorAll('.info-section-row')).map((row, index) => {
+                const title = row.querySelector('[data-field="title"]').value.trim();
+                const body = row.querySelector('[data-field="body"]').value.trim();
+                const is_visible = row.querySelector('[data-field="is_visible"]').checked;
+                if (!title && !body) return null;
+                return { product_id: productId, title: title || 'Product Details', body, is_visible, sort_order: index };
+            }).filter(Boolean);
+        }
+
+        window.openProductModal = async function(productId = null) {
+            const form = $('productForm');
+            form.reset();
+            clearDynamicRows();
+            $('productId').value = '';
+            $('productStatus').value = 'draft';
+            $('trackInventory').checked = true;
+            $('lowStockThreshold').value = 5;
+
+            if (productId) {
+                const p = currentProducts.find(prod => prod.id === productId);
+                if (p) {
+                    $('modalTitle').innerText = 'Edit Product';
+                    $('productId').value = p.id;
+                    $('productName').value = p.name || '';
+                    $('productStatus').value = p.status || 'draft';
+                    $('productBadge').value = p.badge || '';
+                    $('productCategoryName').value = p.categories?.name || '';
+                    $('productSku').value = p.sku || '';
+                    $('productBrand').value = p.brand || '';
+                    $('productSize').value = p.size || p.weight || '';
+                    $('productPrice').value = p.price_jmd ?? '';
+                    $('compareAtPrice').value = p.compare_at_price_jmd ?? '';
+                    $('costPrice').value = p.cost_price_jmd ?? '';
+                    $('discountMode').value = p.discount_mode || '';
+                    $('discountValue').value = p.discount_value ?? '';
+                    $('trackInventory').checked = p.track_inventory !== false;
+                    $('stockQuantity').value = p.stock_quantity ?? 0;
+                    $('lowStockThreshold').value = p.low_stock_threshold ?? 5;
+                    $('allowBackorder').checked = !!p.allow_backorder;
+                    $('shortDescription').value = p.short_description || '';
+                    $('productDescription').value = p.description || '';
+                    $('productBenefits').value = p.best_for_html || '';
+                    $('productIngredients').value = p.ingredients_html || '';
+                    $('productHowToUse').value = p.how_to_use_html || '';
+                    $('returnPolicy').value = p.return_policy_html || '';
+                    $('imageUrls').value = (p.product_images || []).sort((a,b)=>(a.sort_order||0)-(b.sort_order||0)).map(img => img.image_url).join('\n');
+                    (p.product_variants || []).sort((a,b)=>(a.sort_order||0)-(b.sort_order||0)).forEach(window.addVariantRow);
+                    (p.product_info_sections || []).sort((a,b)=>(a.sort_order||0)-(b.sort_order||0)).forEach(window.addInfoSectionRow);
+                }
+            } else {
+                $('modalTitle').innerText = 'Add Product';
+                window.addInfoSectionRow({ title: 'Return Policy', body: '', is_visible: false });
+            }
+            $('productModal').classList.remove('hidden');
+        };
+
+        $('productForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = $('saveProductBtn');
+            const originalText = btn.innerText;
+            btn.innerText = 'Saving...';
+            btn.disabled = true;
+
+            try {
+                const id = $('productId').value;
+                const name = $('productName').value.trim();
+                const category_id = await ensureCategory($('productCategoryName').value);
+
+                const productData = {
+                    name,
+                    category_id,
+                    sku: $('productSku').value.trim() || null,
+                    brand: $('productBrand').value.trim() || null,
+                    size: $('productSize').value.trim() || null,
+                    weight: $('productSize').value.trim() || null,
+                    price_jmd: numberOrNull($('productPrice').value) || 0,
+                    compare_at_price_jmd: numberOrNull($('compareAtPrice').value),
+                    cost_price_jmd: numberOrNull($('costPrice').value),
+                    discount_mode: $('discountMode').value || null,
+                    discount_value: numberOrNull($('discountValue').value),
+                    status: $('productStatus').value,
+                    badge: $('productBadge').value.trim() || null,
+                    short_description: $('shortDescription').value.trim() || null,
+                    description: $('productDescription').value.trim() || null,
+                    best_for_html: $('productBenefits').value.trim() || null,
+                    ingredients_html: $('productIngredients').value.trim() || null,
+                    how_to_use_html: $('productHowToUse').value.trim() || null,
+                    return_policy_html: $('returnPolicy').value.trim() || null,
+                    track_inventory: $('trackInventory').checked,
+                    stock_quantity: intOrZero($('stockQuantity').value),
+                    low_stock_threshold: intOrZero($('lowStockThreshold').value || 5),
+                    allow_backorder: $('allowBackorder').checked,
+                    type: 'physical'
+                };
+
+                if (!id) productData.slug = slugify(name) || `product-${Date.now()}`;
+
+                let savedProductId = id;
+                if (id) {
+                    const { error } = await supabase.from('products').update(productData).eq('id', id);
+                    if (error) throw new Error('Failed to update product: ' + error.message);
+                } else {
+                    const { data: newProd, error } = await supabase.from('products').insert(productData).select('id').single();
+                    if (error) throw new Error('Failed to create product: ' + error.message);
+                    savedProductId = newProd.id;
+                }
+
+                const imageUrls = $('imageUrls').value.split('\n').map(url => url.trim()).filter(Boolean);
+                const fileInput = $('productImage');
+                if (fileInput.files.length > 0) {
+                    const file = fileInput.files[0];
+                    const fileExt = file.name.split('.').pop();
+                    const fileName = `${Math.random().toString(36).slice(2)}_${Date.now()}.${fileExt}`;
+                    const { error: uploadError } = await supabase.storage.from('product-images').upload(fileName, file, { upsert: false });
+                    if (uploadError) throw new Error('Image upload failed: ' + uploadError.message);
+                    const { data: publicUrlData } = supabase.storage.from('product-images').getPublicUrl(fileName);
+                    imageUrls.push(publicUrlData.publicUrl);
+                }
+
+                await supabase.from('product_images').delete().eq('product_id', savedProductId);
+                if (imageUrls.length > 0) {
+                    const imageRows = imageUrls.map((image_url, index) => ({ product_id: savedProductId, image_url, is_primary: index === 0, sort_order: index }));
+                    const { error: imgError } = await supabase.from('product_images').insert(imageRows);
+                    if (imgError) throw new Error('Failed to save images: ' + imgError.message);
+                }
+
+                await supabase.from('product_variants').delete().eq('product_id', savedProductId);
+                const variantRows = collectVariants(savedProductId);
+                if (variantRows.length > 0) {
+                    const { error: variantError } = await supabase.from('product_variants').insert(variantRows);
+                    if (variantError) throw new Error('Failed to save variants: ' + variantError.message);
+                }
+
+                await supabase.from('product_info_sections').delete().eq('product_id', savedProductId);
+                const sectionRows = collectInfoSections(savedProductId);
+                if (sectionRows.length > 0) {
+                    const { error: sectionError } = await supabase.from('product_info_sections').insert(sectionRows);
+                    if (sectionError) throw new Error('Failed to save page sections: ' + sectionError.message);
+                }
+
+                showToast('Product saved successfully!', 'success');
+                closeProductModal();
+                await loadProducts();
+            } catch (err) {
+                showToast(err.message, 'error');
+            } finally {
+                btn.innerText = originalText;
+                btn.disabled = false;
+            }
+        });
+
+        function getStatusBadgeClass(status) {
+            if (status === 'active') return 'bg-green-100 text-green-800';
+            if (status === 'draft') return 'bg-yellow-100 text-yellow-800';
+            return 'bg-gray-100 text-stone-800';
+        }
+
+        async function loadProducts() {
+            await checkAuth();
+            await loadCategories();
+            const { data: products, error } = await supabase
+                .from('products')
+                .select('*, categories(id,name), product_images(id,image_url,sort_order,is_primary), product_variants(*), product_info_sections(*)')
+                .order('created_at', { ascending: false });
+
+            const tbody = $('productsTableBody');
+            if (error) {
+                tbody.innerHTML = `<tr><td colspan="8" class="p-4 text-red-500">Error: ${escapeHtml(error.message)}. Make sure the new product catalog migration has been run in Supabase.</td></tr>`;
+                return;
+            }
+
+            currentProducts = products || [];
+            if (currentProducts.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="8" class="p-4 text-stone-500 text-center">No products found.</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = currentProducts.map(p => {
+                const images = (p.product_images || []).sort((a,b)=>(a.sort_order||0)-(b.sort_order||0));
+                const img = images.length > 0 ? images[0].image_url : 'https://placehold.co/100x100/eeeeee/cccccc?text=No+Img';
+                const variantCount = (p.product_variants || []).length;
+                return `
+                <tr class="hover:bg-stone-50">
+                    <td class="p-4"><img src="${escapeHtml(img)}" class="w-12 h-12 object-cover rounded shadow-sm"></td>
+                    <td class="p-4">
+                        <div class="font-bold text-stone-800">${escapeHtml(p.name)}</div>
+                        <div class="text-xs text-stone-500">${p.sku ? 'SKU: ' + escapeHtml(p.sku) : 'No SKU set'}</div>
+                    </td>
+                    <td class="p-4 text-gray-600">${escapeHtml(p.categories?.name || 'Uncategorized')}</td>
+                    <td class="p-4 font-medium text-gray-600">${formatCurrency(p.price_jmd || 0)}</td>
+                    <td class="p-4 text-gray-600">${variantCount ? `<span class="px-2 py-1 rounded-full bg-sage-100 text-sage-800 text-xs font-bold">${variantCount}</span>` : '<span class="text-stone-400 text-xs">None</span>'}</td>
+                    <td class="p-4 text-gray-600">${p.track_inventory ? (p.stock_quantity ?? 0) : '∞'}</td>
+                    <td class="p-4"><span class="px-2.5 py-1 text-xs font-semibold rounded-full capitalize ${getStatusBadgeClass(p.status)}">${escapeHtml(p.status || 'draft')}</span></td>
+                    <td class="p-4 text-right"><button class="bg-amber-50 text-amber-900 hover:bg-amber-100 px-3 py-1.5 rounded text-sm font-medium transition" onclick="window.openProductModal('${p.id}')"><i class="fas fa-pen mr-1"></i>Edit</button></td>
+                </tr>`;
+            }).join('');
+        }
+
+        $('logoutBtn').addEventListener('click', async (e) => {
+            e.preventDefault();
+            await supabase.auth.signOut();
+            window.location.href = '/admin/login.html';
+        });
+
+        function showToast(message, type = 'success') {
+            const toast = $('toast');
+            const toastMessage = $('toastMessage');
+            const toastIcon = $('toastIcon');
+            toastMessage.innerText = message;
+            toastIcon.className = type === 'error' ? 'fas fa-exclamation-circle text-red-400 text-xl' : 'fas fa-check-circle text-green-400 text-xl';
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            toast.classList.add('translate-y-0', 'opacity-100');
+            setTimeout(() => {
+                toast.classList.add('translate-y-20', 'opacity-0');
+                toast.classList.remove('translate-y-0', 'opacity-100');
+            }, 4000);
+        }
+
+        loadProducts();
+    </script>
+</body>
+</html>

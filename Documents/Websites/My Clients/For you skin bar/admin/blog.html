@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blog & Content - For You Skin Bar Admin</title>
+    
+  <link rel="icon" type="image/png" sizes="32x32" href="../assets/brand/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="../assets/brand/favicon-16.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="../assets/brand/apple-touch-icon.png">
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            stone: {
+              50: '#F8F5EF',
+              100: '#EBE3D5',
+              200: '#D1C5B5',
+              300: '#B8AFA4',
+              400: '#8A7D6E',
+              500: '#6B5D50',
+              600: '#5A4C3A',
+              700: '#3A2E27',
+              800: '#3A2E27',
+              900: '#2C211B',
+            },
+            amber: {
+              50: '#F8F5EF',
+              100: '#F3E6C7',
+              200: '#E1C77D',
+              300: '#C89B3C',
+              400: '#C89B3C',
+              500: '#C89B3C',
+              600: '#B0852F',
+              700: '#C89B3C',
+              800: '#B0852F',
+              900: '#8B5A2B',
+            }
+          },
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            serif: ['"Cormorant Garamond"', 'serif'],
+          }
+        }
+      }
+    }
+  </script>
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        body { font-family: system-ui, -apple-system, sans-serif; }
+    </style>
+</head>
+<body class="bg-stone-50 font-sans">
+    <div class="flex h-screen overflow-hidden"><div class="w-64 bg-stone-900 text-white py-5 flex flex-col shrink-0 h-screen sticky top-0">
+        <h2 class="px-5 text-2xl font-serif mb-8 text-amber-200">For You Admin</h2>
+        <a href="index.html" class="block text-stone-300 hover:bg-stone-800 hover:text-white px-5 py-3 transition">Dashboard</a>
+        <a href="orders.html" class="block text-stone-300 hover:bg-stone-800 hover:text-white px-5 py-3 transition">Orders</a>
+        <a href="products.html" class="block text-stone-300 hover:bg-stone-800 hover:text-white px-5 py-3 transition">Products</a>
+        <a href="inventory.html" class="block text-stone-300 hover:bg-stone-800 hover:text-white px-5 py-3 transition">Inventory</a>
+        <a href="customers.html" class="block text-stone-300 hover:bg-stone-800 hover:text-white px-5 py-3 transition">Customers</a>
+        <a href="discounts.html" class="block text-stone-300 hover:bg-stone-800 hover:text-white px-5 py-3 transition">Discounts</a>
+        <a href="blog.html" class="block bg-stone-800 text-white border-l-4 border-amber-800 px-4 py-3">Blog & Content</a>
+        <a href="settings.html" class="block text-stone-300 hover:bg-stone-800 hover:text-white px-5 py-3 transition">Settings</a>
+        <div class="mt-auto border-t border-stone-800 pt-3">
+            <a href="#" id="logoutBtn" class="block text-stone-300 hover:bg-stone-800 hover:text-white px-5 py-3 transition">Logout</a>
+        </div>
+    </div>
+    
+    <div class="flex-1 p-8 overflow-y-auto relative">
+        <div class="flex justify-between items-center mb-8">
+            <h1 class="text-2xl font-bold text-stone-800">Blog & Content</h1>
+            <button onclick="window.openPostModal()" class="bg-amber-800 hover:bg-amber-900 text-white px-5 py-2.5 rounded-lg text-sm font-semibold transition shadow-sm flex items-center gap-2">
+                <i class="fas fa-plus"></i> New Post
+            </button>
+        </div>
+
+        <!-- Posts Table -->
+        <div class="bg-white rounded-xl shadow-sm border border-stone-200 overflow-hidden">
+            <table class="w-full text-left border-collapse">
+                <thead>
+                    <tr class="bg-stone-50 border-b border-stone-200 text-stone-600 font-semibold text-sm">
+                        <th class="p-4 w-16">Image</th>
+                        <th class="p-4">Title</th>
+                        <th class="p-4">Status</th>
+                        <th class="p-4">Date</th>
+                        <th class="p-4 w-24 text-right">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="postsTableBody" class="divide-y divide-stone-100 text-sm">
+                    <tr><td colspan="5" class="p-8 text-center text-stone-500">Loading posts...</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Post Modal -->
+        <div id="postModal" class="fixed inset-0 bg-stone-900/50 hidden flex items-center justify-center z-50 p-4">
+            <div class="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
+                <div class="px-6 py-4 border-b border-stone-100 flex justify-between items-center bg-stone-50">
+                    <h2 class="text-lg font-bold text-stone-800 font-serif" id="modalTitle">Add New Post</h2>
+                    <button onclick="document.getElementById('postModal').classList.add('hidden')" class="text-stone-400 hover:text-stone-600 transition">
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+                <div class="p-6 overflow-y-auto flex-1">
+                    <form id="postForm" class="space-y-6">
+                        <input type="hidden" id="postId" name="id">
+                        
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div class="col-span-2 md:col-span-1">
+                                <label class="block text-sm font-bold text-stone-700 mb-1">Title *</label>
+                                <input type="text" id="postTitle" name="title" required class="w-full border border-stone-300 rounded p-2 text-sm focus:border-amber-800 focus:outline-none focus:ring-1 focus:ring-amber-800">
+                            </div>
+                            <div class="col-span-2 md:col-span-1">
+                                <label class="block text-sm font-bold text-stone-700 mb-1">URL Slug *</label>
+                                <input type="text" id="postSlug" name="slug" required placeholder="my-awesome-post" class="w-full border border-stone-300 rounded p-2 text-sm focus:border-amber-800 focus:outline-none focus:ring-1 focus:ring-amber-800">
+                                <p class="text-xs text-stone-500 mt-1">e.g. how-to-clear-acne (No spaces)</p>
+                            </div>
+                            
+                            <div class="col-span-2">
+                                <label class="block text-sm font-bold text-stone-700 mb-1">Excerpt</label>
+                                <textarea id="postExcerpt" name="excerpt" rows="2" class="w-full border border-stone-300 rounded p-2 text-sm focus:border-amber-800 focus:outline-none" placeholder="Brief summary of the post"></textarea>
+                            </div>
+                            
+                            <div class="col-span-2">
+                                <label class="block text-sm font-bold text-stone-700 mb-1">Content</label>
+                                <!-- Quill Editor Container -->
+                                <div id="editor-container" class="bg-white h-64 border border-stone-300 rounded-b"></div>
+                                <!-- Hidden input to hold HTML content for form submission -->
+                                <textarea id="postContent" name="content" class="hidden"></textarea>
+                            </div>
+
+                            <div class="col-span-2 md:col-span-1">
+                                <label class="block text-sm font-bold text-stone-700 mb-1">Featured Image URL</label>
+                                <input type="url" id="postImage" name="featured_image_url" class="w-full border border-stone-300 rounded p-2 text-sm focus:border-amber-800 focus:outline-none">
+                            </div>
+                            
+                            <div class="col-span-2 md:col-span-1">
+                                <label class="block text-sm font-bold text-stone-700 mb-1">Status</label>
+                                <select id="postStatus" name="status" class="w-full border border-stone-300 rounded p-2 text-sm">
+                                    <option value="draft">Draft</option>
+                                    <option value="published">Published</option>
+                                </select>
+                            </div>
+
+                            <div class="col-span-2 bg-stone-50 p-4 rounded-lg border border-stone-200">
+                                <h3 class="font-bold text-stone-800 mb-3 text-sm"><i class="fas fa-search mr-2"></i>SEO Settings</h3>
+                                <div class="space-y-3">
+                                    <div>
+                                        <label class="block text-xs font-bold text-stone-700 mb-1">SEO Title</label>
+                                        <input type="text" id="postSeoTitle" name="seo_title" class="w-full border border-stone-300 rounded p-2 text-sm focus:border-amber-800 focus:outline-none">
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs font-bold text-stone-700 mb-1">SEO Description</label>
+                                        <textarea id="postSeoDesc" name="seo_description" rows="2" class="w-full border border-stone-300 rounded p-2 text-sm focus:border-amber-800 focus:outline-none"></textarea>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <div class="px-6 py-4 border-t border-stone-100 flex justify-end gap-3 bg-stone-50">
+                    <button type="button" onclick="document.getElementById('postModal').classList.add('hidden')" class="px-4 py-2 text-sm font-semibold text-stone-600 hover:text-stone-800">Cancel</button>
+                    <button type="button" id="savePostBtn" class="bg-amber-800 hover:bg-amber-900 text-white px-6 py-2 rounded-lg text-sm font-semibold shadow-sm transition">Save Post</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Toast Notification -->
+        <div id="toast" class="fixed bottom-5 right-5 transform transition-all duration-300 translate-y-20 opacity-0 bg-stone-800 text-white px-6 py-4 rounded-xl shadow-2xl flex items-center gap-3 z-50">
+            <i id="toastIcon" class="fas fa-check-circle text-green-400 text-xl"></i>
+            <span id="toastMessage" class="font-medium">Success!</span>
+        </div>
+    </div>
+
+    <!-- Quill JS dependencies -->
+    <link href="https://cdn.quilljs.com/1.3.7/quill.snow.css" rel="stylesheet">
+    <script src="https://cdn.quilljs.com/1.3.7/quill.min.js"></script>
+
+    <script type="module">
+        import { supabase, checkAuth } from './js/supabase-client.js';
+        
+        let currentPosts = [];
+        let quill;
+
+        async function init() {
+            await checkAuth();
+            
+            // Initialize Quill Editor
+            quill = new Quill('#editor-container', {
+                theme: 'snow',
+                placeholder: 'Write your article here...',
+                modules: {
+                    toolbar: [
+                        [{ 'header': [2, 3, false] }],
+                        ['bold', 'italic', 'underline'],
+                        [{ 'list': 'ordered'}, { 'list': 'bullet' }],
+                        ['link', 'clean']
+                    ]
+                }
+            });
+            
+            // Handle quill styles overriding tailwind's rounded borders on top
+            document.querySelector('.ql-toolbar').classList.add('rounded-t', 'border-stone-300');
+            document.querySelector('.ql-container').classList.add('rounded-b', 'border-stone-300');
+            
+            loadPosts();
+        }
+        
+        function showToast(message, type = 'success') {
+            const toast = document.getElementById('toast');
+            const toastMessage = document.getElementById('toastMessage');
+            const toastIcon = document.getElementById('toastIcon');
+            toastMessage.innerText = message;
+            if (type === 'error') {
+                toastIcon.className = 'fas fa-exclamation-circle text-red-400 text-xl';
+            } else {
+                toastIcon.className = 'fas fa-check-circle text-green-400 text-xl';
+            }
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            toast.classList.add('translate-y-0', 'opacity-100');
+            setTimeout(() => {
+                toast.classList.add('translate-y-20', 'opacity-0');
+                toast.classList.remove('translate-y-0', 'opacity-100');
+            }, 3000);
+        }
+
+        async function loadPosts() {
+            const tbody = document.getElementById('postsTableBody');
+            const { data, error } = await supabase.from('blog_posts').select('*').order('created_at', { ascending: false });
+            
+            if (error) {
+                tbody.innerHTML = `<tr><td colspan="5" class="p-4 text-red-500">Error: ${error.message}</td></tr>`;
+                return;
+            }
+            
+            currentPosts = data;
+            
+            if (data.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="5" class="p-8 text-center text-stone-500">No blog posts found. Create one!</td></tr>`;
+                return;
+            }
+            
+            tbody.innerHTML = data.map(p => {
+                const img = p.featured_image_url || 'https://placehold.co/100x100/eeeeee/cccccc?text=No+Img';
+                const statusClass = p.status === 'published' ? 'bg-green-100 text-green-800' : 'bg-stone-200 text-stone-800';
+                const date = new Date(p.created_at).toLocaleDateString();
+                return `
+                <tr class="hover:bg-stone-50 transition">
+                    <td class="p-4"><img src="${img}" class="w-12 h-12 object-cover rounded shadow-sm"></td>
+                    <td class="p-4 font-bold text-stone-800">${p.title}<br><span class="text-xs text-stone-400 font-normal">/${p.slug}</span></td>
+                    <td class="p-4"><span class="px-2 py-1 text-xs font-semibold rounded-full uppercase ${statusClass}">${p.status}</span></td>
+                    <td class="p-4 text-stone-600">${date}</td>
+                    <td class="p-4 text-right">
+                        <button class="text-amber-800 hover:text-amber-600 font-medium text-sm" onclick="window.openPostModal('${p.id}')">Edit</button>
+                        <button class="text-red-500 hover:text-red-700 font-medium text-sm ml-3" onclick="window.deletePost('${p.id}')"><i class="fas fa-trash"></i></button>
+                    </td>
+                </tr>
+                `;
+            }).join('');
+        }
+
+        window.openPostModal = (id = null) => {
+            const form = document.getElementById('postForm');
+            form.reset();
+            document.getElementById('postId').value = '';
+            document.getElementById('modalTitle').innerText = id ? 'Edit Post' : 'Add New Post';
+            
+            // Clear Quill editor
+            quill.root.innerHTML = '';
+
+            if (id) {
+                const post = currentPosts.find(p => p.id === id);
+                if (post) {
+                    document.getElementById('postId').value = post.id;
+                    document.getElementById('postTitle').value = post.title || '';
+                    document.getElementById('postSlug').value = post.slug || '';
+                    document.getElementById('postExcerpt').value = post.excerpt || '';
+                    document.getElementById('postContent').value = post.content || '';
+                    // Set Quill editor content
+                    quill.root.innerHTML = post.content || '';
+                    document.getElementById('postImage').value = post.featured_image_url || '';
+                    document.getElementById('postStatus').value = post.status || 'draft';
+                    document.getElementById('postSeoTitle').value = post.seo_title || '';
+                    document.getElementById('postSeoDesc').value = post.seo_description || '';
+                }
+            }
+            document.getElementById('postModal').classList.remove('hidden');
+        };
+
+        window.deletePost = async (id) => {
+            if(!confirm("Are you sure you want to delete this post?")) return;
+            const { error } = await supabase.from('blog_posts').delete().eq('id', id);
+            if (error) {
+                showToast(error.message, 'error');
+            } else {
+                showToast('Post deleted successfully');
+                loadPosts();
+            }
+        };
+
+        document.getElementById('savePostBtn').addEventListener('click', async () => {
+            const form = document.getElementById('postForm');
+            
+            // Sync Quill data to hidden input
+            const quillContent = quill.root.innerHTML;
+            document.getElementById('postContent').value = quillContent === '<p><br></p>' ? '' : quillContent;
+            
+            if(!form.checkValidity()) {
+                form.reportValidity();
+                return;
+            }
+
+            const btn = document.getElementById('savePostBtn');
+            btn.innerText = 'Saving...';
+            btn.disabled = true;
+
+            const id = document.getElementById('postId').value;
+            const payload = {
+                title: document.getElementById('postTitle').value,
+                slug: document.getElementById('postSlug').value.toLowerCase().replace(/[^a-z0-9-]/g, '-'),
+                excerpt: document.getElementById('postExcerpt').value,
+                content: document.getElementById('postContent').value,
+                featured_image_url: document.getElementById('postImage').value,
+                status: document.getElementById('postStatus').value,
+                seo_title: document.getElementById('postSeoTitle').value,
+                seo_description: document.getElementById('postSeoDesc').value,
+            };
+
+            try {
+                if (id) {
+                    const { error } = await supabase.from('blog_posts').update(payload).eq('id', id);
+                    if (error) throw error;
+                    showToast('Post updated successfully!');
+                } else {
+                    const { error } = await supabase.from('blog_posts').insert(payload);
+                    if (error) throw error;
+                    showToast('Post created successfully!');
+                }
+                document.getElementById('postModal').classList.add('hidden');
+                loadPosts();
+            } catch (err) {
+                showToast(err.message, 'error');
+            } finally {
+                btn.innerText = 'Save Post';
+                btn.disabled = false;
+            }
+        });
+        
+        document.getElementById('logoutBtn').addEventListener('click', async (e) => {
+            e.preventDefault();
+            await supabase.auth.signOut();
+            window.location.href = '/admin/login.html';
+        });
+        
+        init();
+    </script>
+</div>
+</body>
+</html>

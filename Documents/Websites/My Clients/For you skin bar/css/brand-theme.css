@@ -1,0 +1,473 @@
+/* ==========================================================
+   For You Skin Bar — Client-Corrected Brand Theme
+   Main experience: Soft Ivory (#F8F5EF)
+   Action color: Golden Glow (#C89B3C)
+   Supporting color: Deep Sage (#6E7F67) for banners/feature strips
+   Text/contrast: Rich Cocoa (#3A2E27)
+   ========================================================== */
+:root {
+  --brand-soft-ivory: #F8F5EF;
+  --brand-ivory-deep: #EFE7D9;
+  --brand-paper: #FFFDF8;
+  --brand-deep-sage: #6E7F67;
+  --brand-sage-dark: #5A6B53;
+  --brand-sage-darker: #465640;
+  --brand-sage-soft: #DDE5D7;
+  --brand-golden-glow: #C89B3C;
+  --brand-golden-hover: #B0852F;
+  --brand-gold-soft: rgba(200, 155, 60, 0.16);
+  --brand-rich-cocoa: #3A2E27;
+  --brand-cocoa-soft: #5A4C3A;
+
+  --bg-color: var(--brand-soft-ivory) !important;
+  --bg-secondary: var(--brand-paper) !important;
+  --bg-warm: var(--brand-soft-ivory) !important;
+  --text-primary: var(--brand-rich-cocoa) !important;
+  --text-secondary: var(--brand-cocoa-soft) !important;
+  --accent-light: var(--brand-gold-soft) !important;
+  --accent-base: var(--brand-golden-glow) !important;
+  --accent-dark: var(--brand-golden-glow) !important;
+  --accent-hover: var(--brand-golden-hover) !important;
+  --amber-100: rgba(200, 155, 60, 0.15) !important;
+  --border-light: rgba(58, 46, 39, 0.10) !important;
+  --border-medium: rgba(200, 155, 60, 0.38) !important;
+  --shadow-hover: 0 24px 45px -16px rgba(58, 46, 39, 0.24) !important;
+}
+
+html,
+body,
+body.antialiased,
+body.bg-\[\#6E7F67\],
+body.bg-stone-50 {
+  background: var(--brand-soft-ivory) !important;
+  color: var(--brand-rich-cocoa) !important;
+}
+
+main {
+  background:
+    radial-gradient(circle at 6% 0%, rgba(200, 155, 60, 0.08) 0, transparent 26%),
+    radial-gradient(circle at 96% 20%, rgba(110, 127, 103, 0.11) 0, transparent 30%),
+    var(--brand-soft-ivory) !important;
+  color: var(--brand-rich-cocoa) !important;
+}
+
+/* Navigation stays clean and ivory-led. */
+.glass-nav,
+nav.glass-nav {
+  background: rgba(248, 245, 239, 0.96) !important;
+  border-bottom: 1px solid rgba(200, 155, 60, 0.30) !important;
+  box-shadow: 0 10px 28px rgba(58, 46, 39, 0.08) !important;
+}
+.glass-nav a,
+.glass-nav .text-white,
+.glass-nav .text-stone-700,
+.glass-nav .fa-bag-shopping,
+#mobileMenuBtn,
+#mobileMenuBtn i {
+  color: var(--brand-rich-cocoa) !important;
+}
+.glass-nav a:hover,
+.glass-nav a.text-amber-800,
+.glass-nav a.hover\:text-amber-800:hover {
+  color: var(--brand-golden-hover) !important;
+}
+
+/* Announcement and support banners use sage, not the full page. */
+body > .bg-amber-900\/90:first-child,
+.bg-amber-900\/90,
+.brand-sage-panel,
+.trust-bar,
+.bg-gradient-to-br.from-\[\#6E7F67\],
+.bg-gradient-to-r.from-\[\#465640\],
+section.bg-gradient-to-r.from-amber-800,
+section.bg-gradient-to-r.from-amber-900,
+section.bg-gradient-to-r {
+  background: linear-gradient(135deg, var(--brand-sage-darker) 0%, var(--brand-deep-sage) 65%, var(--brand-sage-dark) 100%) !important;
+  color: var(--brand-soft-ivory) !important;
+  border-color: rgba(200, 155, 60, 0.45) !important;
+}
+
+.brand-sage-panel h1,
+.brand-sage-panel h2,
+.brand-sage-panel h3,
+.brand-sage-panel p,
+.trust-bar,
+.trust-bar span,
+.trust-bar i,
+.bg-gradient-to-br.from-\[\#6E7F67\] h1,
+.bg-gradient-to-br.from-\[\#6E7F67\] h2,
+.bg-gradient-to-br.from-\[\#6E7F67\] p,
+.bg-gradient-to-br.from-\[\#6E7F67\] .text-white,
+section.bg-gradient-to-r h2,
+section.bg-gradient-to-r p,
+section.bg-gradient-to-r .text-white {
+  color: var(--brand-soft-ivory) !important;
+}
+
+/* Home welcome hero: product-photo background with readable overlay. */
+.home-hero {
+  min-height: 78vh;
+  background-image:
+    linear-gradient(90deg, rgba(58, 46, 39, 0.82) 0%, rgba(58, 46, 39, 0.54) 46%, rgba(58, 46, 39, 0.18) 100%),
+    url('../assets/products/gift_set.png') !important;
+  background-size: cover !important;
+  background-position: center right !important;
+  background-repeat: no-repeat !important;
+  color: var(--brand-soft-ivory) !important;
+}
+.home-hero h1,
+.home-hero h2,
+.home-hero h3,
+.home-hero p,
+.home-hero .text-white,
+.home-hero .serif-heading {
+  color: var(--brand-soft-ivory) !important;
+}
+.home-hero .hero-eyebrow {
+  background: rgba(248, 245, 239, 0.14) !important;
+  border: 1px solid rgba(248, 245, 239, 0.32) !important;
+  color: var(--brand-soft-ivory) !important;
+}
+.home-hero .hero-soft-card {
+  background: rgba(248, 245, 239, 0.13) !important;
+  color: var(--brand-soft-ivory) !important;
+  border: 1px solid rgba(248, 245, 239, 0.24) !important;
+  backdrop-filter: blur(10px);
+}
+.home-hero .hero-soft-card i { color: var(--brand-golden-glow) !important; }
+
+@media (max-width: 768px) {
+  .home-hero {
+    min-height: 76vh;
+    background-image:
+      linear-gradient(180deg, rgba(58, 46, 39, 0.82) 0%, rgba(58, 46, 39, 0.56) 58%, rgba(58, 46, 39, 0.32) 100%),
+      url('../assets/products/gift_set.png') !important;
+    background-position: center !important;
+  }
+}
+
+/* Standard page text should be cocoa on ivory, unless it is inside a sage/hero/footer context. */
+main > section:not(.home-hero):not(.brand-sage-panel):not(.trust-bar):not(.bg-gradient-to-r):not(.bg-gradient-to-br) h1,
+main > section:not(.home-hero):not(.brand-sage-panel):not(.trust-bar):not(.bg-gradient-to-r):not(.bg-gradient-to-br) h2,
+main > section:not(.home-hero):not(.brand-sage-panel):not(.trust-bar):not(.bg-gradient-to-r):not(.bg-gradient-to-br) h3,
+main > section:not(.home-hero):not(.brand-sage-panel):not(.trust-bar):not(.bg-gradient-to-r):not(.bg-gradient-to-br) h4,
+main > section:not(.home-hero):not(.brand-sage-panel):not(.trust-bar):not(.bg-gradient-to-r):not(.bg-gradient-to-br) .serif-heading,
+main > section:not(.home-hero):not(.brand-sage-panel):not(.trust-bar):not(.bg-gradient-to-r):not(.bg-gradient-to-br) .text-white,
+main > section:not(.home-hero):not(.brand-sage-panel):not(.trust-bar):not(.bg-gradient-to-r):not(.bg-gradient-to-br) .text-stone-200,
+main > section:not(.home-hero):not(.brand-sage-panel):not(.trust-bar):not(.bg-gradient-to-r):not(.bg-gradient-to-br) .text-stone-300,
+main > section:not(.home-hero):not(.brand-sage-panel):not(.trust-bar):not(.bg-gradient-to-r):not(.bg-gradient-to-br) .text-stone-400,
+main > section:not(.home-hero):not(.brand-sage-panel):not(.trust-bar):not(.bg-gradient-to-r):not(.bg-gradient-to-br) .text-stone-500,
+main > section:not(.home-hero):not(.brand-sage-panel):not(.trust-bar):not(.bg-gradient-to-r):not(.bg-gradient-to-br) .text-stone-600,
+main > section:not(.home-hero):not(.brand-sage-panel):not(.trust-bar):not(.bg-gradient-to-r):not(.bg-gradient-to-br) .text-stone-700,
+main > section:not(.home-hero):not(.brand-sage-panel):not(.trust-bar):not(.bg-gradient-to-r):not(.bg-gradient-to-br) .text-stone-800,
+main > section:not(.home-hero):not(.brand-sage-panel):not(.trust-bar):not(.bg-gradient-to-r):not(.bg-gradient-to-br) .text-stone-900 {
+  color: var(--brand-rich-cocoa) !important;
+}
+main p,
+main li,
+main .text-stone-500,
+main .text-stone-600,
+main .text-stone-700 {
+  color: var(--brand-cocoa-soft) !important;
+}
+.home-hero p,
+.home-hero li,
+.brand-sage-panel p,
+.trust-bar p,
+.bg-gradient-to-br.from-\[\#6E7F67\] p,
+section.bg-gradient-to-r p {
+  color: var(--brand-soft-ivory) !important;
+}
+
+/* Cards and drawers should sit on the ivory experience neatly. */
+.bg-white,
+.product-card,
+.trust-item,
+.value-card,
+.ingredient-card,
+.ingredient-card-about,
+.faq-item,
+.reward-card,
+.blog-card,
+#mobileMenuDrawer,
+#cartDrawer,
+.form-input,
+.form-select,
+.form-textarea,
+div.bg-white\/50,
+div.bg-white\/60,
+div.bg-white\/70,
+div.bg-white\/80,
+div.bg-white\/90 {
+  background-color: var(--brand-paper) !important;
+  color: var(--brand-rich-cocoa) !important;
+  border-color: rgba(200, 155, 60, 0.28) !important;
+}
+.product-card,
+.trust-item,
+.value-card,
+.ingredient-card,
+.ingredient-card-about,
+.faq-item,
+.reward-card,
+.blog-card,
+main .bg-white,
+#mobileMenuDrawer,
+#cartDrawer {
+  box-shadow: 0 16px 35px rgba(58, 46, 39, 0.10) !important;
+}
+
+main .bg-white h1,
+main .bg-white h2,
+main .bg-white h3,
+main .bg-white h4,
+main .bg-white .serif-heading,
+.product-card h1,
+.product-card h2,
+.product-card h3,
+.product-card p,
+.trust-item,
+.trust-item span,
+.faq-item,
+.faq-item h3,
+.faq-item p,
+.ingredient-card h3,
+.ingredient-card p,
+.ingredient-card-about h3,
+.ingredient-card-about p,
+.reward-card h3,
+.reward-card p,
+.blog-card h3,
+.blog-card p,
+#mobileMenuDrawer,
+#mobileMenuDrawer a,
+#cartDrawer,
+#cartDrawer h3,
+#cartDrawer p {
+  color: var(--brand-rich-cocoa) !important;
+}
+
+main .bg-white .text-stone-400,
+main .bg-white .text-stone-500,
+main .bg-white .text-stone-600,
+main .bg-white .text-stone-700,
+main .bg-white .text-stone-800,
+.product-card .text-stone-400,
+.product-card .text-stone-500,
+.product-card .text-stone-600,
+.product-card .text-stone-700,
+.product-card .text-stone-800,
+.blog-card .text-stone-400,
+.blog-card .text-stone-500,
+.blog-card .text-stone-600,
+.blog-card .text-stone-700,
+.blog-card .text-stone-800,
+.faq-item .text-stone-400,
+.faq-item .text-stone-500,
+.faq-item .text-stone-600,
+.faq-item .text-stone-700,
+.faq-item .text-stone-800,
+#cartDrawer .text-stone-400,
+#cartDrawer .text-stone-500,
+#cartDrawer .text-stone-600,
+#cartDrawer .text-stone-700,
+#cartDrawer .text-stone-800 {
+  color: var(--brand-cocoa-soft) !important;
+}
+
+/* Buttons: gold is the only primary action color. */
+.btn-primary,
+.bg-amber-700,
+.bg-amber-800,
+.bg-amber-900,
+.filter-btn.active,
+a.bg-amber-800,
+button.bg-amber-800,
+a.bg-amber-700,
+button.bg-amber-700 {
+  background: var(--brand-golden-glow) !important;
+  color: #fff !important;
+  border-color: var(--brand-golden-glow) !important;
+}
+.btn-primary:hover,
+.bg-amber-700:hover,
+.bg-amber-800:hover,
+a.bg-amber-800:hover,
+button.bg-amber-800:hover,
+a.bg-amber-700:hover,
+button.bg-amber-700:hover {
+  background: var(--brand-golden-hover) !important;
+  color: #fff !important;
+}
+.text-amber-500,
+.text-amber-600,
+.text-amber-700,
+.text-amber-800,
+.text-amber-900,
+.hover\:text-amber-800:hover,
+.faq-question i,
+.article-content a,
+.filter-label:hover,
+.badge i,
+.fa-star,
+.fa-gift,
+.fa-leaf,
+.fa-spa,
+.fa-sun,
+.fa-droplet,
+.fa-magic,
+.fa-question-circle {
+  color: var(--brand-golden-glow) !important;
+}
+.bg-amber-50,
+.bg-amber-100,
+.bg-amber-200\/30,
+.hover\:bg-amber-50:hover,
+.hover\:bg-amber-100:hover,
+.quiz-option.selected {
+  background-color: rgba(200, 155, 60, 0.14) !important;
+  color: var(--brand-rich-cocoa) !important;
+}
+.border-amber-50,
+.border-amber-100,
+.border-amber-200,
+.border-amber-700,
+.border-amber-800,
+.border-amber-900,
+.border-amber-900\/5,
+.border-stone-100,
+.border-stone-200,
+.border-stone-300 {
+  border-color: rgba(200, 155, 60, 0.32) !important;
+}
+
+/* Product detail scan layout. */
+.product-buy-panel {
+  background: rgba(255, 253, 248, 0.92) !important;
+  color: var(--brand-rich-cocoa) !important;
+  border: 1px solid rgba(200, 155, 60, 0.30) !important;
+  border-radius: 28px;
+  box-shadow: 0 18px 40px rgba(58, 46, 39, 0.10);
+}
+.product-buy-panel h1,
+.product-buy-panel p,
+.product-buy-panel span,
+.product-buy-panel label,
+.product-buy-panel .text-white,
+.product-buy-panel .text-stone-200,
+.product-buy-panel .text-stone-500,
+.product-buy-panel .text-stone-700,
+.product-buy-panel .text-stone-800 {
+  color: var(--brand-rich-cocoa) !important;
+}
+.product-buy-panel #product-price,
+.product-detail-card h3,
+.product-result-chip i {
+  color: var(--brand-golden-glow) !important;
+}
+.product-detail-card {
+  background: var(--brand-paper) !important;
+  border: 1px solid rgba(200, 155, 60, 0.28) !important;
+  border-radius: 24px;
+  color: var(--brand-rich-cocoa) !important;
+  box-shadow: 0 16px 35px rgba(58, 46, 39, 0.08);
+}
+.product-detail-card p,
+.product-detail-card li,
+.product-detail-card div,
+.product-detail-card span {
+  color: var(--brand-cocoa-soft) !important;
+}
+.product-result-chip {
+  background: rgba(200, 155, 60, 0.12) !important;
+  border: 1px solid rgba(200, 155, 60, 0.25) !important;
+  color: var(--brand-rich-cocoa) !important;
+}
+.quantity-selector button {
+  background: rgba(200, 155, 60, 0.14) !important;
+  color: var(--brand-rich-cocoa) !important;
+}
+.quantity-selector input {
+  color: var(--brand-rich-cocoa) !important;
+}
+
+/* Forms/focus. */
+.form-input:focus,
+.form-select:focus,
+.form-textarea:focus,
+.quiz-option:hover,
+.quiz-option.selected,
+.filter-radio:checked + .filter-label,
+.ingredient-card.active {
+  border-color: var(--brand-golden-glow) !important;
+  box-shadow: 0 0 0 3px rgba(200, 155, 60, 0.18) !important;
+}
+.ingredient-card.active,
+.article-content blockquote {
+  background: rgba(200, 155, 60, 0.12) !important;
+  border-left-color: var(--brand-golden-glow) !important;
+}
+.filter-btn:not(.active),
+.filter-label {
+  background-color: var(--brand-paper) !important;
+  color: var(--brand-rich-cocoa) !important;
+  border-color: rgba(200, 155, 60, 0.32) !important;
+}
+.badge-bestseller,
+.badge-new,
+.badge-digital,
+.badge {
+  background: rgba(200, 155, 60, 0.14) !important;
+  color: var(--brand-rich-cocoa) !important;
+  border: 1px solid rgba(200, 155, 60, 0.32) !important;
+}
+
+/* Mobile/cart readability. */
+#mobileMenuDrawer a:hover,
+#closeMobileMenuBtn:hover,
+#cartDrawer a:not(.btn-primary),
+#cartDrawer button:hover {
+  color: var(--brand-golden-glow) !important;
+}
+
+/* Footer keeps depth and contrast. */
+footer,
+.footer,
+body > footer {
+  background: #2d3025 !important;
+  color: var(--brand-soft-ivory) !important;
+  border-top: 2px solid var(--brand-golden-glow) !important;
+}
+footer h1,
+footer h2,
+footer h3,
+footer h4,
+footer p,
+footer a,
+footer span,
+footer li {
+  color: var(--brand-soft-ivory) !important;
+}
+footer a:hover,
+footer .text-amber-800,
+footer .text-amber-700 {
+  color: var(--brand-golden-glow) !important;
+}
+
+/* Utilities for new edits. */
+.brand-sage-bg { background: var(--brand-deep-sage) !important; color: var(--brand-soft-ivory) !important; }
+.brand-gold-bg { background: var(--brand-golden-glow) !important; color: #fff !important; }
+.brand-gold-text { color: var(--brand-golden-glow) !important; }
+.brand-ivory-card { background: var(--brand-paper) !important; color: var(--brand-rich-cocoa) !important; }
+
+/* Keep the home trust strip as a sage banner instead of separate ivory cards. */
+.trust-bar .trust-item {
+  background: transparent !important;
+  color: var(--brand-soft-ivory) !important;
+  border-color: rgba(200, 155, 60, 0.28) !important;
+  box-shadow: none !important;
+}
+.trust-bar .trust-item span,
+.trust-bar .trust-item i {
+  color: var(--brand-soft-ivory) !important;
+}

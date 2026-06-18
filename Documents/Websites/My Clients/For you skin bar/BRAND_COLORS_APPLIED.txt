@@ -1,0 +1,14 @@
+CLIENT-CORRECTED BRAND COLORS APPLIED
+
+Updated based on the client's latest direction:
+- Soft Ivory (#F8F5EF) is now the main website background.
+- Golden Glow (#C89B3C) is used for primary buttons, highlights, and action states.
+- Deep Sage (#6E7F67) is now used as a supporting color for banners, hero/page headers, trust strips, and selected accent sections only.
+- Rich Cocoa (#3A2E27) is used for strong readable text contrast.
+
+Additional client-requested layout changes:
+- Home welcome section now uses a product photo as the background with overlaid text.
+- Product page purchase controls are moved higher under the product name.
+- Quantity selector is above the Add to Cart button.
+- Variant/option dropdowns no longer show prices beside option names.
+- Product descriptions are rendered in shorter, scannable cards with headings, results, ingredients, and how-to-use sections.

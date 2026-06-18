@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - For You Skin Bar Admin</title>
+    
+  <link rel="icon" type="image/png" sizes="32x32" href="../assets/brand/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="../assets/brand/favicon-16.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="../assets/brand/apple-touch-icon.png">
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            stone: {
+              50: '#F8F5EF',
+              100: '#EBE3D5',
+              200: '#D1C5B5',
+              300: '#B8AFA4',
+              400: '#8A7D6E',
+              500: '#6B5D50',
+              600: '#5A4C3A',
+              700: '#3A2E27',
+              800: '#3A2E27',
+              900: '#2C211B',
+            },
+            amber: {
+              50: '#F8F5EF',
+              100: '#F3E6C7',
+              200: '#E1C77D',
+              300: '#C89B3C',
+              400: '#C89B3C',
+              500: '#C89B3C',
+              600: '#B0852F',
+              700: '#C89B3C',
+              800: '#B0852F',
+              900: '#8B5A2B',
+            }
+          },
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            serif: ['"Cormorant Garamond"', 'serif'],
+          }
+        }
+      }
+    }
+  </script>
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        body { font-family: system-ui, -apple-system, sans-serif; }
+    </style>
+</head>
+<body class="bg-stone-50 font-sans">
+    <div class="flex h-screen overflow-hidden"><div class="w-64 bg-stone-900 text-white py-5 flex flex-col shrink-0 h-screen sticky top-0">
+        <h2 class="px-5 text-2xl font-serif mb-8 text-amber-200">For You Admin</h2>
+        <a href="index.html" class="block bg-stone-800 text-white border-l-4 border-amber-800 px-4 py-3">Dashboard</a>
+        <a href="orders.html" class="block text-stone-300 hover:bg-stone-800 hover:text-white px-5 py-3 transition">Orders</a>
+        <a href="products.html" class="block text-stone-300 hover:bg-stone-800 hover:text-white px-5 py-3 transition">Products</a>
+        <a href="inventory.html" class="block text-stone-300 hover:bg-stone-800 hover:text-white px-5 py-3 transition">Inventory</a>
+        <a href="customers.html" class="block text-stone-300 hover:bg-stone-800 hover:text-white px-5 py-3 transition">Customers</a>
+        <a href="discounts.html" class="block text-stone-300 hover:bg-stone-800 hover:text-white px-5 py-3 transition">Discounts</a>
+        <a href="blog.html" class="block text-stone-300 hover:bg-stone-800 hover:text-white px-5 py-3 transition">Blog & Content</a>
+        <a href="settings.html" class="block text-stone-300 hover:bg-stone-800 hover:text-white px-5 py-3 transition">Settings</a>
+        <div class="mt-auto border-t border-stone-800 pt-3">
+            <a href="#" id="logoutBtn" class="block text-stone-300 hover:bg-stone-800 hover:text-white px-5 py-3 transition">Logout</a>
+        </div>
+    </div>
+    
+    <div class="flex-1 p-8 overflow-y-auto">
+        <div class="flex justify-between items-center mb-8">
+            <h1 class="text-2xl font-bold text-stone-800">Dashboard Overview</h1>
+        </div>
+        
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                <h3 class="text-stone-500 font-medium text-sm mb-2">Total Sales (Paid)</h3>
+                <div class="text-3xl font-bold text-gray-900" id="totalSales">...</div>
+            </div>
+            <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                <h3 class="text-stone-500 font-medium text-sm mb-2">Pending Orders</h3>
+                <div class="text-3xl font-bold text-amber-800" id="pendingOrders">...</div>
+            </div>
+            <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                <h3 class="text-stone-500 font-medium text-sm mb-2">Active Products</h3>
+                <div class="text-3xl font-bold text-gray-900" id="activeProducts">...</div>
+            </div>
+        </div>
+    </div>
+    
+    <script type="module">
+        import { supabase, checkAuth, formatCurrency } from './js/supabase-client.js';
+        
+        async function loadDashboard() {
+            await checkAuth();
+            
+            try {
+                // Pending orders count
+                const { count: pendingCount, error: pendingErr } = await supabase
+                    .from('orders')
+                    .select('*', { count: 'exact', head: true })
+                    .eq('status', 'pending');
+                    
+                if (!pendingErr) document.getElementById('pendingOrders').textContent = pendingCount;
+                
+                // Active products count
+                const { count: productsCount, error: prodErr } = await supabase
+                    .from('products')
+                    .select('*', { count: 'exact', head: true })
+                    .eq('status', 'active');
+                    
+                if (!prodErr) document.getElementById('activeProducts').textContent = productsCount;
+                
+                // Total Sales (completed/paid)
+                const { data: sales, error: salesErr } = await supabase
+                    .from('orders')
+                    .select('grand_total_jmd')
+                    .eq('payment_status', 'paid');
+                    
+                if (!salesErr) {
+                    const total = sales.reduce((sum, order) => sum + order.grand_total_jmd, 0);
+                    document.getElementById('totalSales').textContent = formatCurrency(total);
+                }
+                
+            } catch (e) {
+                console.error("Dashboard error:", e);
+            }
+        }
+        
+        document.getElementById('logoutBtn').addEventListener('click', async (e) => {
+            e.preventDefault();
+            await supabase.auth.signOut();
+            window.location.href = '/admin/login.html';
+        });
+        
+        loadDashboard();
+    </script>
+</div>
+</body>
+</html>
