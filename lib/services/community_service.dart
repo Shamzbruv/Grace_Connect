@@ -29,29 +29,49 @@ class CommunityService {
     }
   }
 
-  Future<List<CommunityStory>> fetchActiveStories(String churchId) async {
+  Future<List<CommunityStory>> fetchActiveStories(
+    String churchId, {
+    List<String>? churchIds,
+    bool includeShared = false,
+  }) async {
     final data = await _supabase
         .from(_storiesTable)
         .select()
-        .eq('church_id', churchId)
         .order('created_at', ascending: false)
         .limit(100);
 
-    return _normalizeStories(data);
+    return _normalizeStories(
+      data,
+      viewerChurchId: churchId,
+      churchIds: churchIds,
+      includeShared: includeShared,
+    );
   }
 
-  Stream<List<CommunityStory>> getActiveStories(String churchId) async* {
+  Stream<List<CommunityStory>> getActiveStories(
+    String churchId, {
+    List<String>? churchIds,
+    bool includeShared = false,
+  }) async* {
     var lastKnown = <CommunityStory>[];
 
     try {
-      lastKnown = await fetchActiveStories(churchId);
+      lastKnown = await fetchActiveStories(
+        churchId,
+        churchIds: churchIds,
+        includeShared: includeShared,
+      );
       yield lastKnown;
     } catch (error) {
       debugPrint('Could not load statuses before realtime: $error');
     }
 
     try {
-      await for (final stories in _activeStoriesRealtime(churchId).timeout(
+      await for (final stories in _activeStoriesRealtime(
+        churchId,
+        churchIds: churchIds,
+        includeShared: includeShared,
+      ).timeout(
         _realtimeQuietTimeout,
         onTimeout: (sink) {
           sink.add(lastKnown);
@@ -69,13 +89,23 @@ class CommunityService {
     }
   }
 
-  Stream<List<CommunityStory>> _activeStoriesRealtime(String churchId) {
+  Stream<List<CommunityStory>> _activeStoriesRealtime(
+    String churchId, {
+    List<String>? churchIds,
+    required bool includeShared,
+  }) {
     return _supabase
         .from(_storiesTable)
         .stream(primaryKey: ['id'])
-        .eq('church_id', churchId)
         .order('created_at', ascending: false)
-        .map(_normalizeStories);
+        .map(
+          (rows) => _normalizeStories(
+            rows,
+            viewerChurchId: churchId,
+            churchIds: churchIds,
+            includeShared: includeShared,
+          ),
+        );
   }
 
   Future<void> addStory(CommunityStory story) async {
@@ -121,7 +151,11 @@ class CommunityService {
     return _normalizePosts(data);
   }
 
-  Future<List<Post>> fetchPostsForChurches(List<String>? churchIds) async {
+  Future<List<Post>> fetchPostsForChurches(
+    String viewerChurchId,
+    List<String>? churchIds, {
+    bool includeShared = false,
+  }) async {
     final queryChurchIds = churchIds
         ?.where((churchId) => churchId.trim().isNotEmpty)
         .map((churchId) => churchId.trim())
@@ -144,7 +178,12 @@ class CommunityService {
       data = await query.order('created_at', ascending: false).limit(75);
     }
 
-    return _normalizePosts(data);
+    return _normalizePosts(
+      data,
+      viewerChurchId: viewerChurchId,
+      churchIds: queryChurchIds,
+      includeShared: includeShared,
+    );
   }
 
   // Get stream of posts for a specific church. The feed is REST-first so
@@ -177,7 +216,11 @@ class CommunityService {
     }
   }
 
-  Stream<List<Post>> getPostsForChurches(List<String>? churchIds) async* {
+  Stream<List<Post>> getPostsForChurches(
+    String viewerChurchId,
+    List<String>? churchIds, {
+    bool includeShared = false,
+  }) async* {
     var lastKnown = <Post>[];
     final queryChurchIds = churchIds
         ?.where((churchId) => churchId.trim().isNotEmpty)
@@ -186,15 +229,22 @@ class CommunityService {
         .toList();
 
     try {
-      lastKnown = await fetchPostsForChurches(queryChurchIds);
+      lastKnown = await fetchPostsForChurches(
+        viewerChurchId,
+        queryChurchIds,
+        includeShared: includeShared,
+      );
       yield lastKnown;
     } catch (error) {
       debugPrint('Could not load filtered posts before realtime: $error');
     }
 
     try {
-      await for (final posts
-          in _postsRealtimeForChurches(queryChurchIds).timeout(
+      await for (final posts in _postsRealtimeForChurches(
+        viewerChurchId,
+        queryChurchIds,
+        includeShared: includeShared,
+      ).timeout(
         _realtimeQuietTimeout,
         onTimeout: (sink) {
           sink.add(lastKnown);
@@ -222,17 +272,22 @@ class CommunityService {
         .map(_normalizePosts);
   }
 
-  Stream<List<Post>> _postsRealtimeForChurches(List<String>? churchIds) {
-    final filterIds = churchIds?.toSet();
+  Stream<List<Post>> _postsRealtimeForChurches(
+    String viewerChurchId,
+    List<String>? churchIds, {
+    required bool includeShared,
+  }) {
     final query = _supabase
         .from(_postsTable)
         .stream(primaryKey: ['id'])
         .order('created_at', ascending: false)
         .limit(75);
     return query.map((rows) {
-      if (filterIds == null || filterIds.isEmpty) return _normalizePosts(rows);
       return _normalizePosts(
-        rows.where((row) => filterIds.contains(row['place_id'])).toList(),
+        rows,
+        viewerChurchId: viewerChurchId,
+        churchIds: churchIds,
+        includeShared: includeShared,
       );
     });
   }
@@ -382,22 +437,56 @@ class CommunityService {
         .map((data) => data.map((e) => Map<String, dynamic>.from(e)).toList());
   }
 
-  List<CommunityStory> _normalizeStories(List<dynamic> data) {
+  List<CommunityStory> _normalizeStories(
+    List<dynamic> data, {
+    String? viewerChurchId,
+    List<String>? churchIds,
+    bool includeShared = false,
+  }) {
+    final filterIds = churchIds
+        ?.where((churchId) => churchId.trim().isNotEmpty)
+        .map((churchId) => churchId.trim())
+        .toSet();
     final stories = data
         .map((map) => CommunityStory.fromMap(Map<String, dynamic>.from(map)))
-        .where((story) => !story.isExpired)
-        .toList()
+        .where((story) {
+      if (story.isExpired) return false;
+      if (viewerChurchId == null || viewerChurchId.isEmpty) return true;
+      final isOwnChurch = story.churchId == viewerChurchId;
+      if (filterIds != null && filterIds.isNotEmpty) {
+        return filterIds.contains(story.churchId) &&
+            (isOwnChurch || (includeShared && story.visibleToAllChurches));
+      }
+      return isOwnChurch || (includeShared && story.visibleToAllChurches);
+    }).toList()
       ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
     return stories;
   }
 
-  List<Post> _normalizePosts(List<dynamic> data) {
+  List<Post> _normalizePosts(
+    List<dynamic> data, {
+    String? viewerChurchId,
+    List<String>? churchIds,
+    bool includeShared = false,
+  }) {
+    final filterIds = churchIds
+        ?.where((churchId) => churchId.trim().isNotEmpty)
+        .map((churchId) => churchId.trim())
+        .toSet();
     final postsById = <String, Post>{};
     for (final map in data) {
       final post = Post.fromMap(Map<String, dynamic>.from(map));
       final expiresAt = post.expiresAt;
       final isExpired = expiresAt != null && expiresAt.isBefore(DateTime.now());
-      if (post.id.isNotEmpty && !isExpired) {
+      final isOwnChurch = post.placeId == viewerChurchId;
+      final canShow = viewerChurchId == null ||
+          viewerChurchId.isEmpty ||
+          (filterIds != null && filterIds.isNotEmpty
+              ? filterIds.contains(post.placeId) &&
+                  (isOwnChurch || (includeShared && post.visibleToAllChurches))
+              : isOwnChurch || (includeShared && post.visibleToAllChurches));
+
+      if (post.id.isNotEmpty && !isExpired && canShow) {
         postsById[post.id] = post;
       }
     }

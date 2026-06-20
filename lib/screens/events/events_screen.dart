@@ -9,6 +9,8 @@ import '../../widgets/ui/app_card.dart';
 import '../../widgets/ui/app_button.dart';
 import '../../widgets/ui/app_text_field.dart';
 import '../../widgets/ui/app_loader.dart';
+import '../../widgets/ui/app_feedback.dart';
+import '../../services/church_service.dart';
 import '../../services/event_service.dart';
 import '../../services/ministry_service.dart';
 import '../../models/event_model.dart';
@@ -29,6 +31,7 @@ class EventsScreen extends StatefulWidget {
 class _EventsScreenState extends State<EventsScreen> {
   final EventService _eventService = EventService();
   final MinistryService _ministryService = MinistryService();
+  final ChurchService _churchService = ChurchService();
   final TextEditingController _titleController = TextEditingController();
   final TextEditingController _descriptionController = TextEditingController();
   final TextEditingController _locationController = TextEditingController();
@@ -39,9 +42,13 @@ class _EventsScreenState extends State<EventsScreen> {
   bool _isAddingEvent = false;
   bool _canAddMinistryEvent = false;
   List<MinistryManager> _managedMinistries = [];
+  final Map<String, String> _churchNamesById = {};
+  final Set<String> _loadingChurchNameIds = {};
   String? _selectedMinistryId;
   DateTime _selectedDate = DateTime.now();
   TimeOfDay _selectedTime = TimeOfDay.now();
+  bool _showSharedEvents = false;
+  bool _eventVisibleToAllChurches = false;
 
   @override
   void initState() {
@@ -99,8 +106,10 @@ class _EventsScreenState extends State<EventsScreen> {
     await _eventService.rsvpToEvent(event.id, _currentUser!.id, !isGoing);
 
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(isGoing ? 'RSVP Cancelled' : 'RSVP Confirmed!')),
+      AppFeedback.show(
+        context,
+        isGoing ? 'RSVP cancelled.' : 'RSVP confirmed.',
+        type: isGoing ? AppFeedbackType.info : AppFeedbackType.success,
       );
     }
   }
@@ -167,6 +176,7 @@ class _EventsScreenState extends State<EventsScreen> {
       sourceLabel: sourceLabel,
       ministryId: selectedMinistry?.ministryId,
       ministryName: selectedMinistry?.ministryName ?? '',
+      visibleToAllChurches: _eventVisibleToAllChurches,
       attendees: [],
     );
 
@@ -177,11 +187,14 @@ class _EventsScreenState extends State<EventsScreen> {
       _descriptionController.clear();
       _locationController.clear();
       _selectedMinistryId = null;
+      _eventVisibleToAllChurches = false;
 
       if (mounted) {
         Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Event added successfully!')),
+        AppFeedback.show(
+          context,
+          'Event added successfully.',
+          type: AppFeedbackType.success,
         );
       }
     } catch (e) {
@@ -197,6 +210,7 @@ class _EventsScreenState extends State<EventsScreen> {
   void _showAddEventDialog() {
     _selectedDate = DateTime.now();
     _selectedTime = TimeOfDay.now();
+    _eventVisibleToAllChurches = false;
     final roleProvider = Provider.of<UserRoleProvider>(context, listen: false);
     final ministryEventAccess =
         _managedMinistries.where((manager) => manager.canCreateEvents).toList();
@@ -269,6 +283,15 @@ class _EventsScreenState extends State<EventsScreen> {
                     },
                   ),
                 ],
+                const SizedBox(height: 16),
+                _EventAudienceTile(
+                  visibleToAllChurches: _eventVisibleToAllChurches,
+                  onChanged: (value) {
+                    setDialogState(() {
+                      _eventVisibleToAllChurches = value;
+                    });
+                  },
+                ),
                 const SizedBox(height: 16),
                 Row(
                   children: [
@@ -359,44 +382,291 @@ class _EventsScreenState extends State<EventsScreen> {
           ? const Center(child: AppLoader())
           : _churchId == null
               ? const Center(child: Text('Please join a church to see events.'))
-              : StreamBuilder<List<EventModel>>(
-                  stream: _eventService.getEvents(_churchId!),
-                  builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      return ListView.builder(
-                          itemCount: 3,
-                          itemBuilder: (_, __) => const AppSkeletonListItem());
-                    }
-
-                    if (snapshot.hasError) {
-                      return Center(child: Text('Error: ${snapshot.error}'));
-                    }
-
-                    final events = snapshot.data ?? [];
-
-                    if (events.isEmpty) {
-                      return Center(
-                          child: Text('No upcoming events.',
-                              style: TextStyle(color: Colors.grey[600])));
-                    }
-
-                    return ListView.builder(
-                      padding: const EdgeInsets.all(16.0),
-                      itemCount: events.length,
-                      itemBuilder: (context, index) {
-                        final event = events[index];
-                        final isRsvped = _currentUser != null &&
-                            event.attendees.contains(_currentUser!.id);
-
-                        return _EventCard(
-                          event: event,
-                          isRsvped: isRsvped,
-                          onRsvp: () => _handleRSVP(event),
-                        );
+              : Column(
+                  children: [
+                    _EventScopeSelector(
+                      showSharedEvents: _showSharedEvents,
+                      onChanged: (value) {
+                        setState(() => _showSharedEvents = value);
                       },
-                    );
-                  },
+                    ),
+                    Expanded(
+                      child: StreamBuilder<List<EventModel>>(
+                        stream: _eventService.getEvents(
+                          _churchId!,
+                          includeSharedEvents: _showSharedEvents,
+                        ),
+                        builder: (context, snapshot) {
+                          if (snapshot.connectionState ==
+                              ConnectionState.waiting) {
+                            return ListView.builder(
+                              padding: const EdgeInsets.all(16),
+                              itemCount: 3,
+                              itemBuilder: (_, __) =>
+                                  const AppSkeletonListItem(),
+                            );
+                          }
+
+                          if (snapshot.hasError) {
+                            return Center(
+                              child: Text('Error: ${snapshot.error}'),
+                            );
+                          }
+
+                          final events = snapshot.data ?? [];
+                          _queueChurchNameLoads(events);
+
+                          if (events.isEmpty) {
+                            return Center(
+                              child: Text(
+                                _showSharedEvents
+                                    ? 'No shared upcoming events.'
+                                    : 'No upcoming events.',
+                                style: TextStyle(color: Colors.grey[600]),
+                              ),
+                            );
+                          }
+
+                          return ListView.builder(
+                            padding: const EdgeInsets.all(16.0),
+                            itemCount: events.length,
+                            itemBuilder: (context, index) {
+                              final event = events[index];
+                              final isRsvped = _currentUser != null &&
+                                  event.attendees.contains(_currentUser!.id);
+                              final canViewRsvps =
+                                  _canViewRsvpDetails(event, roleProvider);
+
+                              return _EventCard(
+                                event: event,
+                                viewerChurchId: _churchId!,
+                                churchName: _churchNamesById[event.churchId],
+                                isRsvped: isRsvped,
+                                canViewRsvps: canViewRsvps,
+                                onRsvp: () => _handleRSVP(event),
+                                onViewRsvps: canViewRsvps
+                                    ? () => _showRsvpDetails(event)
+                                    : null,
+                              );
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                  ],
                 ),
+    );
+  }
+
+  bool _canViewRsvpDetails(EventModel event, UserRoleProvider roleProvider) {
+    if (_churchId == null || event.churchId != _churchId) return false;
+    if (roleProvider.canManageEvents) return true;
+    if (event.organizerId == _currentUser?.id) return true;
+    final ministryId = event.ministryId;
+    if (ministryId == null || ministryId.isEmpty) return false;
+    return _managedMinistries.any(
+      (manager) => manager.ministryId == ministryId && manager.canCreateEvents,
+    );
+  }
+
+  Future<void> _showRsvpDetails(EventModel event) async {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (sheetContext) {
+        return FutureBuilder<List<EventRsvpDetail>>(
+          future: _eventService.fetchRsvpDetails(event.id),
+          builder: (context, snapshot) {
+            final theme = Theme.of(context);
+            final attendees = snapshot.data ?? const <EventRsvpDetail>[];
+            return DraggableScrollableSheet(
+              expand: false,
+              initialChildSize: 0.62,
+              minChildSize: 0.36,
+              maxChildSize: 0.9,
+              builder: (context, scrollController) {
+                return ListView(
+                  controller: scrollController,
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'RSVPs',
+                            style: theme.textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Close',
+                          onPressed: () => Navigator.pop(sheetContext),
+                          icon: const Icon(Icons.close),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    AppCard(
+                      margin: EdgeInsets.zero,
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.how_to_reg_outlined,
+                            color: theme.colorScheme.primary,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              '${attendees.length} ${attendees.length == 1 ? 'person is' : 'people are'} going',
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    if (snapshot.connectionState == ConnectionState.waiting)
+                      const Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(24),
+                          child: AppLoader(),
+                        ),
+                      )
+                    else if (snapshot.hasError)
+                      Text(
+                        'Could not load RSVPs: ${snapshot.error}',
+                        style: TextStyle(color: theme.colorScheme.error),
+                      )
+                    else if (attendees.isEmpty)
+                      Text(
+                        'No one has RSVP\'d yet.',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      )
+                    else
+                      ...attendees.map(
+                        (attendee) => _RsvpAttendeeTile(attendee: attendee),
+                      ),
+                  ],
+                );
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _queueChurchNameLoads(List<EventModel> events) {
+    final ownChurchId = _churchId;
+    if (ownChurchId == null) return;
+
+    for (final event in events) {
+      final eventChurchId = event.churchId.trim();
+      if (eventChurchId.isEmpty ||
+          eventChurchId == ownChurchId ||
+          _churchNamesById.containsKey(eventChurchId) ||
+          _loadingChurchNameIds.contains(eventChurchId)) {
+        continue;
+      }
+
+      _loadingChurchNameIds.add(eventChurchId);
+      _churchService.getChurch(eventChurchId).then((church) {
+        if (!mounted) return;
+        setState(() {
+          _churchNamesById[eventChurchId] =
+              church?.name.trim().isNotEmpty == true
+                  ? church!.name.trim()
+                  : _prettifyChurchIdentifier(eventChurchId);
+          _loadingChurchNameIds.remove(eventChurchId);
+        });
+      });
+    }
+  }
+}
+
+class _EventScopeSelector extends StatelessWidget {
+  const _EventScopeSelector({
+    required this.showSharedEvents,
+    required this.onChanged,
+  });
+
+  final bool showSharedEvents;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+      color: theme.colorScheme.surface,
+      child: SegmentedButton<bool>(
+        segments: const [
+          ButtonSegment(
+            value: false,
+            icon: Icon(Icons.church_outlined),
+            label: Text('My Church'),
+          ),
+          ButtonSegment(
+            value: true,
+            icon: Icon(Icons.public_outlined),
+            label: Text('Shared'),
+          ),
+        ],
+        selected: {showSharedEvents},
+        onSelectionChanged: (values) => onChanged(values.first),
+      ),
+    );
+  }
+}
+
+class _EventAudienceTile extends StatelessWidget {
+  const _EventAudienceTile({
+    required this.visibleToAllChurches,
+    required this.onChanged,
+  });
+
+  final bool visibleToAllChurches;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.7),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: theme.colorScheme.outline.withValues(alpha: 0.2),
+        ),
+      ),
+      child: SwitchListTile.adaptive(
+        value: visibleToAllChurches,
+        onChanged: onChanged,
+        secondary: Icon(
+          visibleToAllChurches ? Icons.public_outlined : Icons.church_outlined,
+          color: theme.colorScheme.primary,
+        ),
+        title: Text(
+          visibleToAllChurches ? 'Visible to all churches' : 'My church only',
+          style: theme.textTheme.titleSmall?.copyWith(
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        subtitle: Text(
+          visibleToAllChurches
+              ? 'Members from other churches can see and RSVP.'
+              : 'Only your church can see this event.',
+        ),
+      ),
     );
   }
 }
@@ -444,18 +714,32 @@ class _PickerTile extends StatelessWidget {
 class _EventCard extends StatelessWidget {
   const _EventCard({
     required this.event,
+    required this.viewerChurchId,
+    this.churchName,
     required this.isRsvped,
+    required this.canViewRsvps,
     required this.onRsvp,
+    this.onViewRsvps,
   });
 
   final EventModel event;
+  final String viewerChurchId;
+  final String? churchName;
   final bool isRsvped;
+  final bool canViewRsvps;
   final VoidCallback onRsvp;
+  final VoidCallback? onViewRsvps;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final date = DateFormat('EEEE, MMMM d, yyyy').format(event.date);
+    final isOtherChurch = event.churchId.trim().isNotEmpty &&
+        event.churchId.trim() != viewerChurchId.trim();
+    final displayChurchName = churchName?.trim().isNotEmpty == true
+        ? churchName!.trim()
+        : _prettifyChurchIdentifier(event.churchId);
+    final compactChurch = _compactChurchLabel(displayChurchName);
 
     return AppCard(
       margin: const EdgeInsets.only(bottom: 16),
@@ -471,6 +755,21 @@ class _EventCard extends StatelessWidget {
                 avatar: const Icon(Icons.campaign_outlined, size: 18),
                 visualDensity: VisualDensity.compact,
               ),
+              if (event.visibleToAllChurches)
+                const Chip(
+                  label: Text('Shared'),
+                  avatar: Icon(Icons.public_outlined, size: 18),
+                  visualDensity: VisualDensity.compact,
+                ),
+              if (isOtherChurch)
+                Tooltip(
+                  message: displayChurchName,
+                  child: Chip(
+                    label: Text(compactChurch),
+                    avatar: const Icon(Icons.church_outlined, size: 18),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ),
               if (isRsvped)
                 const Chip(
                   label: Text('Going'),
@@ -500,19 +799,83 @@ class _EventCard extends StatelessWidget {
             ),
           ],
           const SizedBox(height: 16),
-          AppButton(
-            text: isRsvped ? 'Cancel RSVP' : 'RSVP Now',
-            isSecondary: isRsvped,
-            isFullWidth: true,
-            onPressed: onRsvp,
-            backgroundColor:
-                isRsvped ? Colors.transparent : theme.colorScheme.primary,
-            textColor: isRsvped
-                ? theme.colorScheme.primary
-                : theme.colorScheme.onPrimary,
+          Row(
+            children: [
+              Expanded(
+                child: AppButton(
+                  text: isRsvped ? 'Cancel RSVP' : 'RSVP Now',
+                  isSecondary: isRsvped,
+                  isFullWidth: true,
+                  onPressed: onRsvp,
+                  backgroundColor:
+                      isRsvped ? Colors.transparent : theme.colorScheme.primary,
+                  textColor: isRsvped
+                      ? theme.colorScheme.primary
+                      : theme.colorScheme.onPrimary,
+                ),
+              ),
+              if (canViewRsvps && onViewRsvps != null) ...[
+                const SizedBox(width: 10),
+                IconButton.filledTonal(
+                  tooltip: 'View RSVPs',
+                  onPressed: onViewRsvps,
+                  icon: Badge.count(
+                    count: event.attendees.length,
+                    isLabelVisible: event.attendees.isNotEmpty,
+                    child: const Icon(Icons.groups_2_outlined),
+                  ),
+                ),
+              ],
+            ],
           ),
         ],
       ),
+    );
+  }
+}
+
+class _RsvpAttendeeTile extends StatelessWidget {
+  const _RsvpAttendeeTile({required this.attendee});
+
+  final EventRsvpDetail attendee;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final churchName = attendee.churchName.trim().isNotEmpty
+        ? attendee.churchName.trim()
+        : _prettifyChurchIdentifier(attendee.churchId);
+
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: CircleAvatar(
+        backgroundColor: theme.colorScheme.primary.withValues(alpha: 0.16),
+        child: Text(
+          _initialFor(attendee.fullName),
+          style: TextStyle(
+            color: theme.colorScheme.primary,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ),
+      title: Text(
+        attendee.fullName,
+        style: const TextStyle(fontWeight: FontWeight.w800),
+      ),
+      subtitle: attendee.isOtherChurch
+          ? Text(churchName)
+          : attendee.email.trim().isEmpty
+              ? const Text('Your church')
+              : Text(attendee.email),
+      trailing: attendee.isOtherChurch
+          ? Tooltip(
+              message: churchName,
+              child: Chip(
+                label: Text(_compactChurchLabel(churchName)),
+                visualDensity: VisualDensity.compact,
+              ),
+            )
+          : null,
     );
   }
 }
@@ -544,4 +907,43 @@ class _EventMeta extends StatelessWidget {
       ],
     );
   }
+}
+
+String _compactChurchLabel(String churchName) {
+  final clean = _prettifyChurchIdentifier(churchName);
+  if (clean.length <= 24) return clean;
+  final words = clean
+      .replaceAll(RegExp(r'[^A-Za-z0-9 ]+'), ' ')
+      .split(RegExp(r'\s+'))
+      .where((word) =>
+          word.length > 2 &&
+          !{'the', 'and', 'of', 'for', 'church'}.contains(
+            word.toLowerCase(),
+          ))
+      .toList();
+  final acronym = words.take(5).map((word) => word[0].toUpperCase()).join();
+  return acronym.length >= 2 ? acronym : clean.substring(0, 24);
+}
+
+String _prettifyChurchIdentifier(String value) {
+  var clean = value.trim();
+  if (clean.isEmpty) return 'Church';
+  clean = clean.replaceFirst(RegExp(r'^(local|manual)_'), '');
+  clean = clean.replaceAll(RegExp(r'[_-]+'), ' ');
+  clean = clean.replaceAll(RegExp(r'\s+'), ' ').trim();
+  if (clean.startsWith('church ') || clean.length > 48) return 'Other Church';
+
+  final uppercaseWords = {'ntcog', 'cog', 'cogop', 'ja', 'jm'};
+  return clean.split(' ').map((word) {
+    final lower = word.toLowerCase();
+    if (uppercaseWords.contains(lower)) return lower.toUpperCase();
+    if (word.length <= 2) return lower;
+    return '${word[0].toUpperCase()}${word.substring(1).toLowerCase()}';
+  }).join(' ');
+}
+
+String _initialFor(String name) {
+  final trimmed = name.trim();
+  if (trimmed.isEmpty) return '?';
+  return trimmed.characters.first.toUpperCase();
 }

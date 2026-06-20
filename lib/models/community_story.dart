@@ -10,6 +10,7 @@ class CommunityStory {
     this.mediaPath,
     this.mediaType,
     this.likes = const [],
+    this.visibleToAllChurches = false,
     required this.createdAt,
     required this.expiresAt,
   });
@@ -24,6 +25,7 @@ class CommunityStory {
   final String? mediaPath;
   final String? mediaType;
   final List<String> likes;
+  final bool visibleToAllChurches;
   final DateTime createdAt;
   final DateTime expiresAt;
 
@@ -41,6 +43,8 @@ class CommunityStory {
       mediaPath: data['media_path'] ?? data['mediaPath'],
       mediaType: data['media_type'] ?? data['mediaType'],
       likes: _parseStringList(data['likes']),
+      visibleToAllChurches: data['visible_to_all_churches'] == true ||
+          data['visibleToAllChurches'] == true,
       createdAt: _parseDate(data['created_at'] ?? data['createdAt']),
       expiresAt: _parseDate(data['expires_at'] ?? data['expiresAt']),
     );
@@ -57,6 +61,7 @@ class CommunityStory {
       'media_path': mediaPath,
       'media_type': mediaType,
       'likes': likes,
+      'visible_to_all_churches': visibleToAllChurches,
       'created_at': createdAt.toUtc().toIso8601String(),
       'expires_at': expiresAt.toUtc().toIso8601String(),
     };
@@ -76,6 +81,7 @@ class CommunityStory {
       mediaPath: mediaPath,
       mediaType: mediaType,
       likes: likes ?? this.likes,
+      visibleToAllChurches: visibleToAllChurches,
       createdAt: createdAt,
       expiresAt: expiresAt,
     );

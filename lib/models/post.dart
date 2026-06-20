@@ -12,6 +12,7 @@ class Post {
   final String? mediaPath;
   final String? mediaType;
   final DateTime? expiresAt;
+  final bool visibleToAllChurches;
 
   Post({
     required this.id,
@@ -27,6 +28,7 @@ class Post {
     this.mediaPath,
     this.mediaType,
     this.expiresAt,
+    this.visibleToAllChurches = false,
   });
 
   factory Post.fromMap(Map<String, dynamic> data) {
@@ -46,6 +48,8 @@ class Post {
       mediaPath: data['media_path'] ?? data['mediaPath'],
       mediaType: data['media_type'],
       expiresAt: _nullableDate(data['expires_at'] ?? data['expiresAt']),
+      visibleToAllChurches: data['visible_to_all_churches'] == true ||
+          data['visibleToAllChurches'] == true,
     );
   }
 
@@ -64,6 +68,7 @@ class Post {
       'expires_at': (expiresAt ?? DateTime.now().add(const Duration(days: 30)))
           .toUtc()
           .toIso8601String(),
+      'visible_to_all_churches': visibleToAllChurches,
       // 'id' and 'created_at' are typically handled by Supabase DB defaults
     };
   }

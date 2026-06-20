@@ -69,6 +69,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
   String _feedScope = 'church';
   List<String>? _selectedFeedChurchIds;
   String? _selectedFeedLabel;
+  bool _postVisibleToAllChurches = false;
 
   XFile? _selectedMedia;
   Uint8List? _selectedImagePreviewBytes;
@@ -260,6 +261,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
     XFile? selectedStoryMedia;
     Uint8List? selectedStoryPreviewBytes;
     String? selectedStoryType;
+    var shareWithAllChurches = false;
 
     await showModalBottomSheet<void>(
       context: context,
@@ -356,6 +358,13 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                     hint: 'Add a short caption...',
                     maxLines: 2,
                   ),
+                  const SizedBox(height: 12),
+                  _AudienceSelector(
+                    visibleToAllChurches: shareWithAllChurches,
+                    onChanged: (value) => setSheetState(
+                      () => shareWithAllChurches = value,
+                    ),
+                  ),
                   const SizedBox(height: 14),
                   SizedBox(
                     width: double.infinity,
@@ -367,6 +376,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                                 caption: captionController.text,
                                 media: selectedStoryMedia,
                                 mediaType: selectedStoryType,
+                                visibleToAllChurches: shareWithAllChurches,
                               );
                               if (sheetContext.mounted) {
                                 Navigator.pop(sheetContext);
@@ -395,6 +405,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
     required String caption,
     required XFile? media,
     required String? mediaType,
+    required bool visibleToAllChurches,
   }) async {
     if (_isPostingStory) return;
     final cleanCaption = caption.trim();
@@ -436,6 +447,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
         mediaUrl: mediaUrl,
         mediaPath: mediaPath,
         mediaType: mediaType,
+        visibleToAllChurches: visibleToAllChurches,
         createdAt: DateTime.now(),
         expiresAt: DateTime.now().add(const Duration(hours: 24)),
       );
@@ -461,11 +473,13 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
     }
 
     if (_confirmBeforePosting) {
+      final audience =
+          _postVisibleToAllChurches ? 'all churches' : 'your church feed';
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
           title: const Text('Post to Community?'),
-          content: const Text('This will be visible in your church feed.'),
+          content: Text('This will be visible in $audience.'),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context, false),
@@ -535,6 +549,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
         mediaPath: mediaPath,
         mediaType: _mediaType,
         expiresAt: DateTime.now().add(const Duration(days: 30)),
+        visibleToAllChurches: _postVisibleToAllChurches,
       );
 
       await _communityService.addPost(newPost);
@@ -544,6 +559,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
         _selectedMedia = null;
         _selectedImagePreviewBytes = null;
         _mediaType = null;
+        _postVisibleToAllChurches = false;
         _feedRefreshToken++;
       });
       if (mounted) FocusScope.of(context).unfocus();
@@ -987,7 +1003,11 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                   key: ValueKey(
                     'feed-$churchId-$_feedScope-${_selectedFeedChurchIds?.join('|')}-$_feedRefreshToken',
                   ),
-                  stream: _communityService.getPostsForChurches(feedChurchIds),
+                  stream: _communityService.getPostsForChurches(
+                    churchId,
+                    feedChurchIds,
+                    includeShared: _feedScope != 'church',
+                  ),
                   builder: (context, snapshot) {
                     final posts = (snapshot.data ?? [])
                         .where(
@@ -1117,8 +1137,8 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
   Widget _buildFeedScopeSummary(BuildContext context) {
     final theme = Theme.of(context);
     final subtitle = switch (_feedScope) {
-      'all' => 'Showing all churches',
-      'custom' => _selectedFeedLabel ?? 'Custom church filter',
+      'all' => 'Showing shared posts from all churches',
+      'custom' => _selectedFeedLabel ?? 'Shared posts from selected churches',
       _ => 'Showing your church',
     };
 
@@ -1817,6 +1837,8 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
   }
 
   Future<void> _showPostComposerSheet() async {
+    setState(() => _postVisibleToAllChurches = false);
+
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -2347,7 +2369,11 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                 ? const Center(child: CircularProgressIndicator())
                 : StreamBuilder<List<CommunityStory>>(
                     key: ValueKey('statuses-$churchId-$_storiesRefreshToken'),
-                    stream: _communityService.getActiveStories(churchId),
+                    stream: _communityService.getActiveStories(
+                      churchId,
+                      churchIds: _feedChurchIds(churchId),
+                      includeShared: _feedScope != 'church',
+                    ),
                     builder: (context, snapshot) {
                       final stories = (snapshot.data ?? [])
                           .where((story) =>
@@ -2557,7 +2583,9 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                   minLines: 1,
                   maxLines: 2,
                   decoration: InputDecoration(
-                    hintText: 'Share with your church...',
+                    hintText: _postVisibleToAllChurches
+                        ? 'Share with all churches...'
+                        : 'Share with your church...',
                     filled: true,
                     fillColor: theme.colorScheme.surfaceContainerHighest,
                     contentPadding: const EdgeInsets.symmetric(
@@ -2619,6 +2647,14 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                 ),
               ),
             ],
+          ),
+          const SizedBox(height: 10),
+          _AudienceSelector(
+            visibleToAllChurches: _postVisibleToAllChurches,
+            onChanged: (value) {
+              setState(() => _postVisibleToAllChurches = value);
+              onMediaChanged?.call();
+            },
           ),
         ],
       ),
@@ -3123,6 +3159,60 @@ class _StatusViewerDialogState extends State<_StatusViewerDialog> {
     final trimmed = name.trim();
     if (trimmed.isEmpty) return '?';
     return trimmed.characters.first.toUpperCase();
+  }
+}
+
+class _AudienceSelector extends StatelessWidget {
+  const _AudienceSelector({
+    required this.visibleToAllChurches,
+    required this.onChanged,
+  });
+
+  final bool visibleToAllChurches;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.7),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: theme.colorScheme.outline.withValues(alpha: 0.18),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(8),
+        child: Row(
+          children: [
+            Icon(
+              visibleToAllChurches
+                  ? Icons.public_outlined
+                  : Icons.church_outlined,
+              color: theme.colorScheme.primary,
+              size: 20,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                visibleToAllChurches
+                    ? 'Audience: all churches'
+                    : 'Audience: my church',
+                style: theme.textTheme.labelLarge?.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            Switch.adaptive(
+              value: visibleToAllChurches,
+              onChanged: onChanged,
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

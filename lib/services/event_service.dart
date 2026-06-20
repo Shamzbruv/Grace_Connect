@@ -8,18 +8,55 @@ class EventService {
   final SupabaseClient _supabase = Supabase.instance.client;
   final String _collection = 'events';
 
-  // Get stream of events for a specific church
-  Stream<List<EventModel>> getEvents(String churchId) {
+  // Get stream of events for a specific church, optionally including events
+  // intentionally shared by other churches.
+  Stream<List<EventModel>> getEvents(
+    String churchId, {
+    bool includeSharedEvents = false,
+  }) async* {
     unawaited(cleanupPastEvents());
-    return _supabase
+    var lastKnown = <EventModel>[];
+
+    try {
+      lastKnown = await fetchEvents(
+        churchId,
+        includeSharedEvents: includeSharedEvents,
+      );
+      yield lastKnown;
+    } catch (_) {
+      // Realtime below may still recover.
+    }
+
+    await for (final events in _supabase
         .from(_collection)
         .stream(primaryKey: ['id'])
-        .eq('churchId', churchId)
         .order('date', ascending: true)
-        .map((docs) => docs
-            .map((doc) => EventModel.fromMap(doc))
-            .where((event) => !_isPastEvent(event))
-            .toList());
+        .limit(200)
+        .map((docs) => _normalizeEvents(
+              docs,
+              churchId,
+              includeSharedEvents: includeSharedEvents,
+            ))) {
+      lastKnown = events;
+      yield lastKnown;
+    }
+  }
+
+  Future<List<EventModel>> fetchEvents(
+    String churchId, {
+    bool includeSharedEvents = false,
+  }) async {
+    final data = await _supabase
+        .from(_collection)
+        .select()
+        .order('date', ascending: true)
+        .limit(200);
+
+    return _normalizeEvents(
+      data,
+      churchId,
+      includeSharedEvents: includeSharedEvents,
+    );
   }
 
   // Get upcoming events (limited)
@@ -62,6 +99,7 @@ class EventService {
       sourceLabel: event.sourceLabel,
       ministryId: event.ministryId,
       ministryName: event.ministryName,
+      visibleToAllChurches: event.visibleToAllChurches,
       createdAt: event.createdAt,
       attendees: event.attendees,
     );
@@ -86,6 +124,35 @@ class EventService {
         'is_joining': isJoining,
       },
     );
+  }
+
+  Future<List<EventRsvpDetail>> fetchRsvpDetails(String eventId) async {
+    final rows = await _supabase.rpc(
+      'get_event_rsvp_details',
+      params: {'target_event_id': eventId},
+    );
+    if (rows is! List) return const [];
+
+    return rows
+        .map((row) => EventRsvpDetail.fromMap(Map<String, dynamic>.from(row)))
+        .toList();
+  }
+
+  List<EventModel> _normalizeEvents(
+    List<dynamic> data,
+    String churchId, {
+    required bool includeSharedEvents,
+  }) {
+    final events = data
+        .map((doc) => EventModel.fromMap(Map<String, dynamic>.from(doc)))
+        .where((event) {
+      final isOwnChurch = event.churchId == churchId;
+      final canShow =
+          isOwnChurch || (includeSharedEvents && event.visibleToAllChurches);
+      return canShow && !_isPastEvent(event);
+    }).toList()
+      ..sort((a, b) => a.date.compareTo(b.date));
+    return events;
   }
 
   bool _isPastEvent(EventModel event) {
