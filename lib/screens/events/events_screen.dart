@@ -126,13 +126,31 @@ class _EventsScreenState extends State<EventsScreen> {
     return null;
   }
 
-  Future<void> _addEvent() async {
+  String _sourceLabelForEvent(
+    UserRoleProvider roleProvider,
+    MinistryManager? selectedMinistry,
+  ) {
+    if (selectedMinistry != null) {
+      return 'From ${selectedMinistry.ministryName}';
+    }
+
+    return roleProvider.hasRole('Pastor') ||
+            roleProvider.hasRole('Senior Pastor') ||
+            roleProvider.hasRole('Assistant Pastor') ||
+            roleProvider.hasRole('Acting Pastor')
+        ? "From the Pastor's Desk"
+        : 'Church Event';
+  }
+
+  Future<void> _saveEvent([EventModel? existingEvent]) async {
     if (_isAddingEvent) return;
 
     if (_titleController.text.trim().isEmpty ||
         _descriptionController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please add a title and event details.')),
+      AppFeedback.show(
+        context,
+        'Please add a title and event details.',
+        type: AppFeedbackType.warning,
       );
       return;
     }
@@ -142,24 +160,27 @@ class _EventsScreenState extends State<EventsScreen> {
     setState(() => _isAddingEvent = true);
     final roleProvider = Provider.of<UserRoleProvider>(context, listen: false);
     final selectedMinistry = _selectedMinistryForEvent();
-    if (!roleProvider.canManageEvents && selectedMinistry == null) {
+    final selectedMinistryId = selectedMinistry?.ministryId ??
+        (existingEvent?.ministryId == _selectedMinistryId
+            ? existingEvent?.ministryId
+            : null);
+    final selectedMinistryName = selectedMinistry?.ministryName ??
+        (existingEvent?.ministryId == _selectedMinistryId
+            ? existingEvent?.ministryName
+            : null);
+
+    if (!roleProvider.canManageEvents && selectedMinistryId == null) {
       setState(() => _isAddingEvent = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Choose a ministry for this event.')),
+      AppFeedback.show(
+        context,
+        'Choose a ministry for this event.',
+        type: AppFeedbackType.warning,
       );
       return;
     }
-    final sourceLabel = selectedMinistry != null
-        ? 'From ${selectedMinistry.ministryName}'
-        : roleProvider.hasRole('Pastor') ||
-                roleProvider.hasRole('Senior Pastor') ||
-                roleProvider.hasRole('Assistant Pastor') ||
-                roleProvider.hasRole('Acting Pastor')
-            ? "From the Pastor's Desk"
-            : 'Church Event';
 
-    final newEvent = EventModel(
-      id: '', // Service handles ID
+    final event = EventModel(
+      id: existingEvent?.id ?? '',
       title: _titleController.text.trim(),
       description: _descriptionController.text.trim(),
       date: DateTime(
@@ -172,16 +193,23 @@ class _EventsScreenState extends State<EventsScreen> {
       time: _selectedTime.format(context),
       location: _locationController.text.trim(),
       churchId: _churchId!,
-      organizerId: _currentUser!.id,
-      sourceLabel: sourceLabel,
-      ministryId: selectedMinistry?.ministryId,
-      ministryName: selectedMinistry?.ministryName ?? '',
+      organizerId: existingEvent?.organizerId ?? _currentUser!.id,
+      sourceLabel: selectedMinistryId != null
+          ? 'From ${selectedMinistryName?.trim().isNotEmpty == true ? selectedMinistryName!.trim() : 'Ministry'}'
+          : _sourceLabelForEvent(roleProvider, selectedMinistry),
+      ministryId: selectedMinistryId,
+      ministryName: selectedMinistryName ?? '',
       visibleToAllChurches: _eventVisibleToAllChurches,
-      attendees: [],
+      createdAt: existingEvent?.createdAt,
+      attendees: existingEvent?.attendees ?? const [],
     );
 
     try {
-      await _eventService.addEvent(newEvent);
+      if (existingEvent == null) {
+        await _eventService.addEvent(event);
+      } else {
+        await _eventService.updateEvent(event);
+      }
 
       _titleController.clear();
       _descriptionController.clear();
@@ -193,14 +221,20 @@ class _EventsScreenState extends State<EventsScreen> {
         Navigator.pop(context);
         AppFeedback.show(
           context,
-          'Event added successfully.',
+          existingEvent == null
+              ? 'Event added successfully.'
+              : 'Event updated successfully.',
           type: AppFeedbackType.success,
         );
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not add event: $e')),
+      AppFeedback.show(
+        context,
+        existingEvent == null
+            ? 'Could not add event: $e'
+            : 'Could not update event: $e',
+        type: AppFeedbackType.error,
       );
     } finally {
       if (mounted) setState(() => _isAddingEvent = false);
@@ -208,17 +242,62 @@ class _EventsScreenState extends State<EventsScreen> {
   }
 
   void _showAddEventDialog() {
-    _selectedDate = DateTime.now();
-    _selectedTime = TimeOfDay.now();
-    _eventVisibleToAllChurches = false;
+    _showEventDialog();
+  }
+
+  void _showEditEventDialog(EventModel event) {
+    _showEventDialog(existingEvent: event);
+  }
+
+  void _showEventDialog({EventModel? existingEvent}) {
+    final isEditing = existingEvent != null;
+    _titleController.text = existingEvent?.title ?? '';
+    _descriptionController.text = existingEvent?.description ?? '';
+    _locationController.text = existingEvent?.location ?? '';
+    _selectedDate = existingEvent?.date ?? DateTime.now();
+    _selectedTime = existingEvent != null
+        ? TimeOfDay.fromDateTime(existingEvent.date)
+        : TimeOfDay.now();
+    _eventVisibleToAllChurches = existingEvent?.visibleToAllChurches ?? false;
     final roleProvider = Provider.of<UserRoleProvider>(context, listen: false);
     final ministryEventAccess =
         _managedMinistries.where((manager) => manager.canCreateEvents).toList();
-    _selectedMinistryId = roleProvider.canManageEvents
-        ? null
-        : ministryEventAccess.isNotEmpty
-            ? ministryEventAccess.first.ministryId
-            : null;
+    _selectedMinistryId = existingEvent?.ministryId ??
+        (roleProvider.canManageEvents
+            ? null
+            : ministryEventAccess.isNotEmpty
+                ? ministryEventAccess.first.ministryId
+                : null);
+
+    final selectedEventMinistryId = existingEvent?.ministryId;
+    final hasSelectedEventMinistry = selectedEventMinistryId != null &&
+        selectedEventMinistryId.isNotEmpty &&
+        !ministryEventAccess
+            .any((manager) => manager.ministryId == selectedEventMinistryId);
+
+    final sourceOptions = <DropdownMenuItem<String>>[
+      if (roleProvider.canManageEvents)
+        const DropdownMenuItem(
+          value: 'church',
+          child: Text('Church-wide event'),
+        ),
+      ...ministryEventAccess.map(
+        (manager) => DropdownMenuItem(
+          value: manager.ministryId,
+          child: Text(manager.ministryName),
+        ),
+      ),
+      if (hasSelectedEventMinistry)
+        DropdownMenuItem(
+          value: selectedEventMinistryId,
+          child: Text(
+            existingEvent?.ministryName.trim().isNotEmpty == true
+                ? existingEvent!.ministryName.trim()
+                : 'Assigned ministry',
+          ),
+        ),
+    ];
+    final showSourcePicker = sourceOptions.length > 1;
 
     showDialog(
       context: context,
@@ -226,7 +305,7 @@ class _EventsScreenState extends State<EventsScreen> {
         backgroundColor: Theme.of(dialogContext).cardTheme.color,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
         title: Text(
-          'Add New Event',
+          isEditing ? 'Edit Event' : 'Add New Event',
           style: Theme.of(dialogContext).textTheme.titleLarge?.copyWith(
                 fontWeight: FontWeight.w800,
               ),
@@ -254,28 +333,15 @@ class _EventsScreenState extends State<EventsScreen> {
                   label: 'Location',
                   hint: 'Main sanctuary, online, etc.',
                 ),
-                if (roleProvider.canManageEvents ||
-                    ministryEventAccess.isNotEmpty) ...[
+                if (showSourcePicker) ...[
                   const SizedBox(height: 16),
                   DropdownButtonFormField<String>(
                     value: _selectedMinistryId ?? 'church',
                     decoration: const InputDecoration(
-                      labelText: 'Event Source',
+                      labelText: 'Hosted by',
                       prefixIcon: Icon(Icons.groups_outlined),
                     ),
-                    items: [
-                      if (roleProvider.canManageEvents)
-                        const DropdownMenuItem(
-                          value: 'church',
-                          child: Text('Church-wide event'),
-                        ),
-                      ...ministryEventAccess.map(
-                        (manager) => DropdownMenuItem(
-                          value: manager.ministryId,
-                          child: Text(manager.ministryName),
-                        ),
-                      ),
-                    ],
+                    items: sourceOptions,
                     onChanged: (value) {
                       setDialogState(() {
                         _selectedMinistryId = value == 'church' ? null : value;
@@ -342,7 +408,7 @@ class _EventsScreenState extends State<EventsScreen> {
             child: const Text('Cancel'),
           ),
           ElevatedButton(
-            onPressed: _isAddingEvent ? null : _addEvent,
+            onPressed: _isAddingEvent ? null : () => _saveEvent(existingEvent),
             style: ElevatedButton.styleFrom(
               backgroundColor: Theme.of(dialogContext).colorScheme.primary,
               foregroundColor: Theme.of(dialogContext).colorScheme.onPrimary,
@@ -355,11 +421,67 @@ class _EventsScreenState extends State<EventsScreen> {
                     height: 18,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Text('Add'),
+                : Text(isEditing ? 'Save' : 'Add'),
           ),
         ],
       ),
     );
+  }
+
+  Future<void> _deleteEvent(EventModel event) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        final theme = Theme.of(dialogContext);
+        return AlertDialog(
+          backgroundColor: theme.cardTheme.color,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+          ),
+          title: const Text('Delete Event?'),
+          content: Text(
+            'This will remove "${event.title}" and its RSVP list.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton.icon(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              icon: const Icon(Icons.delete_outline),
+              label: const Text('Delete'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: theme.colorScheme.error,
+                foregroundColor: theme.colorScheme.onError,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      await _eventService.deleteEvent(event.id);
+      if (!mounted) return;
+      AppFeedback.show(
+        context,
+        'Event deleted.',
+        type: AppFeedbackType.success,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      AppFeedback.show(
+        context,
+        'Could not delete event: $e',
+        type: AppFeedbackType.error,
+      );
+    }
   }
 
   @override
@@ -436,6 +558,8 @@ class _EventsScreenState extends State<EventsScreen> {
                                   event.attendees.contains(_currentUser!.id);
                               final canViewRsvps =
                                   _canViewRsvpDetails(event, roleProvider);
+                              final canManageEvent =
+                                  _canManageEvent(event, roleProvider);
 
                               return _EventCard(
                                 event: event,
@@ -443,9 +567,16 @@ class _EventsScreenState extends State<EventsScreen> {
                                 churchName: _churchNamesById[event.churchId],
                                 isRsvped: isRsvped,
                                 canViewRsvps: canViewRsvps,
+                                canManageEvent: canManageEvent,
                                 onRsvp: () => _handleRSVP(event),
                                 onViewRsvps: canViewRsvps
                                     ? () => _showRsvpDetails(event)
+                                    : null,
+                                onEdit: canManageEvent
+                                    ? () => _showEditEventDialog(event)
+                                    : null,
+                                onDelete: canManageEvent
+                                    ? () => _deleteEvent(event)
                                     : null,
                               );
                             },
@@ -459,6 +590,10 @@ class _EventsScreenState extends State<EventsScreen> {
   }
 
   bool _canViewRsvpDetails(EventModel event, UserRoleProvider roleProvider) {
+    return _canManageEvent(event, roleProvider);
+  }
+
+  bool _canManageEvent(EventModel event, UserRoleProvider roleProvider) {
     if (_churchId == null || event.churchId != _churchId) return false;
     if (roleProvider.canManageEvents) return true;
     if (event.organizerId == _currentUser?.id) return true;
@@ -711,6 +846,8 @@ class _PickerTile extends StatelessWidget {
   }
 }
 
+enum _EventAction { edit, delete }
+
 class _EventCard extends StatelessWidget {
   const _EventCard({
     required this.event,
@@ -718,8 +855,11 @@ class _EventCard extends StatelessWidget {
     this.churchName,
     required this.isRsvped,
     required this.canViewRsvps,
+    required this.canManageEvent,
     required this.onRsvp,
     this.onViewRsvps,
+    this.onEdit,
+    this.onDelete,
   });
 
   final EventModel event;
@@ -727,8 +867,11 @@ class _EventCard extends StatelessWidget {
   final String? churchName;
   final bool isRsvped;
   final bool canViewRsvps;
+  final bool canManageEvent;
   final VoidCallback onRsvp;
   final VoidCallback? onViewRsvps;
+  final VoidCallback? onEdit;
+  final VoidCallback? onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -740,41 +883,82 @@ class _EventCard extends StatelessWidget {
         ? churchName!.trim()
         : _prettifyChurchIdentifier(event.churchId);
     final compactChurch = _compactChurchLabel(displayChurchName);
+    final sourceChipLabel = event.ministryName.trim().isNotEmpty
+        ? event.ministryName.trim()
+        : event.sourceLabel.trim();
+    final showSourceChip = sourceChipLabel.isNotEmpty &&
+        (event.ministryId?.trim().isNotEmpty ?? false);
 
     return AppCard(
       margin: const EdgeInsets.only(bottom: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Chip(
-                label: Text(event.sourceLabel),
-                avatar: const Icon(Icons.campaign_outlined, size: 18),
-                visualDensity: VisualDensity.compact,
+              Expanded(
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    if (showSourceChip)
+                      Chip(
+                        label: Text(sourceChipLabel),
+                        avatar: const Icon(Icons.groups_outlined, size: 18),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    if (event.visibleToAllChurches)
+                      const Chip(
+                        label: Text('Shared'),
+                        avatar: Icon(Icons.public_outlined, size: 18),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    if (isOtherChurch)
+                      Tooltip(
+                        message: displayChurchName,
+                        child: Chip(
+                          label: Text(compactChurch),
+                          avatar: const Icon(Icons.church_outlined, size: 18),
+                          visualDensity: VisualDensity.compact,
+                        ),
+                      ),
+                    if (isRsvped)
+                      const Chip(
+                        label: Text('Going'),
+                        avatar: Icon(Icons.check_circle_outline, size: 18),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                  ],
+                ),
               ),
-              if (event.visibleToAllChurches)
-                const Chip(
-                  label: Text('Shared'),
-                  avatar: Icon(Icons.public_outlined, size: 18),
-                  visualDensity: VisualDensity.compact,
-                ),
-              if (isOtherChurch)
-                Tooltip(
-                  message: displayChurchName,
-                  child: Chip(
-                    label: Text(compactChurch),
-                    avatar: const Icon(Icons.church_outlined, size: 18),
-                    visualDensity: VisualDensity.compact,
-                  ),
-                ),
-              if (isRsvped)
-                const Chip(
-                  label: Text('Going'),
-                  avatar: Icon(Icons.check_circle_outline, size: 18),
-                  visualDensity: VisualDensity.compact,
+              if (canManageEvent)
+                PopupMenuButton<_EventAction>(
+                  tooltip: 'Event actions',
+                  icon: const Icon(Icons.more_horiz),
+                  onSelected: (action) {
+                    if (action == _EventAction.edit) {
+                      onEdit?.call();
+                    } else {
+                      onDelete?.call();
+                    }
+                  },
+                  itemBuilder: (context) => const [
+                    PopupMenuItem(
+                      value: _EventAction.edit,
+                      child: ListTile(
+                        leading: Icon(Icons.edit_outlined),
+                        title: Text('Edit'),
+                      ),
+                    ),
+                    PopupMenuItem(
+                      value: _EventAction.delete,
+                      child: ListTile(
+                        leading: Icon(Icons.delete_outline),
+                        title: Text('Delete'),
+                      ),
+                    ),
+                  ],
                 ),
             ],
           ),

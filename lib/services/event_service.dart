@@ -59,6 +59,24 @@ class EventService {
     );
   }
 
+  Future<void> updateEvent(EventModel event) async {
+    await _supabase.from(_collection).update({
+      'title': event.title,
+      'description': event.description,
+      'date': event.date.toIso8601String(),
+      'time': event.time,
+      'location': event.location,
+      'sourceLabel': event.sourceLabel,
+      'ministry_id': event.ministryId,
+      'ministry_name': event.ministryName,
+      'visible_to_all_churches': event.visibleToAllChurches,
+    }).eq('id', event.id);
+  }
+
+  Future<void> deleteEvent(String eventId) async {
+    await _supabase.from(_collection).delete().eq('id', eventId);
+  }
+
   // Get upcoming events (limited)
   Stream<List<EventModel>> getUpcomingEvents(String churchId, {int limit = 3}) {
     unawaited(cleanupPastEvents());
@@ -147,8 +165,9 @@ class EventService {
         .map((doc) => EventModel.fromMap(Map<String, dynamic>.from(doc)))
         .where((event) {
       final isOwnChurch = event.churchId == churchId;
-      final canShow =
-          isOwnChurch || (includeSharedEvents && event.visibleToAllChurches);
+      final canShow = includeSharedEvents
+          ? !isOwnChurch && event.visibleToAllChurches
+          : isOwnChurch;
       return canShow && !_isPastEvent(event);
     }).toList()
       ..sort((a, b) => a.date.compareTo(b.date));
