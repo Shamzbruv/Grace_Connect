@@ -626,6 +626,128 @@ class AttendanceService {
     );
   }
 
+  Future<AttendanceCheckInPrompt> getManualOnSiteCheckInPrompt(
+      String churchId) async {
+    final user = _supabase.auth.currentUser;
+    if (user == null) {
+      return const AttendanceCheckInPrompt(
+        hasActiveService: false,
+        canMarkPresent: false,
+        isInsideGeofence: false,
+        alreadyMarked: false,
+        message: 'Sign in again before marking attendance.',
+      );
+    }
+
+    final activeService = await getActiveService(churchId);
+    if (activeService == null) {
+      return const AttendanceCheckInPrompt(
+        hasActiveService: false,
+        canMarkPresent: false,
+        isInsideGeofence: false,
+        alreadyMarked: false,
+        message: 'Manual sign-in only opens during an active service.',
+      );
+    }
+
+    final serviceId = activeService['id'] as String;
+    final serviceName = activeService['name'] as String;
+    if (await _hasAttendanceForToday(user.id, serviceId)) {
+      return AttendanceCheckInPrompt(
+        hasActiveService: true,
+        canMarkPresent: false,
+        isInsideGeofence: true,
+        alreadyMarked: true,
+        message: 'You are already marked for $serviceName.',
+        serviceId: serviceId,
+        serviceName: serviceName,
+      );
+    }
+
+    final churchLocation = await _getChurchLocation(churchId);
+    if (churchLocation == null) {
+      return AttendanceCheckInPrompt(
+        hasActiveService: true,
+        canMarkPresent: false,
+        isInsideGeofence: false,
+        alreadyMarked: false,
+        message: 'The pastor needs to set the church geofence first.',
+        serviceId: serviceId,
+        serviceName: serviceName,
+      );
+    }
+
+    final permissionReady = await _ensureLocationPermission();
+    if (!permissionReady) {
+      return AttendanceCheckInPrompt(
+        hasActiveService: true,
+        canMarkPresent: false,
+        isInsideGeofence: false,
+        alreadyMarked: false,
+        message: 'Location permission is needed to verify you are at church.',
+        serviceId: serviceId,
+        serviceName: serviceName,
+      );
+    }
+
+    final position = await Geolocator.getCurrentPosition(
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.high,
+      ),
+    );
+    final distance = Geolocator.distanceBetween(
+      position.latitude,
+      position.longitude,
+      churchLocation.latitude,
+      churchLocation.longitude,
+    );
+    final isInside = distance <= churchLocation.radiusMeters;
+
+    return AttendanceCheckInPrompt(
+      hasActiveService: true,
+      canMarkPresent: isInside,
+      isInsideGeofence: isInside,
+      alreadyMarked: false,
+      message: isInside
+          ? 'Location confirmed at church for $serviceName.'
+          : 'You are ${distance.toStringAsFixed(0)}m from church. Manual sign-in unlocks on property.',
+      serviceId: serviceId,
+      serviceName: serviceName,
+      distanceMeters: distance,
+      radiusMeters: churchLocation.radiusMeters,
+      requiredDwellMinutes: 0,
+      currentDwellMinutes: isInside ? 0 : 0,
+    );
+  }
+
+  Future<void> markManualOnSitePresent(String churchId) async {
+    final user = _supabase.auth.currentUser;
+    if (user == null) {
+      throw Exception('Sign in again before marking attendance.');
+    }
+
+    final prompt = await getManualOnSiteCheckInPrompt(churchId);
+    if (prompt.alreadyMarked) return;
+    if (!prompt.hasActiveService ||
+        prompt.serviceId == null ||
+        prompt.serviceName == null) {
+      throw Exception(prompt.message);
+    }
+    if (!prompt.canMarkPresent || !prompt.isInsideGeofence) {
+      throw Exception(prompt.message);
+    }
+
+    final activeService = await getActiveService(churchId);
+    await _markPresent(
+      user.id,
+      churchId,
+      prompt.serviceId!,
+      activeService?['startTime'] as String?,
+      prompt.serviceName,
+      method: 'manual_geofence',
+    );
+  }
+
   Future<void> markRemotePresent({
     required String userId,
     required String churchId,

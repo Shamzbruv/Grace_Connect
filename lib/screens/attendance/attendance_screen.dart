@@ -131,11 +131,11 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   Future<void> _markPresentForActiveService(String churchId) async {
     setState(() => _isMarkingPresent = true);
     try {
-      await _attendanceService.markCurrentServicePresent(churchId);
+      await _attendanceService.markManualOnSitePresent(churchId);
       await _refreshCheckInPrompt(churchId);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Attendance marked present.')),
+        const SnackBar(content: Text('Manual sign-in marked present.')),
       );
     } catch (e) {
       if (!mounted) return;
@@ -513,10 +513,10 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     final theme = Theme.of(context);
     final prompt = _checkInPrompt;
     final serviceName = prompt?.serviceName ?? 'Current Service';
-    final canMark = prompt?.canMarkPresent == true && !_isMarkingPresent;
     final hasActive = prompt?.hasActiveService == true;
     final isVerified = prompt?.alreadyMarked == true;
     final isInside = prompt?.isInsideGeofence == true;
+    final canMark = hasActive && !isVerified && !_isMarkingPresent;
 
     return AppCard(
       color: hasActive
@@ -579,44 +579,15 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
               label: 'Inside church radius',
               isComplete: isInside,
             ),
-            _buildCheckInStep(
-              context,
-              label: 'Property stay verified',
-              isComplete: isVerified || prompt.canMarkPresent,
-            ),
-            const SizedBox(height: 10),
-            LinearProgressIndicator(
-              minHeight: 6,
-              value: prompt.requiredDwellMinutes == 0
-                  ? 1
-                  : (prompt.currentDwellMinutes / prompt.requiredDwellMinutes)
-                      .clamp(0, 1)
-                      .toDouble(),
-              backgroundColor:
-                  theme.colorScheme.surfaceContainerHighest.withValues(
-                alpha: 0.8,
-              ),
-            ),
             const SizedBox(height: 8),
             Text(
               isVerified
                   ? 'Present recorded for today.'
                   : isInside
-                      ? '${prompt.currentDwellMinutes}/${prompt.requiredDwellMinutes} minutes verified on property.'
-                      : 'Geofence verification required before check-in.',
+                      ? 'Location is inside the church radius. Tap Manual Sign-In to mark present.'
+                      : 'Tap Manual Sign-In to request location access and confirm you are at church.',
               style: theme.textTheme.labelMedium,
             ),
-            if (!isVerified && !prompt.canMarkPresent) ...[
-              const SizedBox(height: 6),
-              Text(
-                isInside
-                    ? 'Stay on the church property until verification completes, then tap Mark Present.'
-                    : 'When you arrive at church, keep the app open and tap Refresh so Mark Present can unlock.',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ],
           ],
           const SizedBox(height: 12),
           Row(
@@ -633,7 +604,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Icon(Icons.how_to_reg_outlined),
-                  label: Text(isVerified ? 'Already Present' : 'Mark Present'),
+                  label:
+                      Text(isVerified ? 'Already Present' : 'Manual Sign-In'),
                 ),
               ),
               const SizedBox(width: 8),
