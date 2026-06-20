@@ -10,10 +10,10 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 import '../../providers/user_role_provider.dart';
-import '../../theme/app_colors.dart';
 import '../../widgets/ui/app_scaffold.dart';
 import '../../widgets/ui/app_card.dart';
 import '../../widgets/ui/app_button.dart';
+import '../../widgets/ui/app_feedback.dart';
 import '../../widgets/ui/app_text_field.dart';
 import '../../models/support_ticket_model.dart';
 import '../../services/email_service.dart';
@@ -123,8 +123,10 @@ class _SupportScreenState extends State<SupportScreen> {
     if (!_formKey.currentState!.validate()) return;
     if (_summaryController.text.trim().isEmpty ||
         _descriptionController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please add a summary and description.')),
+      AppFeedback.show(
+        context,
+        'Please add a summary and description.',
+        type: AppFeedbackType.warning,
       );
       return;
     }
@@ -208,7 +210,7 @@ class _SupportScreenState extends State<SupportScreen> {
         showDialog(
           context: context,
           builder: (_) => AlertDialog(
-            title: const Text('Report Sent ✅'),
+            title: const Text('Report Sent'),
             content: Text(
                 'Your ticket ID is:\n$ticketId\n\nOur support team has been notified via email.'),
             actions: [
@@ -225,8 +227,11 @@ class _SupportScreenState extends State<SupportScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Error submitting report: $e')));
+        AppFeedback.show(
+          context,
+          'Error submitting report: $e',
+          type: AppFeedbackType.error,
+        );
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -329,8 +334,10 @@ class _SupportScreenState extends State<SupportScreen> {
                             style: Theme.of(context).textTheme.titleMedium),
                         IconButton(
                             onPressed: _pickImage,
-                            icon: const Icon(Icons.add_a_photo,
-                                color: AppColors.primary)),
+                            icon: Icon(
+                              Icons.add_a_photo,
+                              color: Theme.of(context).colorScheme.primary,
+                            )),
                       ],
                     ),
                     if (_attachments.isNotEmpty)

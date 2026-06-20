@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -11,10 +12,31 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/app_notification.dart';
 
+class _NotificationSoundProfile {
+  const _NotificationSoundProfile({
+    required this.channelId,
+    required this.channelName,
+    required this.description,
+    required this.soundName,
+  });
+
+  final String channelId;
+  final String channelName;
+  final String description;
+  final String soundName;
+
+  RawResourceAndroidNotificationSound get androidSound =>
+      RawResourceAndroidNotificationSound(soundName);
+
+  String get iosSound => '$soundName.wav';
+}
+
 class NotificationService {
   static final NotificationService _instance = NotificationService._internal();
   factory NotificationService() => _instance;
   NotificationService._internal();
+  static final GlobalKey<NavigatorState> navigatorKey =
+      GlobalKey<NavigatorState>();
 
   final FlutterLocalNotificationsPlugin _localNotifications =
       FlutterLocalNotificationsPlugin();
@@ -27,11 +49,87 @@ class NotificationService {
     'https://us-central1-graceconnect-9a97c.cloudfunctions.net/sendTopicNotification',
   );
 
+  static const _defaultSound = _NotificationSoundProfile(
+    channelId: 'grace_default_channel_v1',
+    channelName: 'Grace Connect',
+    description: 'General Grace Connect notifications',
+    soundName: 'grace_default',
+  );
+
+  static const Map<String, _NotificationSoundProfile> _soundProfiles = {
+    'general': _defaultSound,
+    'announcement': _defaultSound,
+    'community': _defaultSound,
+    'like': _defaultSound,
+    'comment': _defaultSound,
+    'message': _NotificationSoundProfile(
+      channelId: 'grace_messages_channel_v1',
+      channelName: 'Grace Connect Messages',
+      description: 'Direct message notifications',
+      soundName: 'grace_message',
+    ),
+    'direct_message': _NotificationSoundProfile(
+      channelId: 'grace_messages_channel_v1',
+      channelName: 'Grace Connect Messages',
+      description: 'Direct message notifications',
+      soundName: 'grace_message',
+    ),
+    'prayer': _NotificationSoundProfile(
+      channelId: 'grace_prayer_channel_v1',
+      channelName: 'Prayer Requests',
+      description: 'Prayer and care notifications',
+      soundName: 'grace_prayer',
+    ),
+    'prayer_request': _NotificationSoundProfile(
+      channelId: 'grace_prayer_channel_v1',
+      channelName: 'Prayer Requests',
+      description: 'Prayer and care notifications',
+      soundName: 'grace_prayer',
+    ),
+    'daily_motivation': _NotificationSoundProfile(
+      channelId: 'grace_daily_word_channel_v1',
+      channelName: 'Daily Word',
+      description: 'Daily devotional and motivation notifications',
+      soundName: 'grace_daily',
+    ),
+    'daily_devotional': _NotificationSoundProfile(
+      channelId: 'grace_daily_word_channel_v1',
+      channelName: 'Daily Word',
+      description: 'Daily devotional and motivation notifications',
+      soundName: 'grace_daily',
+    ),
+    'daily_bible_quiz': _NotificationSoundProfile(
+      channelId: 'grace_daily_quiz_channel_v1',
+      channelName: 'Daily Bible Quiz',
+      description: 'Daily Bible quiz notifications',
+      soundName: 'grace_quiz',
+    ),
+    'quiz': _NotificationSoundProfile(
+      channelId: 'grace_daily_quiz_channel_v1',
+      channelName: 'Daily Bible Quiz',
+      description: 'Daily Bible quiz notifications',
+      soundName: 'grace_quiz',
+    ),
+    'monthly_quiz_winners': _NotificationSoundProfile(
+      channelId: 'grace_daily_quiz_channel_v1',
+      channelName: 'Daily Bible Quiz',
+      description: 'Daily Bible quiz notifications',
+      soundName: 'grace_quiz',
+    ),
+    'live_stream': _NotificationSoundProfile(
+      channelId: 'grace_live_channel_v1',
+      channelName: 'Live Service',
+      description: 'Live service notifications',
+      soundName: 'grace_live',
+    ),
+  };
+
   // Default topics and their pref keys
   static const Map<String, String> topicMap = {
     'events': 'notify_service', // Mapping Service Reminders to events topic
     'updates': 'notify_updates',
     'devotionals': 'notify_devotionals',
+    'quiz': 'notify_daily_quiz',
     'community': 'notify_community',
     'prayers': 'notify_prayer',
   };
@@ -49,31 +147,126 @@ class NotificationService {
 
     const AndroidInitializationSettings androidInit =
         AndroidInitializationSettings('@mipmap/ic_launcher');
-    const InitializationSettings initSettings =
-        InitializationSettings(android: androidInit);
-    await _localNotifications.initialize(initSettings);
+    const DarwinInitializationSettings iosInit = DarwinInitializationSettings(
+      defaultPresentAlert: true,
+      defaultPresentBadge: true,
+      defaultPresentSound: true,
+    );
+    const InitializationSettings initSettings = InitializationSettings(
+      android: androidInit,
+      iOS: iosInit,
+    );
+    await _localNotifications.initialize(
+      initSettings,
+      onDidReceiveNotificationResponse: (response) {
+        _navigateToRoute(response.payload);
+      },
+    );
+    await _createAndroidNotificationChannels();
 
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       if (message.notification != null) {
         _showLocalNotification(
-            message.notification!.title, message.notification!.body);
+          message.notification!.title,
+          message.notification!.body,
+          route: message.data['route'],
+          type: message.data['type'],
+        );
       }
     });
+
+    FirebaseMessaging.onMessageOpenedApp.listen(_openRouteFromMessage);
+    final initialMessage = await _messaging.getInitialMessage();
+    if (initialMessage != null) {
+      unawaited(Future<void>.delayed(
+        const Duration(milliseconds: 500),
+        () => _openRouteFromMessage(initialMessage),
+      ));
+    }
   }
 
-  Future<void> _showLocalNotification(String? title, String? body) async {
+  Future<void> _showLocalNotification(
+    String? title,
+    String? body, {
+    String? route,
+    String? type,
+  }) async {
     if (kIsWeb) return;
 
-    const AndroidNotificationDetails androidDetails =
+    final profile = _profileForType(type);
+    final AndroidNotificationDetails androidDetails =
         AndroidNotificationDetails(
-      'channel_id',
-      'GraceConnect Notifications',
+      profile.channelId,
+      profile.channelName,
+      channelDescription: profile.description,
       importance: Importance.max,
       priority: Priority.high,
+      playSound: true,
+      sound: profile.androidSound,
     );
-    const NotificationDetails details =
-        NotificationDetails(android: androidDetails);
-    await _localNotifications.show(0, title, body, details);
+    final DarwinNotificationDetails iosDetails = DarwinNotificationDetails(
+      presentAlert: true,
+      presentBadge: true,
+      presentSound: true,
+      sound: profile.iosSound,
+    );
+    final NotificationDetails details = NotificationDetails(
+      android: androidDetails,
+      iOS: iosDetails,
+    );
+    await _localNotifications.show(0, title, body, details, payload: route);
+  }
+
+  Future<void> _createAndroidNotificationChannels() async {
+    final androidPlugin =
+        _localNotifications.resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>();
+    if (androidPlugin == null) return;
+
+    final uniqueProfiles = <String, _NotificationSoundProfile>{
+      for (final p in _soundProfiles.values) p.channelId: p
+    };
+    for (final profile in uniqueProfiles.values) {
+      await androidPlugin.createNotificationChannel(
+        AndroidNotificationChannel(
+          profile.channelId,
+          profile.channelName,
+          description: profile.description,
+          importance: Importance.max,
+          playSound: true,
+          sound: profile.androidSound,
+        ),
+      );
+    }
+  }
+
+  _NotificationSoundProfile _profileForType(String? type) {
+    final normalized = (type ?? 'general')
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9_]+'), '_');
+    return _soundProfiles[normalized] ?? _defaultSound;
+  }
+
+  void _openRouteFromMessage(RemoteMessage message) {
+    _navigateToRoute(message.data['route']);
+  }
+
+  void _navigateToRoute(String? route) {
+    final cleanRoute = route?.trim();
+    if (cleanRoute == null || cleanRoute.isEmpty) return;
+
+    void pushRoute() {
+      final navigator = navigatorKey.currentState;
+      if (navigator == null) return;
+      navigator.pushNamed(cleanRoute);
+    }
+
+    if (navigatorKey.currentState == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => pushRoute());
+    } else {
+      pushRoute();
+    }
   }
 
   Future<void> sendNotification(
@@ -171,7 +364,12 @@ class NotificationService {
           }
           if (notification.createdAt.isBefore(_foregroundStartedAt)) continue;
           _shownForegroundNotificationIds.add(notification.id);
-          _showLocalNotification(notification.title, notification.body);
+          _showLocalNotification(
+            notification.title,
+            notification.body,
+            route: notification.route,
+            type: notification.type,
+          );
         }
       },
       onError: (error) {

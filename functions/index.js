@@ -56,7 +56,19 @@ function normalizeRole(role) {
     .replace(/^_+|_+$/g, "");
 }
 
-function canSendAnnouncements(roles) {
+function normalizePrivilege(privilege) {
+  return String(privilege || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function hasAnyPrivilege(profile, allowedPrivileges) {
+  const privileges = Array.isArray(profile.appPrivileges) ? profile.appPrivileges : [];
+  return privileges.some((privilege) => allowedPrivileges.has(normalizePrivilege(privilege)));
+}
+
+function canSendChurchWidePush(profile, type) {
   const allowedRoles = new Set([
     "pastor",
     "senior_pastor",
@@ -69,7 +81,43 @@ function canSendAnnouncements(roles) {
     "church_secretary",
   ]);
 
-  return Array.isArray(roles) && roles.some((role) => allowedRoles.has(normalizeRole(role)));
+  const hasAllowedRole =
+    Array.isArray(profile.roles) && profile.roles.some((role) => allowedRoles.has(normalizeRole(role)));
+  if (hasAllowedRole) return true;
+
+  const allowedPrivileges = new Set([
+    "sendpushnotification",
+    "createannouncement",
+  ]);
+  if (type === "live_stream") {
+    allowedPrivileges.add("managelivestream");
+  }
+  return hasAnyPrivilege(profile, allowedPrivileges);
+}
+
+function notificationSoundProfile(type) {
+  const normalized = String(type || "general")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, "_");
+  const profiles = {
+    general: { channelId: "grace_default_channel_v1", sound: "grace_default.wav" },
+    announcement: { channelId: "grace_default_channel_v1", sound: "grace_default.wav" },
+    community: { channelId: "grace_default_channel_v1", sound: "grace_default.wav" },
+    like: { channelId: "grace_default_channel_v1", sound: "grace_default.wav" },
+    comment: { channelId: "grace_default_channel_v1", sound: "grace_default.wav" },
+    message: { channelId: "grace_messages_channel_v1", sound: "grace_message.wav" },
+    direct_message: { channelId: "grace_messages_channel_v1", sound: "grace_message.wav" },
+    prayer: { channelId: "grace_prayer_channel_v1", sound: "grace_prayer.wav" },
+    prayer_request: { channelId: "grace_prayer_channel_v1", sound: "grace_prayer.wav" },
+    daily_motivation: { channelId: "grace_daily_word_channel_v1", sound: "grace_daily.wav" },
+    daily_devotional: { channelId: "grace_daily_word_channel_v1", sound: "grace_daily.wav" },
+    daily_bible_quiz: { channelId: "grace_daily_quiz_channel_v1", sound: "grace_quiz.wav" },
+    quiz: { channelId: "grace_daily_quiz_channel_v1", sound: "grace_quiz.wav" },
+    monthly_quiz_winners: { channelId: "grace_daily_quiz_channel_v1", sound: "grace_quiz.wav" },
+    live_stream: { channelId: "grace_live_channel_v1", sound: "grace_live.wav" },
+  };
+  return profiles[normalized] || profiles.general;
 }
 
 async function getSupabaseUserProfile(supabaseToken) {
@@ -144,16 +192,30 @@ exports.sendTopicNotification = onRequest({ cors: true }, async (request, respon
       return;
     }
 
-    if (!canSendAnnouncements(profile.roles || [])) {
+    if (!canSendChurchWidePush(profile, type)) {
       response.status(403).json({ error: "User cannot send church-wide push notifications." });
       return;
     }
 
+    const soundProfile = notificationSoundProfile(type);
     const messageId = await admin.messaging().send({
       topic,
       notification: {
         title: String(title).slice(0, 120),
         body: String(body).slice(0, 220),
+      },
+      android: {
+        notification: {
+          channelId: soundProfile.channelId,
+          sound: soundProfile.sound.replace(".wav", ""),
+        },
+      },
+      apns: {
+        payload: {
+          aps: {
+            sound: soundProfile.sound,
+          },
+        },
       },
       data: {
         type: String(type || "announcement"),

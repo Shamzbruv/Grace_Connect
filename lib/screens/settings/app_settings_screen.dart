@@ -146,11 +146,12 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
     bool value,
     ValueChanged<bool> onChanged,
   ) {
-    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+    final theme = Theme.of(context);
+    final isDarkMode = theme.brightness == Brightness.dark;
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: Theme.of(context).cardTheme.color,
+        color: theme.cardTheme.color,
         borderRadius: BorderRadius.circular(12),
       ),
       child: SwitchListTile(
@@ -158,7 +159,10 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
             Icon(icon, color: isDarkMode ? Colors.white : AppColors.primary),
         title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
         subtitle: Text(subtitle,
-            style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+            style: TextStyle(
+              fontSize: 12,
+              color: theme.colorScheme.onSurfaceVariant,
+            )),
         value: value,
         onChanged: onChanged,
       ),
@@ -167,11 +171,12 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
 
   Widget _buildActionTile(
       BuildContext context, String title, IconData icon, VoidCallback onTap) {
-    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+    final theme = Theme.of(context);
+    final isDarkMode = theme.brightness == Brightness.dark;
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: Theme.of(context).cardTheme.color,
+        color: theme.cardTheme.color,
         borderRadius: BorderRadius.circular(12),
       ),
       child: ListTile(

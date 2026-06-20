@@ -16,6 +16,8 @@ import 'screens/admin/finance_dashboard_screen.dart';
 import 'screens/admin/attendance_insights_screen.dart';
 import 'screens/admin/role_management_screen.dart';
 import 'screens/admin/schedule_management_screen.dart';
+import 'screens/admin/daily_motivation_admin_screen.dart';
+import 'screens/admin/daily_bible_quiz_admin_screen.dart';
 import 'screens/landing/landing_page.dart';
 import 'screens/login screen/login_screen.dart';
 import 'screens/login screen/auth_callback_screen.dart';
@@ -32,6 +34,8 @@ import 'screens/prayers/prayers_screen.dart';
 import 'screens/analytics/analytics_screen.dart';
 import 'screens/announcements/announcements_screen.dart';
 import 'screens/counseling/counseling_intro_screen.dart';
+import 'screens/daily_word/daily_word_screen.dart';
+import 'screens/bible/bible_quiz_screen.dart';
 import 'screens/live_streaming/live_streaming_screen.dart';
 import 'screens/main/main_tabs_screen.dart';
 import 'screens/members/member_dashboard_screen.dart';
@@ -155,6 +159,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
           return MaterialApp(
             title: 'Grace Connect',
             debugShowCheckedModeBanner: false,
+            navigatorKey: NotificationService.navigatorKey,
             theme: AppTheme.lightTheme,
             darkTheme: AppTheme.darkTheme,
             themeMode: themeProvider.themeMode,
@@ -185,6 +190,9 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
                   _protected(const CounselingIntroScreen()),
               '/live_streaming': (context) =>
                   _protected(const LiveStreamingScreen()),
+              '/daily_word': (context) => _protected(const DailyWordScreen()),
+              '/daily_bible_quiz': (context) =>
+                  _protected(const BibleQuizScreen()),
               '/community': (context) =>
                   _protected(const MainTabsScreen(initialIndex: 0)),
               '/bible': (context) =>
@@ -197,6 +205,10 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
                   _protected(const RoleManagementScreen()),
               '/schedule_management': (context) =>
                   _protected(const ScheduleManagementScreen()),
+              '/admin/daily_word': (context) =>
+                  _protected(const DailyMotivationAdminScreen()),
+              '/admin/daily_quiz': (context) =>
+                  _protected(const DailyBibleQuizAdminScreen()),
               '/finance': (context) =>
                   _protected(const FinanceDashboardScreen()),
               '/member_dashboard': (context) =>
@@ -251,6 +263,28 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
               '/ministries': (context) => _protected(const MinistriesScreen()),
               '/church_transfer': (context) =>
                   _protected(const ChurchTransferScreen()),
+            },
+            onGenerateRoute: (settings) {
+              final uri = Uri.tryParse(settings.name ?? '');
+              if (uri?.path == '/daily_word') {
+                return MaterialPageRoute(
+                  builder: (_) => _protected(
+                    DailyWordScreen(
+                      motivationId: uri?.queryParameters['id'],
+                    ),
+                  ),
+                );
+              }
+              if (uri?.path == '/daily_bible_quiz') {
+                return MaterialPageRoute(
+                  builder: (_) => _protected(
+                    BibleQuizScreen(
+                      initialMonth: uri?.queryParameters['month'],
+                    ),
+                  ),
+                );
+              }
+              return null;
             },
             onUnknownRoute: (settings) {
               final routeName = settings.name ?? '';

@@ -124,6 +124,17 @@ class AppTheme {
       dividerTheme: DividerThemeData(
           color: isDark ? Colors.white10 : const Color(0xFFEEEEEE),
           thickness: 1),
+      sliderTheme: SliderThemeData(
+        activeTrackColor: colorScheme.primary,
+        inactiveTrackColor: colorScheme.onSurface.withValues(alpha: 0.22),
+        thumbColor: colorScheme.primary,
+        overlayColor: colorScheme.primary.withValues(alpha: 0.16),
+        valueIndicatorColor: colorScheme.primary,
+        valueIndicatorTextStyle: GoogleFonts.outfit(
+          color: colorScheme.onPrimary,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
       drawerTheme: DrawerThemeData(
         backgroundColor: isDark ? AppColors.surfaceDark : AppColors.background,
       ),
@@ -133,6 +144,46 @@ class AppTheme {
             isDark ? AppColors.surfaceDark : AppColors.surface,
         shape: const RoundedRectangleBorder(
             borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
+      ),
+      snackBarTheme: SnackBarThemeData(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor:
+            isDark ? AppColors.surfaceDark : AppColors.primaryVariant,
+        contentTextStyle: GoogleFonts.outfit(
+          color: Colors.white,
+          fontSize: 15,
+          fontWeight: FontWeight.w600,
+        ),
+        actionTextColor: AppColors.goldHighlight,
+        elevation: 10,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(18),
+          side: BorderSide(
+            color: isDark ? Colors.white12 : Colors.black12,
+          ),
+        ),
+        insetPadding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
+      ),
+      dialogTheme: DialogThemeData(
+        backgroundColor: isDark ? AppColors.surfaceDark : AppColors.surface,
+        surfaceTintColor: Colors.transparent,
+        elevation: 16,
+        titleTextStyle: GoogleFonts.outfit(
+          color: colorScheme.onSurface,
+          fontSize: 22,
+          fontWeight: FontWeight.w800,
+        ),
+        contentTextStyle: GoogleFonts.outfit(
+          color: colorScheme.onSurfaceVariant,
+          fontSize: 15,
+          height: 1.35,
+        ),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(24),
+          side: BorderSide(
+            color: isDark ? Colors.white10 : const Color(0xFFE5E7EB),
+          ),
+        ),
       ),
     );
   }

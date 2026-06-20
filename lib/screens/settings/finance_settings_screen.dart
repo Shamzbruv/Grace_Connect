@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../providers/user_role_provider.dart';
-import '../../theme/app_colors.dart';
 import '../../widgets/ui/app_scaffold.dart';
 
 class FinanceSettingsScreen extends StatefulWidget {
@@ -204,7 +203,6 @@ class _FinanceSettingsScreenState extends State<FinanceSettingsScreen> {
                   subtitle:
                       const Text('Flag expense records that have no receipt.'),
                   value: _requireReceipts,
-                  activeColor: AppColors.primary,
                   onChanged: (value) =>
                       setState(() => _requireReceipts = value),
                 ),

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../models/user_profile.dart';
 import '../../providers/user_role_provider.dart';
 import '../../services/feed_scroll_service.dart';
 import '../../widgets/app_bottom_menu.dart';
@@ -93,7 +94,8 @@ class _MoreTabScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final profile = context.watch<UserRoleProvider>().userProfile;
+    final roleProvider = context.watch<UserRoleProvider>();
+    final profile = roleProvider.userProfile;
     final capabilities = profile?.capabilities;
     final canAccessCareCases = capabilities?.canManageCareCases == true ||
         capabilities?.canViewAssignedCareCases == true;
@@ -101,15 +103,23 @@ class _MoreTabScreen extends StatelessWidget {
         capabilities?.canViewSensitivePrayers == true;
     final canManageRoles = capabilities?.canManageRoles ?? false;
     final canManageSchedules = capabilities?.canManageSchedules ?? false;
+    final canViewAnalytics = capabilities?.canManageMembersBasic == true ||
+        capabilities?.canViewFinance == true ||
+        capabilities?.canApproveHighImpactEvents == true ||
+        roleProvider.isDeveloper;
+    final isPlainMember = _isPlainMember(profile);
 
     final actions = [
-      const _MoreAction('Member View', '/member_view', Icons.home_outlined),
+      if (!isPlainMember)
+        const _MoreAction('Member View', '/member_view', Icons.home_outlined),
       const _MoreAction('Members', '/members', Icons.people_outline),
       const _MoreAction('Inbox', '/inbox', Icons.inbox_outlined),
       const _MoreAction(
           'Attendance', '/attendance', Icons.checklist_rtl_outlined),
       const _MoreAction(
           'Transfer', '/church_transfer', Icons.compare_arrows_outlined),
+      const _MoreAction(
+          'Announcements', '/announcements', Icons.campaign_outlined),
       if (canManageSchedules)
         const _MoreAction(
           'Schedules',
@@ -130,7 +140,8 @@ class _MoreTabScreen extends StatelessWidget {
         Icons.favorite_outline,
       ),
       const _MoreAction('Live', '/live_streaming', Icons.live_tv_outlined),
-      const _MoreAction('Analytics', '/analytics', Icons.analytics_outlined),
+      if (canViewAnalytics)
+        const _MoreAction('Analytics', '/analytics', Icons.analytics_outlined),
       if (canManageRoles)
         const _MoreAction('Roles', '/role_management', Icons.security_outlined),
       const _MoreAction('Giving', '/donations', Icons.favorite_outline),
@@ -151,47 +162,10 @@ class _MoreTabScreen extends StatelessWidget {
                 ?.copyWith(fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 16),
-          GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: actions.length,
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 3,
-              mainAxisSpacing: 12,
-              crossAxisSpacing: 12,
-              childAspectRatio: 0.95,
-            ),
-            itemBuilder: (context, index) {
-              final action = actions[index];
-              return InkWell(
-                onTap: () => Navigator.of(context).pushNamed(action.route),
-                borderRadius: BorderRadius.circular(16),
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: theme.cardTheme.color,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: theme.dividerColor.withValues(alpha: 0.12),
-                    ),
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(action.icon, color: theme.colorScheme.primary),
-                      const SizedBox(height: 8),
-                      Text(
-                        action.label,
-                        textAlign: TextAlign.center,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.labelLarge,
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
+          for (final action in actions) ...[
+            _MoreActionTile(action: action),
+            const SizedBox(height: 8),
+          ],
           const SizedBox(height: 20),
           ListTile(
             leading: const Icon(Icons.logout, color: Colors.red),
@@ -213,6 +187,39 @@ class _MoreTabScreen extends StatelessWidget {
       ),
     );
   }
+
+  bool _isPlainMember(UserProfile? profile) {
+    if (profile == null) return true;
+    final capabilities = profile.capabilities;
+    final hasElevatedAccess = capabilities.canCreateEvents ||
+        capabilities.canEditEvents ||
+        capabilities.canPublishAnnouncements ||
+        capabilities.canModeratePosts ||
+        capabilities.canManageSchedules ||
+        capabilities.canAssignPrayers ||
+        capabilities.canViewSensitivePrayers ||
+        capabilities.canManageCareCases ||
+        capabilities.canViewAssignedCareCases ||
+        capabilities.canManageMembersBasic ||
+        capabilities.canManageRoles ||
+        capabilities.canViewFinance ||
+        capabilities.canManageFinance ||
+        capabilities.canManageMediaUploads ||
+        capabilities.canManageServiceChecklists ||
+        capabilities.canApproveHighImpactEvents ||
+        profile.isDeveloper;
+    if (hasElevatedAccess) return false;
+
+    return profile.roles.every((role) {
+      final normalized = role
+          .trim()
+          .toLowerCase()
+          .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+          .replaceAll(RegExp(r'_+'), '_')
+          .replaceAll(RegExp(r'^_|_$'), '');
+      return normalized.isEmpty || normalized == 'member';
+    });
+  }
 }
 
 class _MoreAction {
@@ -221,4 +228,35 @@ class _MoreAction {
   final String label;
   final String route;
   final IconData icon;
+}
+
+class _MoreActionTile extends StatelessWidget {
+  const _MoreActionTile({required this.action});
+
+  final _MoreAction action;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return ListTile(
+      leading: Icon(action.icon, color: theme.colorScheme.primary),
+      title: Text(
+        action.label,
+        style: theme.textTheme.titleMedium?.copyWith(
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+      trailing: Icon(
+        Icons.chevron_right,
+        color: theme.colorScheme.onSurfaceVariant,
+      ),
+      tileColor: theme.cardTheme.color,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: theme.dividerColor.withValues(alpha: 0.12)),
+      ),
+      onTap: () => Navigator.of(context).pushNamed(action.route),
+    );
+  }
 }

@@ -10,7 +10,6 @@ import '../../models/user_profile.dart';
 import '../../providers/user_role_provider.dart';
 import '../../services/attendance_service.dart';
 import '../../models/attendance_record.dart';
-import '../../theme/app_colors.dart';
 import '../../widgets/ui/app_card.dart';
 
 import '../../widgets/ui/app_loader.dart';
@@ -289,7 +288,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                             if (selected) setState(() => _filter = filter);
                           },
                           backgroundColor: Theme.of(context).cardColor,
-                          selectedColor: AppColors.primary,
+                          selectedColor: Theme.of(context).colorScheme.primary,
                           labelStyle: TextStyle(
                             color: isSelected
                                 ? Theme.of(context).colorScheme.onPrimary

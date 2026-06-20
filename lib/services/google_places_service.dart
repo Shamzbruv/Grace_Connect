@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
+import '../config.dart';
+
 class GooglePlaceResult {
   const GooglePlaceResult({
     required this.id,
@@ -19,8 +21,7 @@ class GooglePlaceResult {
 }
 
 class GooglePlacesService {
-  // Ideally this should be in an environment variable or secure config
-  static const String apiKey = 'AIzaSyCwOedktmKNGVOK5mmpvNbSrnbzZ0PG1wg';
+  static const String apiKey = Config.googlePlacesApiKey;
 
   static Future<List<Map<String, String>>> searchChurches(String query) async {
     final results = await searchChurchLocations(query);

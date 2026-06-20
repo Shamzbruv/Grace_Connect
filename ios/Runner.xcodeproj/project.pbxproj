@@ -11,6 +11,12 @@
 		3231C24D803C3D841009BB54 /* GoogleService-Info.plist in Sources */ = {isa = PBXBuildFile; fileRef = DA240FD645993752C82F3E87 /* GoogleService-Info.plist */; };
 		331C808B294A63AB00263BE5 /* RunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 331C807B294A618700263BE5 /* RunnerTests.swift */; };
 		3B3967161E833CAA004F5970 /* AppFrameworkInfo.plist in Resources */ = {isa = PBXBuildFile; fileRef = 3B3967151E833CAA004F5970 /* AppFrameworkInfo.plist */; };
+		4C1A90010000000000000001 /* grace_default.wav in Resources */ = {isa = PBXBuildFile; fileRef = 4C1A90000000000000000001 /* grace_default.wav */; };
+		4C1A90030000000000000001 /* grace_message.wav in Resources */ = {isa = PBXBuildFile; fileRef = 4C1A90020000000000000001 /* grace_message.wav */; };
+		4C1A90050000000000000001 /* grace_prayer.wav in Resources */ = {isa = PBXBuildFile; fileRef = 4C1A90040000000000000001 /* grace_prayer.wav */; };
+		4C1A90070000000000000001 /* grace_daily.wav in Resources */ = {isa = PBXBuildFile; fileRef = 4C1A90060000000000000001 /* grace_daily.wav */; };
+		4C1A90090000000000000001 /* grace_quiz.wav in Resources */ = {isa = PBXBuildFile; fileRef = 4C1A90080000000000000001 /* grace_quiz.wav */; };
+		4C1A900B0000000000000001 /* grace_live.wav in Resources */ = {isa = PBXBuildFile; fileRef = 4C1A900A0000000000000001 /* grace_live.wav */; };
 		74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74858FAE1ED2DC5600515810 /* AppDelegate.swift */; };
 		748E8FB588A9E22AF899E65E /* libPods-Runner.a in Frameworks */ = {isa = PBXBuildFile; fileRef = E37E701C3242011F04CDFD52 /* libPods-Runner.a */; };
 		97C146FC1CF9000F007C117D /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FA1CF9000F007C117D /* Main.storyboard */; };
@@ -50,6 +56,12 @@
 		331C8081294A63A400263BE5 /* RunnerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RunnerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		33C1E43835AF89667758D2A7 /* libPods-RunnerTests.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-RunnerTests.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		3B3967151E833CAA004F5970 /* AppFrameworkInfo.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = AppFrameworkInfo.plist; path = Flutter/AppFrameworkInfo.plist; sourceTree = "<group>"; };
+		4C1A90000000000000000001 /* grace_default.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = NotificationSounds/grace_default.wav; sourceTree = "<group>"; };
+		4C1A90020000000000000001 /* grace_message.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = NotificationSounds/grace_message.wav; sourceTree = "<group>"; };
+		4C1A90040000000000000001 /* grace_prayer.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = NotificationSounds/grace_prayer.wav; sourceTree = "<group>"; };
+		4C1A90060000000000000001 /* grace_daily.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = NotificationSounds/grace_daily.wav; sourceTree = "<group>"; };
+		4C1A90080000000000000001 /* grace_quiz.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = NotificationSounds/grace_quiz.wav; sourceTree = "<group>"; };
+		4C1A900A0000000000000001 /* grace_live.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = NotificationSounds/grace_live.wav; sourceTree = "<group>"; };
 		615D65DC11B98FD4E1D14086 /* Pods-Runner.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.release.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig"; sourceTree = "<group>"; };
 		74858FAD1ED2DC5600515810 /* Runner-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Runner-Bridging-Header.h"; sourceTree = "<group>"; };
 		74858FAE1ED2DC5600515810 /* AppDelegate.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
@@ -107,7 +119,6 @@
 				C264219C769D5FA7331237E1 /* Pods-RunnerTests.release.xcconfig */,
 				863D052DC42D800B7E7086CA /* Pods-RunnerTests.profile.xcconfig */,
 			);
-			name = Pods;
 			path = Pods;
 			sourceTree = "<group>";
 		};
@@ -155,8 +166,22 @@
 				74858FAE1ED2DC5600515810 /* AppDelegate.swift */,
 				74858FAD1ED2DC5600515810 /* Runner-Bridging-Header.h */,
 				DA240FD645993752C82F3E87 /* GoogleService-Info.plist */,
+				4C1A900C0000000000000001 /* NotificationSounds */,
 			);
 			path = Runner;
+			sourceTree = "<group>";
+		};
+		4C1A900C0000000000000001 /* NotificationSounds */ = {
+			isa = PBXGroup;
+			children = (
+				4C1A90000000000000000001 /* grace_default.wav */,
+				4C1A90020000000000000001 /* grace_message.wav */,
+				4C1A90040000000000000001 /* grace_prayer.wav */,
+				4C1A90060000000000000001 /* grace_daily.wav */,
+				4C1A90080000000000000001 /* grace_quiz.wav */,
+				4C1A900A0000000000000001 /* grace_live.wav */,
+			);
+			path = NotificationSounds;
 			sourceTree = "<group>";
 		};
 		9E5DDA76A56F0F581391D97C /* Frameworks */ = {
@@ -263,6 +288,12 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				4C1A90010000000000000001 /* grace_default.wav in Resources */,
+				4C1A90030000000000000001 /* grace_message.wav in Resources */,
+				4C1A90050000000000000001 /* grace_prayer.wav in Resources */,
+				4C1A90070000000000000001 /* grace_daily.wav in Resources */,
+				4C1A90090000000000000001 /* grace_quiz.wav in Resources */,
+				4C1A900B0000000000000001 /* grace_live.wav in Resources */,
 				97C147011CF9000F007C117D /* LaunchScreen.storyboard in Resources */,
 				3B3967161E833CAA004F5970 /* AppFrameworkInfo.plist in Resources */,
 				97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */,
@@ -475,6 +506,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
+				DEVELOPMENT_TEAM = 2FTU79V464;
 				ENABLE_BITCODE = NO;
 				INFOPLIST_FILE = Runner/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -657,6 +689,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
+				DEVELOPMENT_TEAM = 2FTU79V464;
 				ENABLE_BITCODE = NO;
 				INFOPLIST_FILE = Runner/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -679,6 +712,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
+				DEVELOPMENT_TEAM = 2FTU79V464;
 				ENABLE_BITCODE = NO;
 				INFOPLIST_FILE = Runner/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (

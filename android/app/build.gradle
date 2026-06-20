@@ -5,6 +5,26 @@ plugins {
     id "com.google.gms.google-services"
 }
 
+def localProperties = new Properties()
+def localPropertiesFile = rootProject.file("local.properties")
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.withReader("UTF-8") { reader ->
+        localProperties.load(reader)
+    }
+}
+
+def readMapsApiKey = { platform ->
+    def platformKeyName = "GOOGLE_MAPS_API_KEY_${platform}"
+    def sharedKeyName = "GOOGLE_MAPS_API_KEY"
+    return project.findProperty(platformKeyName)
+            ?: localProperties.getProperty(platformKeyName)
+            ?: System.getenv(platformKeyName)
+            ?: project.findProperty(sharedKeyName)
+            ?: localProperties.getProperty(sharedKeyName)
+            ?: System.getenv(sharedKeyName)
+            ?: ""
+}
+
 android {
     namespace "com.example.grace_connect"
     compileSdkVersion 35
@@ -28,9 +48,12 @@ android {
         applicationId "com.example.grace_connect"
         minSdkVersion 23
         targetSdkVersion 35
-        versionCode 8
-        versionName "1.0.7-beta"
+        versionCode 9
+        versionName "1.0.8-beta"
         multiDexEnabled true
+        manifestPlaceholders = [
+            googleMapsApiKey: readMapsApiKey("ANDROID"),
+        ]
     }
 
     signingConfigs {

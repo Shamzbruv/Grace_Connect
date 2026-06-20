@@ -1,6 +1,5 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
-import 'firebase_options.dart';
 
 class Config {
   static String get apiUrl {
@@ -13,7 +12,13 @@ class Config {
     }
   }
 
-  static String get googlePlacesApiKey {
-    return DefaultFirebaseOptions.currentPlatform.apiKey;
-  }
+  static const String googleMapsApiKey = String.fromEnvironment(
+    'GOOGLE_MAPS_API_KEY',
+    defaultValue: '',
+  );
+
+  static const String googlePlacesApiKey = String.fromEnvironment(
+    'GOOGLE_PLACES_API_KEY',
+    defaultValue: googleMapsApiKey,
+  );
 }

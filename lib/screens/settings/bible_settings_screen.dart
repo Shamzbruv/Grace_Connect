@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../services/bible_service.dart';
-import '../../theme/app_colors.dart';
 import '../../widgets/ui/app_scaffold.dart';
 
 class BibleSettingsScreen extends StatefulWidget {
@@ -96,7 +95,6 @@ class _BibleSettingsScreenState extends State<BibleSettingsScreen> {
                   max: 26,
                   divisions: 6,
                   label: _fontSize.round().toString(),
-                  activeColor: AppColors.primary,
                   value: _fontSize,
                   onChanged: (value) => setState(() => _fontSize = value),
                   onChangeEnd: (value) =>

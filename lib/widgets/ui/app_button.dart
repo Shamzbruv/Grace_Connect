@@ -28,11 +28,11 @@ class AppButton extends StatelessWidget {
 
     // Determine styles based on secondary flag or overrides
     final bgColor = backgroundColor ??
-        (isSecondary ? Colors.transparent : theme.primaryColor);
+        (isSecondary ? Colors.transparent : theme.colorScheme.primary);
     final fgColor = textColor ??
-        (isSecondary ? theme.primaryColor : theme.colorScheme.onPrimary);
+        (isSecondary ? theme.colorScheme.primary : theme.colorScheme.onPrimary);
     final borderSide = isSecondary
-        ? BorderSide(color: theme.primaryColor, width: 2)
+        ? BorderSide(color: theme.colorScheme.primary, width: 2)
         : BorderSide.none;
 
     Widget buttonContent = Row(
@@ -69,8 +69,7 @@ class AppButton extends StatelessWidget {
           foregroundColor: fgColor,
           side: borderSide,
         ).copyWith(
-          backgroundColor:
-              WidgetStateProperty.resolveWith((states) => bgColor),
+          backgroundColor: WidgetStateProperty.resolveWith((states) => bgColor),
         ),
         child: buttonContent,
       );

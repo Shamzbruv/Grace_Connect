@@ -107,7 +107,7 @@ class UserRoleProvider with ChangeNotifier {
     _userProfile = profile;
     _isLoading = false;
 
-    if (previousChurchId != profile.churchId) {
+    if (previousChurchId != profile.churchId || profile.churchId.isNotEmpty) {
       unawaited(NotificationService().syncSubscriptions(profile.churchId));
     }
     NotificationService().watchForegroundNotifications(profile.uid);

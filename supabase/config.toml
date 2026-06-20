@@ -1,0 +1,13 @@
+project_id = "nimgsgnkcvddomrgkawb"
+
+[functions.generate-daily-motivation]
+verify_jwt = false
+
+[functions.generate-daily-bible-quiz]
+verify_jwt = false
+
+[functions.cleanup-daily-bible-quiz-attempts]
+verify_jwt = false
+
+[functions.finalize-monthly-quiz-winners]
+verify_jwt = false

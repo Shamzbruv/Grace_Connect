@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import '../../widgets/ui/app_scaffold.dart';
 import '../../widgets/ui/app_card.dart';
+import '../../widgets/ui/app_feedback.dart';
 import '../../widgets/ui/app_skeleton_list_item.dart';
 import '../../widgets/ui/app_text_field.dart';
 import 'package:provider/provider.dart';
@@ -620,13 +621,17 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
     try {
       await _communityService.deletePost(post);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Post deleted')),
+      AppFeedback.show(
+        context,
+        'Post deleted.',
+        type: AppFeedbackType.success,
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not delete post: $e')),
+      AppFeedback.show(
+        context,
+        'Could not delete post: $e',
+        type: AppFeedbackType.error,
       );
     }
   }
@@ -661,10 +666,15 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
       );
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(_messageAccessHelpForPost(post, currentUser, error)),
-        ),
+      final fallbackAuthor = _profileFromPostAuthor(post);
+      if (_shouldOfferBibleNudgeForPost(post, currentUser, error)) {
+        await _showBibleNudgeRequiredPrompt(fallbackAuthor);
+        return;
+      }
+      AppFeedback.show(
+        context,
+        _messageAccessHelpForPost(post, currentUser, error),
+        type: AppFeedbackType.warning,
       );
     }
   }
@@ -685,6 +695,78 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
     );
   }
 
+  bool _shouldOfferBibleNudgeForPost(
+    Post post,
+    UserProfile currentUser,
+    Object error,
+  ) {
+    return _isDifferentKnownChurch(post.placeId, currentUser.churchId) &&
+        _isBibleNudgeAccessIssue(error);
+  }
+
+  bool _shouldOfferBibleNudgeForProfile(
+    UserProfile otherUser,
+    UserProfile currentUser,
+    Object error,
+  ) {
+    return _isDifferentKnownChurch(otherUser.churchId, currentUser.churchId) &&
+        _isBibleNudgeAccessIssue(error);
+  }
+
+  bool _isDifferentKnownChurch(String otherChurchId, String currentChurchId) {
+    final other = otherChurchId.trim();
+    final current = currentChurchId.trim();
+    return other.isNotEmpty && current.isNotEmpty && other != current;
+  }
+
+  bool _isBibleNudgeAccessIssue(Object error) {
+    final message = error.toString().toLowerCase();
+    return message.contains('bible nudge') ||
+        message.contains('outside your church') ||
+        message.contains('member profile was not found') ||
+        message.contains('profile was not found') ||
+        message.contains('not accepting messages') ||
+        message.contains('not available') ||
+        message.contains('blocked');
+  }
+
+  Future<void> _showBibleNudgeRequiredPrompt(UserProfile recipient) async {
+    if (!mounted) return;
+
+    final displayName = recipient.fullName.trim().isNotEmpty
+        ? recipient.fullName.trim()
+        : recipient.email.trim().isNotEmpty
+            ? recipient.email.trim()
+            : 'this member';
+
+    final shouldSend = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Bible Nudge required'),
+          content: Text(
+            'To view $displayName\'s profile or send a message, send a Bible Nudge first. Once both of you accept, you can view the profile and message each other anytime.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Not now'),
+            ),
+            FilledButton.icon(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              icon: const Icon(Icons.menu_book_outlined),
+              label: const Text('Bible Nudge'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (shouldSend == true && mounted) {
+      await _sendBibleNudge(recipient);
+    }
+  }
+
   String _messageAccessHelpForPost(
     Post post,
     UserProfile currentUser,
@@ -692,13 +774,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
   ) {
     final isOtherChurch =
         post.placeId.trim().isNotEmpty && post.placeId != currentUser.churchId;
-    final message = error.toString().toLowerCase();
-    final isAccessIssue = message.contains('bible nudge') ||
-        message.contains('outside your church') ||
-        message.contains('member profile was not found') ||
-        message.contains('not accepting messages') ||
-        message.contains('not available') ||
-        message.contains('blocked');
+    final isAccessIssue = _isBibleNudgeAccessIssue(error);
 
     if (isOtherChurch && isAccessIssue) {
       return 'This person is outside your church. Send a Bible Nudge first. Once both people accept, you can view their profile and message each other anytime.';
@@ -1577,13 +1653,17 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
         message: messageController.text,
       );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Bible Nudge sent to $displayName.')),
+      AppFeedback.show(
+        context,
+        'Bible Nudge sent to $displayName.',
+        type: AppFeedbackType.success,
       );
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not send Bible Nudge: $error')),
+      AppFeedback.show(
+        context,
+        'Could not send Bible Nudge: $error',
+        type: AppFeedbackType.error,
       );
     } finally {
       messageController.dispose();
@@ -1615,12 +1695,14 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
       );
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            _messageAccessHelpForProfile(otherUser, currentUser, error),
-          ),
-        ),
+      if (_shouldOfferBibleNudgeForProfile(otherUser, currentUser, error)) {
+        await _showBibleNudgeRequiredPrompt(otherUser);
+        return;
+      }
+      AppFeedback.show(
+        context,
+        _messageAccessHelpForProfile(otherUser, currentUser, error),
+        type: AppFeedbackType.warning,
       );
     }
   }
@@ -1632,13 +1714,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
   ) {
     final isOtherChurch = otherUser.churchId.trim().isNotEmpty &&
         otherUser.churchId != currentUser.churchId;
-    final message = error.toString().toLowerCase();
-    final isAccessIssue = message.contains('bible nudge') ||
-        message.contains('outside your church') ||
-        message.contains('member profile was not found') ||
-        message.contains('not accepting messages') ||
-        message.contains('not available') ||
-        message.contains('blocked');
+    final isAccessIssue = _isBibleNudgeAccessIssue(error);
 
     if (isOtherChurch && isAccessIssue) {
       return 'This person is outside your church. Send a Bible Nudge first. Once both people accept, you can view their profile and message each other anytime.';

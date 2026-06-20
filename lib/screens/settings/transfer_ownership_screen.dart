@@ -4,6 +4,7 @@ import '../../services/church_service.dart';
 import '../../services/role_service.dart';
 import '../../widgets/ui/app_scaffold.dart';
 import '../../widgets/ui/app_button.dart';
+import '../../widgets/ui/app_feedback.dart';
 import '../../widgets/ui/app_loader.dart';
 
 class TransferOwnershipScreen extends StatefulWidget {
@@ -67,24 +68,28 @@ class _TransferOwnershipScreenState extends State<TransferOwnershipScreen> {
           });
         } else {
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                  content: Text(
-                      'User found, but they do not belong to this church.')),
+            AppFeedback.show(
+              context,
+              'User found, but they do not belong to this church.',
+              type: AppFeedbackType.warning,
             );
           }
         }
       } else {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('No user found with that email.')),
+          AppFeedback.show(
+            context,
+            'No user found with that email.',
+            type: AppFeedbackType.warning,
           );
         }
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
+        AppFeedback.show(
+          context,
+          'Error: $e',
+          type: AppFeedbackType.error,
         );
       }
     } finally {
@@ -137,15 +142,19 @@ class _TransferOwnershipScreenState extends State<TransferOwnershipScreen> {
       }
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Ownership transferred successfully.')),
+        AppFeedback.show(
+          context,
+          'Ownership transferred successfully.',
+          type: AppFeedbackType.success,
         );
         Navigator.pop(context); // Go back to admin settings
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Transfer failed: $e')),
+        AppFeedback.show(
+          context,
+          'Transfer failed: $e',
+          type: AppFeedbackType.error,
         );
       }
     } finally {

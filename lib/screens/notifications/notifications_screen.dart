@@ -13,6 +13,7 @@ import '../../services/notification_service.dart';
 import '../../services/user_service.dart';
 import '../community/post_detail_screen.dart';
 import '../messages/message_thread_screen.dart';
+import '../../widgets/ui/app_feedback.dart';
 import '../../widgets/ui/app_scaffold.dart';
 
 class NotificationsScreen extends StatelessWidget {
@@ -126,14 +127,18 @@ class NotificationsScreen extends StatelessWidget {
           );
           return;
         }
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('That post is no longer available.')),
+        AppFeedback.show(
+          context,
+          'That post is no longer available.',
+          type: AppFeedbackType.warning,
         );
         return;
       } catch (error) {
         if (!context.mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not open post: $error')),
+        AppFeedback.show(
+          context,
+          'Could not open post: $error',
+          type: AppFeedbackType.error,
         );
         return;
       }
@@ -175,10 +180,10 @@ class NotificationsScreen extends StatelessWidget {
       );
       if (!context.mounted) return;
       if (otherUser == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('That member profile could not be opened.'),
-          ),
+        AppFeedback.show(
+          context,
+          'That member profile could not be opened.',
+          type: AppFeedbackType.warning,
         );
         return;
       }
@@ -198,8 +203,10 @@ class NotificationsScreen extends StatelessWidget {
       );
     } catch (error) {
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not open message: $error')),
+      AppFeedback.show(
+        context,
+        'Could not open message: $error',
+        type: AppFeedbackType.error,
       );
     }
   }
@@ -432,17 +439,18 @@ class _BibleNudgeActionsState extends State<_BibleNudgeActions> {
       await _service.respondToNudge(nudge: nudge, accepted: accepted);
       await NotificationService().markAsRead(widget.notification.id);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-              accepted ? 'Bible Nudge accepted.' : 'Bible Nudge declined.'),
-        ),
+      AppFeedback.show(
+        context,
+        accepted ? 'Bible Nudge accepted.' : 'Bible Nudge declined.',
+        type: accepted ? AppFeedbackType.success : AppFeedbackType.info,
       );
       await _load();
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not respond: $error')),
+      AppFeedback.show(
+        context,
+        'Could not respond: $error',
+        type: AppFeedbackType.error,
       );
     } finally {
       if (mounted) setState(() => _isSaving = false);

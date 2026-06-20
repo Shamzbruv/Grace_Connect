@@ -22,6 +22,7 @@ class _NotificationSettingsScreenState
   bool _communityPosts = true;
   bool _prayerRequests = true;
   bool _dailyDevotionals = true;
+  bool _dailyQuiz = true;
   bool _isLoading = true;
 
   @override
@@ -37,6 +38,7 @@ class _NotificationSettingsScreenState
       _communityPosts = prefs.getBool('notify_community') ?? true;
       _prayerRequests = prefs.getBool('notify_prayer') ?? true;
       _dailyDevotionals = prefs.getBool('notify_devotionals') ?? true;
+      _dailyQuiz = prefs.getBool('notify_daily_quiz') ?? true;
       _isLoading = false;
     });
   }
@@ -49,13 +51,22 @@ class _NotificationSettingsScreenState
       if (key == 'notify_community') _communityPosts = value;
       if (key == 'notify_prayer') _prayerRequests = value;
       if (key == 'notify_devotionals') _dailyDevotionals = value;
+      if (key == 'notify_daily_quiz') _dailyQuiz = value;
     });
 
     final user = Supabase.instance.client.auth.currentUser;
-    if (user != null && key == 'notify_service') {
-      await Supabase.instance.client
-          .from('users')
-          .update({'notifyAttendance': value}).eq('uid', user.id);
+    if (user != null) {
+      final column = switch (key) {
+        'notify_service' => 'notifyAttendance',
+        'notify_devotionals' => 'notifyDailyMotivation',
+        'notify_daily_quiz' => 'notifyDailyQuiz',
+        _ => null,
+      };
+      if (column != null) {
+        await Supabase.instance.client
+            .from('users')
+            .update({column: value}).eq('uid', user.id);
+      }
     }
 
     // Refresh subscriptions based on new settings
@@ -103,9 +114,15 @@ class _NotificationSettingsScreenState
                 ),
                 _buildSwitchTile(
                   'Daily Devotionals',
-                  'Bible reading and study reminders',
+                  'Daily Word at 5:00 AM',
                   _dailyDevotionals,
                   (val) => _toggleSetting('notify_devotionals', val),
+                ),
+                _buildSwitchTile(
+                  'Daily Bible Quiz',
+                  'New 5-question challenge each morning',
+                  _dailyQuiz,
+                  (val) => _toggleSetting('notify_daily_quiz', val),
                 ),
                 const Divider(height: 32),
                 _buildSectionHeader('Community'),
@@ -138,10 +155,11 @@ class _NotificationSettingsScreenState
 
   Widget _buildSwitchTile(
       String title, String subtitle, bool value, ValueChanged<bool> onChanged) {
+    final theme = Theme.of(context);
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-          color: Theme.of(context).cardTheme.color,
+          color: theme.cardTheme.color,
           borderRadius: BorderRadius.circular(12),
           boxShadow: [
             BoxShadow(
@@ -152,9 +170,11 @@ class _NotificationSettingsScreenState
       child: SwitchListTile(
         title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
         subtitle: Text(subtitle,
-            style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+            style: TextStyle(
+              fontSize: 12,
+              color: theme.colorScheme.onSurfaceVariant,
+            )),
         value: value,
-        activeColor: AppColors.primary,
         onChanged: onChanged,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),

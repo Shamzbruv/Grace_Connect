@@ -185,10 +185,27 @@ class _BibleBooksScreenState extends State<BibleBooksScreen> {
       length: 2,
       child: Scaffold(
         appBar: AppBar(
-          title: Text('The Bible',
-              style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+          leadingWidth: 52,
+          leading: IconButton(
+            tooltip: 'Daily Bible Quiz',
+            onPressed: () => Navigator.pushNamed(context, '/daily_bible_quiz'),
+            icon: const Icon(Icons.quiz_outlined),
+          ),
+          titleSpacing: 4,
+          centerTitle: false,
+          title: Text(
+            'The Bible',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: GoogleFonts.poppins(fontWeight: FontWeight.bold),
+          ),
           backgroundColor: Colors.indigo,
           actions: [
+            IconButton(
+              tooltip: 'Daily Word',
+              onPressed: () => Navigator.pushNamed(context, '/daily_word'),
+              icon: const Icon(Icons.wb_sunny_outlined),
+            ),
             IconButton(
               tooltip: 'Bible streak leaderboard',
               onPressed: _showLeaderboard,
@@ -207,7 +224,10 @@ class _BibleBooksScreenState extends State<BibleBooksScreen> {
                   padding: const EdgeInsets.only(right: 12),
                   child: ActionChip(
                     avatar: const Icon(Icons.local_fire_department, size: 18),
-                    label: Text('$streak day${streak == 1 ? '' : 's'}'),
+                    label: Text('$streak'),
+                    tooltip:
+                        'Bible streak: $streak day${streak == 1 ? '' : 's'}',
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     visualDensity: VisualDensity.compact,
                     onPressed: () => _showStreakInfo(status),
                   ),

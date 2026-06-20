@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../models/user_profile.dart';
+import '../providers/user_role_provider.dart';
 import '../services/feed_scroll_service.dart';
 
 class AppBottomMenu extends StatelessWidget {
@@ -101,6 +104,12 @@ class AppBottomMenu extends StatelessWidget {
       selectedIcon: Icons.analytics,
     ),
     _MenuItem(
+      label: 'Notifications',
+      route: '/notifications',
+      icon: Icons.notifications_outlined,
+      selectedIcon: Icons.notifications,
+    ),
+    _MenuItem(
       label: 'Giving',
       route: '/donations',
       icon: Icons.volunteer_activism_outlined,
@@ -199,6 +208,8 @@ class AppBottomMenu extends StatelessWidget {
 
   void _showMoreMenu(BuildContext context) {
     final currentRoute = ModalRoute.of(context)?.settings.name;
+    final roleProvider = context.read<UserRoleProvider>();
+    final items = _visibleMoreItems(roleProvider.userProfile);
 
     showModalBottomSheet<void>(
       context: context,
@@ -206,7 +217,7 @@ class AppBottomMenu extends StatelessWidget {
       useSafeArea: true,
       builder: (sheetContext) {
         return _MoreMenuSheet(
-          items: _moreItems,
+          items: items,
           currentRoute: currentRoute,
           onSelectRoute: (route) {
             Navigator.of(sheetContext).pop();
@@ -223,6 +234,31 @@ class AppBottomMenu extends StatelessWidget {
         );
       },
     );
+  }
+
+  List<_MenuItem> _visibleMoreItems(UserProfile? profile) {
+    return _moreItems.where((item) {
+      if (item.route == '/members') return _canViewMembers(profile);
+      if (item.route == '/analytics') return _canViewAnalytics(profile);
+      return true;
+    }).toList(growable: false);
+  }
+
+  bool _canViewMembers(UserProfile? profile) {
+    if (profile == null) return false;
+    final capabilities = profile.capabilities;
+    return profile.isDeveloper ||
+        capabilities.canManageMembersBasic ||
+        capabilities.canManageRoles;
+  }
+
+  bool _canViewAnalytics(UserProfile? profile) {
+    if (profile == null) return false;
+    final capabilities = profile.capabilities;
+    return profile.isDeveloper ||
+        capabilities.canManageMembersBasic ||
+        capabilities.canViewFinance ||
+        capabilities.canApproveHighImpactEvents;
   }
 }
 

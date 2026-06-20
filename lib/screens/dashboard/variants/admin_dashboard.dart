@@ -124,6 +124,20 @@ class AdminDashboard extends StatelessWidget {
           ),
         if (userProfile.canViewFinance) const SizedBox(height: 12),
         ActionCard(
+          title: 'Daily Word',
+          description: 'Review, edit, and publish daily encouragement',
+          icon: Icons.wb_sunny_outlined,
+          onTap: () => Navigator.pushNamed(context, '/admin/daily_word'),
+        ),
+        const SizedBox(height: 12),
+        ActionCard(
+          title: 'Daily Bible Quiz',
+          description: 'Review questions, status, and publishing',
+          icon: Icons.quiz_outlined,
+          onTap: () => Navigator.pushNamed(context, '/admin/daily_quiz'),
+        ),
+        const SizedBox(height: 12),
+        ActionCard(
           title: 'Live Stream Settings',
           description: 'Manage YouTube URL and Go Live',
           icon: Icons.live_tv,

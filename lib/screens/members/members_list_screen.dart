@@ -12,6 +12,7 @@ import '../../services/attendance_analysis_service.dart';
 import '../../services/direct_message_service.dart';
 import '../../services/bible_nudge_service.dart';
 import '../../services/family_service.dart';
+import '../../widgets/ui/app_feedback.dart';
 import '../messages/message_thread_screen.dart';
 
 class MembersListScreen extends StatefulWidget {
@@ -190,10 +191,10 @@ class _MembersListScreenState extends State<MembersListScreen> {
     } catch (error) {
       if (!mounted) return;
       final otherUser = UserProfile.fromMap(data);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(_messageAccessHelpForMember(otherUser, error)),
-        ),
+      AppFeedback.show(
+        context,
+        _messageAccessHelpForMember(otherUser, error),
+        type: AppFeedbackType.warning,
       );
     }
   }
@@ -265,13 +266,17 @@ class _MembersListScreenState extends State<MembersListScreen> {
         message: messageController.text,
       );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Bible Nudge sent to ${recipient.fullName}.')),
+      AppFeedback.show(
+        context,
+        'Bible Nudge sent to ${recipient.fullName}.',
+        type: AppFeedbackType.success,
       );
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not send Bible Nudge: $error')),
+      AppFeedback.show(
+        context,
+        'Could not send Bible Nudge: $error',
+        type: AppFeedbackType.error,
       );
     } finally {
       messageController.dispose();

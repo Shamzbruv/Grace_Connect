@@ -15,6 +15,8 @@ class AppDrawer extends StatelessWidget {
     final theme = Theme.of(context);
     final userProvider = Provider.of<UserRoleProvider>(context);
     final userProfile = userProvider.userProfile;
+    final isPlainMember = _isPlainMember(userProfile);
+    final canViewAnalytics = _canViewAnalytics(userProfile);
 
     return Drawer(
       backgroundColor: theme.scaffoldBackgroundColor,
@@ -31,8 +33,9 @@ class AppDrawer extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 children: [
                   _buildSectionHeader(context, 'MENU'),
-                  _buildDrawerItem(context, Icons.home_outlined, 'Member View',
-                      '/member_view'),
+                  if (!isPlainMember)
+                    _buildDrawerItem(context, Icons.home_outlined,
+                        'Member View', '/member_view'),
                   _buildDrawerItem(context, Icons.dashboard_outlined,
                       'Dashboard', '/admin_dashboard'),
                   _buildDrawerItem(
@@ -61,8 +64,9 @@ class AppDrawer extends StatelessWidget {
                       'Counseling', '/counseling'),
                   _buildDrawerItem(context, Icons.live_tv_outlined,
                       'Live Streaming', '/live_streaming'),
-                  _buildDrawerItem(context, Icons.analytics_outlined,
-                      'Analytics', '/analytics'),
+                  if (canViewAnalytics)
+                    _buildDrawerItem(context, Icons.analytics_outlined,
+                        'Analytics', '/analytics'),
 
                   const Divider(height: 32),
 
@@ -212,6 +216,48 @@ class AppDrawer extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  bool _isPlainMember(UserProfile? profile) {
+    if (profile == null) return true;
+    final capabilities = profile.capabilities;
+    final hasElevatedAccess = capabilities.canCreateEvents ||
+        capabilities.canEditEvents ||
+        capabilities.canPublishAnnouncements ||
+        capabilities.canModeratePosts ||
+        capabilities.canManageSchedules ||
+        capabilities.canAssignPrayers ||
+        capabilities.canViewSensitivePrayers ||
+        capabilities.canManageCareCases ||
+        capabilities.canViewAssignedCareCases ||
+        capabilities.canManageMembersBasic ||
+        capabilities.canManageRoles ||
+        capabilities.canViewFinance ||
+        capabilities.canManageFinance ||
+        capabilities.canManageMediaUploads ||
+        capabilities.canManageServiceChecklists ||
+        capabilities.canApproveHighImpactEvents ||
+        profile.isDeveloper;
+    if (hasElevatedAccess) return false;
+
+    return profile.roles.every((role) {
+      final normalized = role
+          .trim()
+          .toLowerCase()
+          .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+          .replaceAll(RegExp(r'_+'), '_')
+          .replaceAll(RegExp(r'^_|_$'), '');
+      return normalized.isEmpty || normalized == 'member';
+    });
+  }
+
+  bool _canViewAnalytics(UserProfile? profile) {
+    if (profile == null) return false;
+    final capabilities = profile.capabilities;
+    return profile.isDeveloper ||
+        capabilities.canManageMembersBasic ||
+        capabilities.canViewFinance ||
+        capabilities.canApproveHighImpactEvents;
   }
 
   Widget _buildSectionHeader(BuildContext context, String title) {

@@ -4,7 +4,9 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:youtube_player_flutter/youtube_player_flutter.dart';
 import '../../providers/user_role_provider.dart';
 import '../../services/church_service.dart';
+import '../../services/notification_service.dart';
 import '../../models/church_model.dart';
+import '../../widgets/ui/app_feedback.dart';
 import '../../widgets/ui/app_loader.dart';
 
 class AdminStreamSettingsScreen extends StatefulWidget {
@@ -69,8 +71,11 @@ class _AdminStreamSettingsScreenState extends State<AdminStreamSettingsScreen> {
     final url = _urlController.text.trim();
     if (url.isEmpty) {
       if (!quiet) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('Please enter a URL')));
+        AppFeedback.show(
+          context,
+          'Please enter a URL.',
+          type: AppFeedbackType.warning,
+        );
       }
       return;
     }
@@ -78,16 +83,22 @@ class _AdminStreamSettingsScreenState extends State<AdminStreamSettingsScreen> {
     final videoId = YoutubePlayer.convertUrlToId(url);
     if (videoId == null) {
       if (!quiet) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('Invalid YouTube URL')));
+        AppFeedback.show(
+          context,
+          'Invalid YouTube URL.',
+          type: AppFeedbackType.warning,
+        );
       }
       setState(() => _showPreview = false);
       return;
     }
 
     if (!quiet) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('URL is valid! Loading preview...')));
+      AppFeedback.show(
+        context,
+        'URL is valid. Loading preview...',
+        type: AppFeedbackType.success,
+      );
     }
 
     setState(() {
@@ -103,34 +114,109 @@ class _AdminStreamSettingsScreenState extends State<AdminStreamSettingsScreen> {
     });
   }
 
-  Future<void> _saveSettings() async {
-    if (_church == null) return;
-    if (!_formKey.currentState!.validate()) return;
+  Future<bool> _saveSettings() async {
+    if (_church == null) return false;
+    if (!_formKey.currentState!.validate()) return false;
 
     // Validate ID one last time
-    final videoId = YoutubePlayer.convertUrlToId(_urlController.text.trim());
-    if (videoId == null && _urlController.text.isNotEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Please enter a valid YouTube URL')));
-      return;
+    final streamUrl = _urlController.text.trim();
+    final videoId = YoutubePlayer.convertUrlToId(streamUrl);
+    if (videoId == null && streamUrl.isNotEmpty) {
+      AppFeedback.show(
+        context,
+        'Please enter a valid YouTube URL.',
+        type: AppFeedbackType.warning,
+      );
+      return false;
     }
+
+    final wasLive = _church!.isLive;
+    final shouldNotifyLive = _isLive && !wasLive && streamUrl.isNotEmpty;
 
     setState(() => _isLoading = true);
     try {
       await ChurchService().updateStreamSettings(
-          _church!.id, _urlController.text.trim(), _isLive);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Stream settings updated successfully!')));
+        _church!.id,
+        streamUrl,
+        _isLive,
+      );
+      if (shouldNotifyLive) {
+        await _notifyChurchLiveNow();
       }
+      if (mounted) {
+        _syncSavedChurchState(streamUrl);
+        final message = shouldNotifyLive
+            ? 'Stream settings saved and members were notified.'
+            : 'Stream settings updated successfully!';
+        AppFeedback.show(
+          context,
+          message,
+          type: AppFeedbackType.success,
+        );
+      }
+      return true;
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Error saving settings: $e')));
+        AppFeedback.show(
+          context,
+          'Error saving settings: $e',
+          type: AppFeedbackType.error,
+        );
       }
+      return false;
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  Future<void> _handleLiveToggle(bool isLive) async {
+    final previousValue = _isLive;
+    setState(() => _isLive = isLive);
+    final saved = await _saveSettings();
+    if (!saved && mounted) {
+      setState(() => _isLive = previousValue);
+    }
+  }
+
+  Future<void> _notifyChurchLiveNow() async {
+    final adminProfile =
+        Provider.of<UserRoleProvider>(context, listen: false).userProfile;
+    final churchTopicId = adminProfile?.churchId.trim().isNotEmpty == true
+        ? adminProfile!.churchId.trim()
+        : _church!.placeId.trim();
+    if (churchTopicId.isEmpty) return;
+
+    final churchName =
+        _church!.name.trim().isEmpty ? 'Your church' : _church!.name.trim();
+    await NotificationService().sendNotification(
+      '$churchName is live now',
+      'Tap to watch the live service inside Grace Connect.',
+      'church_$churchTopicId',
+      route: '/live_streaming',
+      type: 'live_stream',
+    );
+  }
+
+  void _syncSavedChurchState(String streamUrl) {
+    final church = _church;
+    if (church == null) return;
+    _church = Church(
+      id: church.id,
+      name: church.name,
+      placeId: church.placeId,
+      address: church.address,
+      denomination: church.denomination,
+      ownerUserId: church.ownerUserId,
+      timezone: church.timezone,
+      status: church.status,
+      createdAt: church.createdAt,
+      parish: church.parish,
+      latitude: church.latitude,
+      longitude: church.longitude,
+      policies: church.policies,
+      liveStreamUrl: streamUrl.isEmpty ? null : streamUrl,
+      isLive: _isLive,
+    );
   }
 
   @override
@@ -195,7 +281,8 @@ class _AdminStreamSettingsScreenState extends State<AdminStreamSettingsScreen> {
                   height: 200,
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(12),
-                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                    color:
+                        Theme.of(context).colorScheme.surfaceContainerHighest,
                   ),
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(12),
@@ -211,7 +298,7 @@ class _AdminStreamSettingsScreenState extends State<AdminStreamSettingsScreen> {
                     ? 'Members can currently see the stream.'
                     : 'Stream is hidden from members.'),
                 value: _isLive,
-                onChanged: (val) => setState(() => _isLive = val),
+                onChanged: _isLoading ? null : _handleLiveToggle,
                 secondary: Icon(Icons.live_tv,
                     color: _isLive ? Colors.red : Colors.grey),
               ),
@@ -220,7 +307,7 @@ class _AdminStreamSettingsScreenState extends State<AdminStreamSettingsScreen> {
                 width: double.infinity,
                 height: 50,
                 child: ElevatedButton(
-                  onPressed: _saveSettings,
+                  onPressed: _isLoading ? null : () => _saveSettings(),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Theme.of(context).colorScheme.primary,
                     foregroundColor: Theme.of(context).colorScheme.onPrimary,

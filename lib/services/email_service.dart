@@ -7,6 +7,7 @@ class EmailService {
     'RESEND_FROM_EMAIL',
     defaultValue: 'Grace Connect <onboarding@resend.dev>',
   );
+  static const String supportInbox = 'shamzbiz1@gmail.com';
   static const String _resendApiKey = 're_aKtyyYHD_6QCTGajCE5BC1RPmZbYUkodV';
   static const String _apiUrl = 'https://api.resend.com/emails';
 
@@ -73,19 +74,43 @@ class EmailService {
     required String ticketId,
   }) async {
     final htmlBody = '''
-      <h2>New Support Ticket: $ticketId</h2>
-      <p><strong>Reporter:</strong> $reporterEmail</p>
-      <p><strong>Issue Type:</strong> $issueType</p>
-      <p><strong>Summary:</strong> $summary</p>
+      <h2>New Support Ticket: ${_escape(ticketId)}</h2>
+      <p><strong>Reporter:</strong> ${_escape(reporterEmail)}</p>
+      <p><strong>Issue Type:</strong> ${_escape(issueType)}</p>
+      <p><strong>Summary:</strong> ${_escape(summary)}</p>
       <p><strong>Description:</strong></p>
-      <p>${description.replaceAll('\n', '<br>')}</p>
+      <p>${_escape(description).replaceAll('\n', '<br>')}</p>
     ''';
 
     await sendEmail(
-      to: [
-        'your_support_email@graceconnect.com'
-      ], // Replace with your support email
+      to: [supportInbox],
       subject: 'New Support Ticket: $summary',
+      htmlBody: htmlBody,
+    );
+  }
+
+  Future<void> sendBetaFeedbackEmail({
+    required String reporterEmail,
+    required String type,
+    required String message,
+    required String contactEmail,
+    required String churchId,
+    required String userId,
+  }) async {
+    final htmlBody = '''
+      <h2>New Grace Connect Beta Feedback</h2>
+      <p><strong>Reporter:</strong> ${_escape(reporterEmail)}</p>
+      <p><strong>Contact Email:</strong> ${_escape(contactEmail.isEmpty ? 'Not provided' : contactEmail)}</p>
+      <p><strong>User ID:</strong> ${_escape(userId.isEmpty ? 'Unknown' : userId)}</p>
+      <p><strong>Church ID:</strong> ${_escape(churchId.isEmpty ? 'Unknown' : churchId)}</p>
+      <p><strong>Type:</strong> ${_escape(type)}</p>
+      <p><strong>Message:</strong></p>
+      <p>${_escape(message).replaceAll('\n', '<br>')}</p>
+    ''';
+
+    await sendEmail(
+      to: [supportInbox],
+      subject: 'Grace Connect Beta Feedback: $type',
       htmlBody: htmlBody,
     );
   }

@@ -6,7 +6,6 @@ import '../../../../providers/user_role_provider.dart';
 import '../../../../services/church_service.dart';
 import '../widgets/dashboard_scaffold.dart';
 import '../widgets/action_card.dart';
-import '../../attendance/remote_attendance_screen.dart';
 
 class MemberDashboard extends StatelessWidget {
   const MemberDashboard({super.key});
@@ -31,30 +30,29 @@ class MemberDashboard extends StatelessWidget {
           mainAxisSpacing: 12,
           crossAxisSpacing: 12,
           children: [
-            _buildGridAction(context, 'Events', Icons.event,
-                () => Navigator.pushNamed(context, '/events')),
+            _buildGridAction(context, 'Testimony', Icons.auto_awesome_outlined,
+                () => Navigator.pushNamed(context, '/testimonies')),
+            _buildGridAction(context, 'Announcements', Icons.campaign_outlined,
+                () => Navigator.pushNamed(context, '/announcements')),
             _buildGridAction(context, 'Groups', Icons.group_work,
                 () => Navigator.pushNamed(context, '/study_groups')),
             _buildGridAction(context, 'Give', Icons.favorite,
                 () => Navigator.pushNamed(context, '/donations')),
-            _buildGridAction(context, 'Bible', Icons.book,
-                () => Navigator.pushNamed(context, '/bible')),
+            _buildGridAction(context, 'Bible Quiz', Icons.quiz_outlined,
+                () => Navigator.pushNamed(context, '/daily_bible_quiz')),
             _buildGridAction(
                 context,
-                'Remote Check-In',
-                Icons.wifi_tethering,
-                () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                        builder: (context) => const RemoteAttendanceScreen()))),
+                'Attendance',
+                Icons.checklist_rtl_outlined,
+                () => Navigator.pushNamed(context, '/attendance')),
           ],
         ),
         const SizedBox(height: 24),
         ActionCard(
-          title: 'Latest Announcements',
-          description: 'Check what\'s happening in church',
-          icon: Icons.campaign_outlined,
-          onTap: () => Navigator.pushNamed(context, '/announcements'),
+          title: 'Daily Word',
+          description: 'Start today with encouragement and Scripture',
+          icon: Icons.wb_sunny_outlined,
+          onTap: () => Navigator.pushNamed(context, '/daily_word'),
         ),
       ],
     );

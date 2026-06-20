@@ -27,6 +27,8 @@ class UserProfile {
   final bool isProfilePrivate;
   final bool allowMessages;
   final bool notifyAttendance;
+  final bool notifyDailyMotivation;
+  final bool notifyDailyQuiz;
   final bool showContactInfo;
   final String contactInfoVisibility;
   final bool showFamilyTree;
@@ -68,6 +70,8 @@ class UserProfile {
     this.isProfilePrivate = false,
     this.allowMessages = true,
     this.notifyAttendance = true,
+    this.notifyDailyMotivation = true,
+    this.notifyDailyQuiz = true,
     this.showContactInfo = true,
     this.contactInfoVisibility = 'church',
     this.showFamilyTree = true,
@@ -120,6 +124,8 @@ class UserProfile {
       isProfilePrivate: data['isProfilePrivate'] ?? false,
       allowMessages: data['allowMessages'] ?? true,
       notifyAttendance: data['notifyAttendance'] ?? true,
+      notifyDailyMotivation: data['notifyDailyMotivation'] ?? true,
+      notifyDailyQuiz: data['notifyDailyQuiz'] ?? true,
       showContactInfo: data['showContactInfo'] ?? true,
       contactInfoVisibility: data['contactInfoVisibility'] ??
           (data['showContactInfo'] == false ? 'private' : 'church'),
@@ -161,6 +167,8 @@ class UserProfile {
       'isProfilePrivate': isProfilePrivate,
       'allowMessages': allowMessages,
       'notifyAttendance': notifyAttendance,
+      'notifyDailyMotivation': notifyDailyMotivation,
+      'notifyDailyQuiz': notifyDailyQuiz,
       'showContactInfo': showContactInfo,
       'contactInfoVisibility': contactInfoVisibility,
       'showFamilyTree': showFamilyTree,
@@ -202,6 +210,8 @@ class UserProfile {
     bool? isProfilePrivate,
     bool? allowMessages,
     bool? notifyAttendance,
+    bool? notifyDailyMotivation,
+    bool? notifyDailyQuiz,
     bool? showContactInfo,
     String? contactInfoVisibility,
     bool? showFamilyTree,
@@ -238,6 +248,9 @@ class UserProfile {
       isProfilePrivate: isProfilePrivate ?? this.isProfilePrivate,
       allowMessages: allowMessages ?? this.allowMessages,
       notifyAttendance: notifyAttendance ?? this.notifyAttendance,
+      notifyDailyMotivation:
+          notifyDailyMotivation ?? this.notifyDailyMotivation,
+      notifyDailyQuiz: notifyDailyQuiz ?? this.notifyDailyQuiz,
       showContactInfo: showContactInfo ?? this.showContactInfo,
       contactInfoVisibility:
           contactInfoVisibility ?? this.contactInfoVisibility,

@@ -112,10 +112,11 @@ class _CommunitySettingsScreenState extends State<CommunitySettingsScreen> {
     required bool value,
     required ValueChanged<bool> onChanged,
   }) {
-    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+    final theme = Theme.of(context);
+    final isDarkMode = theme.brightness == Brightness.dark;
     return Container(
       decoration: BoxDecoration(
-        color: Theme.of(context).cardTheme.color,
+        color: theme.cardTheme.color,
         borderRadius: BorderRadius.circular(12),
       ),
       child: SwitchListTile(
@@ -123,10 +124,12 @@ class _CommunitySettingsScreenState extends State<CommunitySettingsScreen> {
             Icon(icon, color: isDarkMode ? Colors.white : AppColors.primary),
         title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
         subtitle: Text(subtitle,
-            style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+            style: TextStyle(
+              fontSize: 12,
+              color: theme.colorScheme.onSurfaceVariant,
+            )),
         value: value,
         onChanged: onChanged,
-        activeColor: AppColors.primary,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
     );
@@ -139,10 +142,11 @@ class _CommunitySettingsScreenState extends State<CommunitySettingsScreen> {
     required String subtitle,
     required VoidCallback onTap,
   }) {
-    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+    final theme = Theme.of(context);
+    final isDarkMode = theme.brightness == Brightness.dark;
     return Container(
       decoration: BoxDecoration(
-        color: Theme.of(context).cardTheme.color,
+        color: theme.cardTheme.color,
         borderRadius: BorderRadius.circular(12),
       ),
       child: ListTile(
@@ -150,7 +154,10 @@ class _CommunitySettingsScreenState extends State<CommunitySettingsScreen> {
             Icon(icon, color: isDarkMode ? Colors.white : AppColors.primary),
         title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
         subtitle: Text(subtitle,
-            style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+            style: TextStyle(
+              fontSize: 12,
+              color: theme.colorScheme.onSurfaceVariant,
+            )),
         trailing: const Icon(Icons.chevron_right),
         onTap: onTap,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),

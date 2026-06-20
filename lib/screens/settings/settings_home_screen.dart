@@ -76,13 +76,6 @@ class SettingsHomeScreen extends StatelessWidget {
                   const Divider(height: 1),
                   _buildSettingsTile(
                       context,
-                      Icons.campaign_outlined,
-                      'Announcements',
-                      'Church and ministry updates',
-                      '/announcements'),
-                  const Divider(height: 1),
-                  _buildSettingsTile(
-                      context,
                       Icons.book_outlined,
                       'Bible & Study',
                       'Plans, Study Partners',
@@ -168,10 +161,8 @@ class SettingsHomeScreen extends StatelessWidget {
             ],
             const SizedBox(height: 32),
             Text('Version 1.0.0',
-                style: Theme.of(context)
-                    .textTheme
-                    .bodySmall
-                    ?.copyWith(color: Colors.grey)),
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant)),
             const SizedBox(height: 32),
           ],
         ),
@@ -216,11 +207,13 @@ class SettingsHomeScreen extends StatelessWidget {
               .bodyMedium
               ?.copyWith(fontWeight: FontWeight.w600)),
       subtitle: Text(subtitle,
-          style: Theme.of(context)
-              .textTheme
-              .bodySmall
-              ?.copyWith(color: Colors.grey)),
-      trailing: const Icon(Icons.chevron_right, size: 20, color: Colors.grey),
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant)),
+      trailing: Icon(
+        Icons.chevron_right,
+        size: 20,
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
+      ),
       onTap: () => Navigator.pushNamed(context, route),
     );
   }

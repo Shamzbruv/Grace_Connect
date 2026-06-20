@@ -108,10 +108,13 @@ class _BibleScreenState extends State<BibleScreen>
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Icon(Icons.menu_book,
-                            size: 60, color: Colors.grey.withValues(alpha: 0.5)),
+                            size: 60,
+                            color: colorScheme.onSurfaceVariant
+                                .withValues(alpha: 0.55)),
                         const SizedBox(height: 16),
                         Text('No books found',
-                            style: TextStyle(color: Colors.grey[600])),
+                            style:
+                                TextStyle(color: colorScheme.onSurfaceVariant)),
                       ],
                     ),
                   )
@@ -176,8 +179,7 @@ class _BibleScreenState extends State<BibleScreen>
           Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (_) =>
-                  BibleReaderScreen(book: book, chapter: 1), 
+              builder: (_) => BibleReaderScreen(book: book, chapter: 1),
             ),
           );
         },

@@ -8,6 +8,7 @@ import '../../providers/user_role_provider.dart';
 import '../../services/church_service.dart';
 import '../../services/church_transfer_service.dart';
 import '../../widgets/ui/app_card.dart';
+import '../../widgets/ui/app_feedback.dart';
 import '../../widgets/ui/app_scaffold.dart';
 
 class ChurchTransferScreen extends StatefulWidget {
@@ -53,16 +54,18 @@ class _ChurchTransferScreenState extends State<ChurchTransferScreen> {
 
             Future<void> submit() async {
               if (selectedChurch == null) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Choose the receiving church.')),
+                AppFeedback.show(
+                  context,
+                  'Choose the receiving church.',
+                  type: AppFeedbackType.warning,
                 );
                 return;
               }
               if (reasonController.text.trim().length < 10) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Add a little more context for the pastors.'),
-                  ),
+                AppFeedback.show(
+                  context,
+                  'Add a little more context for the pastors.',
+                  type: AppFeedbackType.warning,
                 );
                 return;
               }
@@ -76,13 +79,17 @@ class _ChurchTransferScreenState extends State<ChurchTransferScreen> {
                 );
                 if (!sheetContext.mounted) return;
                 Navigator.pop(sheetContext);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Transfer request submitted.')),
+                AppFeedback.show(
+                  context,
+                  'Transfer request submitted.',
+                  type: AppFeedbackType.success,
                 );
               } catch (error) {
                 if (!context.mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Could not submit request: $error')),
+                AppFeedback.show(
+                  context,
+                  'Could not submit request: $error',
+                  type: AppFeedbackType.error,
                 );
               } finally {
                 if (sheetContext.mounted) {
@@ -240,13 +247,17 @@ class _ChurchTransferScreenState extends State<ChurchTransferScreen> {
                 );
                 if (!sheetContext.mounted) return;
                 Navigator.pop(sheetContext);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Transfer status updated.')),
+                AppFeedback.show(
+                  context,
+                  'Transfer status updated.',
+                  type: AppFeedbackType.success,
                 );
               } catch (error) {
                 if (!context.mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Could not update request: $error')),
+                AppFeedback.show(
+                  context,
+                  'Could not update request: $error',
+                  type: AppFeedbackType.error,
                 );
               } finally {
                 if (sheetContext.mounted) {

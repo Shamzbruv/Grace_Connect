@@ -1,8 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:provider/provider.dart';
-import 'package:google_fonts/google_fonts.dart';
 import '../../providers/user_role_provider.dart';
+import '../../services/email_service.dart';
+import '../../widgets/ui/app_button.dart';
+import '../../widgets/ui/app_card.dart';
+import '../../widgets/ui/app_feedback.dart';
+import '../../widgets/ui/app_scaffold.dart';
+import '../../widgets/ui/app_text_field.dart';
 
 class FeedbackScreen extends StatefulWidget {
   const FeedbackScreen({super.key});
@@ -17,34 +22,65 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
   bool _isSubmitting = false;
   String _type = 'Bug Report'; // or 'Suggestion'
 
+  @override
+  void dispose() {
+    _feedbackController.dispose();
+    _emailController.dispose();
+    super.dispose();
+  }
+
   Future<void> _submitFeedback() async {
-    if (_feedbackController.text.trim().isEmpty) return;
+    final message = _feedbackController.text.trim();
+    if (message.isEmpty) {
+      AppFeedback.show(
+        context,
+        'Add a short description before submitting feedback.',
+        type: AppFeedbackType.warning,
+      );
+      return;
+    }
 
     setState(() => _isSubmitting = true);
     final user =
         Provider.of<UserRoleProvider>(context, listen: false).userProfile;
+    final authUser = Supabase.instance.client.auth.currentUser;
 
     try {
       await Supabase.instance.client.from('feedback').insert({
         'userId': user?.uid,
         'churchId': user?.placeId,
         'type': _type,
-        'message': _feedbackController.text.trim(),
+        'message': message,
         'contactEmail': _emailController.text.trim(),
         'timestamp': DateTime.now().toIso8601String(),
         'platform': Theme.of(context).platform.toString(),
         'status': 'new',
       });
 
+      await EmailService().sendBetaFeedbackEmail(
+        reporterEmail: authUser?.email ?? user?.email ?? 'unknown',
+        type: _type,
+        message: message,
+        contactEmail: _emailController.text.trim(),
+        churchId: user?.placeId ?? '',
+        userId: user?.uid ?? '',
+      );
+
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Thank you! Feedback sent.')));
+        AppFeedback.show(
+          context,
+          'Thank you. Feedback sent.',
+          type: AppFeedbackType.success,
+        );
         Navigator.pop(context);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Error sending feedback: $e')));
+        AppFeedback.show(
+          context,
+          'Error sending feedback: $e',
+          type: AppFeedbackType.error,
+        );
         setState(() => _isSubmitting = false);
       }
     }
@@ -52,13 +88,10 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('Beta Feedback',
-            style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
-        backgroundColor: Colors.deepPurple,
-        foregroundColor: Colors.white,
-      ),
+    final theme = Theme.of(context);
+
+    return AppScaffold(
+      title: 'Beta Feedback',
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),
         child: Column(
@@ -66,54 +99,56 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
           children: [
             Text(
               'Help us improve Grace Connect!',
-              style: GoogleFonts.poppins(
-                  fontSize: 18, fontWeight: FontWeight.bold),
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w800,
+              ),
             ),
             const SizedBox(height: 8),
-            const Text('Found a bug or have a suggestion? Let us know below.'),
-            const SizedBox(height: 24),
-            DropdownButtonFormField<String>(
-              value: _type,
-              items: ['Bug Report', 'Suggestion', 'Other']
-                  .map((t) => DropdownMenuItem(value: t, child: Text(t)))
-                  .toList(),
-              onChanged: (val) => setState(() => _type = val!),
-              decoration: const InputDecoration(
-                  labelText: 'Feedback Type', border: OutlineInputBorder()),
+            Text(
+              'Found a bug or have a suggestion? Let us know below.',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
             ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _feedbackController,
-              maxLines: 5,
-              decoration: const InputDecoration(
-                labelText: 'Description',
-                hintText: 'Describe the issue or idea...',
-                border: OutlineInputBorder(),
-                alignLabelWithHint: true,
+            const SizedBox(height: 24),
+            AppCard(
+              child: Column(
+                children: [
+                  DropdownButtonFormField<String>(
+                    value: _type,
+                    items: ['Bug Report', 'Suggestion', 'Other']
+                        .map((t) => DropdownMenuItem(value: t, child: Text(t)))
+                        .toList(),
+                    onChanged: (val) => setState(() => _type = val!),
+                    decoration: const InputDecoration(
+                      labelText: 'Feedback Type',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  AppTextField(
+                    controller: _feedbackController,
+                    label: 'Description',
+                    hint: 'Describe the issue or idea...',
+                    maxLines: 5,
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 16),
-            TextField(
-              controller: _emailController,
-              decoration: const InputDecoration(
-                labelText: 'Contact Email (Optional)',
-                hintText: 'If you want us to follow up',
-                border: OutlineInputBorder(),
+            AppCard(
+              child: AppTextField(
+                controller: _emailController,
+                label: 'Contact Email (Optional)',
+                hint: 'If you want us to follow up',
+                keyboardType: TextInputType.emailAddress,
               ),
             ),
             const SizedBox(height: 32),
-            SizedBox(
-              width: double.infinity,
-              height: 50,
-              child: ElevatedButton(
-                onPressed: _isSubmitting ? null : _submitFeedback,
-                style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.deepPurple),
-                child: _isSubmitting
-                    ? const CircularProgressIndicator(color: Colors.white)
-                    : const Text('Submit Feedback',
-                        style: TextStyle(fontSize: 16, color: Colors.white)),
-              ),
+            AppButton(
+              text: 'Submit Feedback',
+              onPressed: _submitFeedback,
+              isLoading: _isSubmitting,
             ),
           ],
         ),

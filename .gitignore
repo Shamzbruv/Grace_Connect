@@ -39,10 +39,12 @@ build/
 .env.*
 **/.env
 **/.env.*
+*firebase-adminsdk*.json
 .vscode/
 .ruby-lsp/
 supabase/.temp/
 android/local.properties
+ios/Flutter/MapsKeys.xcconfig
 $\\dir\\launcher_icon.png
 
 # Symbolication related

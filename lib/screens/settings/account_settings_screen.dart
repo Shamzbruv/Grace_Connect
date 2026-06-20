@@ -387,7 +387,10 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
                       child: FilledButton(
                         onPressed: _isLoading ? null : _saveProfile,
                         style: FilledButton.styleFrom(
-                          backgroundColor: AppColors.primary,
+                          backgroundColor:
+                              Theme.of(context).colorScheme.primary,
+                          foregroundColor:
+                              Theme.of(context).colorScheme.onPrimary,
                           padding: const EdgeInsets.all(16),
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(12)),
