@@ -11,3 +11,6 @@ verify_jwt = false
 
 [functions.finalize-monthly-quiz-winners]
 verify_jwt = false
+
+[functions.finalize-service-attendance]
+verify_jwt = false

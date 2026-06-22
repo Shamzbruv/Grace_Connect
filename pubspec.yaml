@@ -1,6 +1,6 @@
 name: grace_connect
 description: "Grace Connect - Church Management System"
-version: "1.0.11-beta+12"
+version: "1.0.12-beta+13"
 publish_to: "none"
 
 environment:

@@ -1,6 +1,10 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../models/daily_motivation.dart';
 import '../../services/daily_motivation_service.dart';
@@ -19,6 +23,7 @@ class DailyWordScreen extends StatefulWidget {
 
 class _DailyWordScreenState extends State<DailyWordScreen> {
   final _service = DailyMotivationService();
+  final _dailyWordShareKey = GlobalKey();
   late Future<_DailyWordData> _future;
 
   @override
@@ -37,6 +42,46 @@ class _DailyWordScreenState extends State<DailyWordScreen> {
 
   void _refresh() {
     setState(() => _future = _load());
+  }
+
+  Future<void> _shareDailyWordImage(DailyMotivation motivation) async {
+    try {
+      await WidgetsBinding.instance.endOfFrame;
+      final boundary = _dailyWordShareKey.currentContext?.findRenderObject()
+          as RenderRepaintBoundary?;
+      if (boundary == null) {
+        throw Exception('Daily Word card is not ready yet.');
+      }
+
+      final image = await boundary.toImage(pixelRatio: 3);
+      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      final pngBytes = byteData?.buffer.asUint8List();
+      if (pngBytes == null || pngBytes.isEmpty) {
+        throw Exception('Could not prepare Daily Word image.');
+      }
+
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [
+            XFile.fromData(
+              pngBytes,
+              mimeType: 'image/png',
+              name:
+                  'grace_daily_word_${DateFormat('yyyyMMdd').format(motivation.publishDate.toLocal())}.png',
+            ),
+          ],
+          text: 'Grace Connect Daily Word • ${motivation.scriptureReference}',
+          subject: motivation.title,
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      AppFeedback.show(
+        context,
+        'Could not share Daily Word image: $error',
+        type: AppFeedbackType.error,
+      );
+    }
   }
 
   @override
@@ -84,7 +129,16 @@ class _DailyWordScreenState extends State<DailyWordScreen> {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(18, 12, 18, 28),
               children: [
-                _DailyWordHero(motivation: data!.selected!),
+                RepaintBoundary(
+                  key: _dailyWordShareKey,
+                  child: _DailyWordHero(motivation: data!.selected!),
+                ),
+                const SizedBox(height: 12),
+                FilledButton.icon(
+                  onPressed: () => _shareDailyWordImage(data.selected!),
+                  icon: const Icon(Icons.ios_share_outlined),
+                  label: const Text('Share Daily Word'),
+                ),
                 const SizedBox(height: 22),
                 Text(
                   'Recent Daily Words',

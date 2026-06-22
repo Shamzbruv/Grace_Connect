@@ -98,6 +98,12 @@ class AppBottomMenu extends StatelessWidget {
       selectedIcon: Icons.live_tv,
     ),
     _MenuItem(
+      label: 'Manage Live',
+      route: '/admin/live_stream',
+      icon: Icons.settings_input_antenna_outlined,
+      selectedIcon: Icons.settings_input_antenna,
+    ),
+    _MenuItem(
       label: 'Analytics',
       route: '/analytics',
       icon: Icons.analytics_outlined,
@@ -240,6 +246,7 @@ class AppBottomMenu extends StatelessWidget {
     return _moreItems.where((item) {
       if (item.route == '/members') return _canViewMembers(profile);
       if (item.route == '/analytics') return _canViewAnalytics(profile);
+      if (item.route == '/admin/live_stream') return _canManageLive(profile);
       return true;
     }).toList(growable: false);
   }
@@ -259,6 +266,11 @@ class AppBottomMenu extends StatelessWidget {
         capabilities.canManageMembersBasic ||
         capabilities.canViewFinance ||
         capabilities.canApproveHighImpactEvents;
+  }
+
+  bool _canManageLive(UserProfile? profile) {
+    if (profile == null) return false;
+    return profile.isDeveloper || profile.capabilities.canManageMediaUploads;
   }
 }
 

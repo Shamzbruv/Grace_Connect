@@ -16,6 +16,7 @@ import 'screens/admin/finance_dashboard_screen.dart';
 import 'screens/admin/attendance_insights_screen.dart';
 import 'screens/admin/role_management_screen.dart';
 import 'screens/admin/schedule_management_screen.dart';
+import 'screens/admin/admin_stream_settings_screen.dart';
 import 'screens/admin/daily_motivation_admin_screen.dart';
 import 'screens/admin/daily_bible_quiz_admin_screen.dart';
 import 'screens/landing/landing_page.dart';
@@ -190,6 +191,8 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
                   _protected(const CounselingIntroScreen()),
               '/live_streaming': (context) =>
                   _protected(const LiveStreamingScreen()),
+              '/admin/live_stream': (context) =>
+                  _protected(const AdminStreamSettingsScreen()),
               '/daily_word': (context) => _protected(const DailyWordScreen()),
               '/daily_bible_quiz': (context) =>
                   _protected(const BibleQuizScreen()),

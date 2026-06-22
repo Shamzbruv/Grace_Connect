@@ -103,6 +103,8 @@ class _MoreTabScreen extends StatelessWidget {
         capabilities?.canViewSensitivePrayers == true;
     final canManageRoles = capabilities?.canManageRoles ?? false;
     final canManageSchedules = capabilities?.canManageSchedules ?? false;
+    final canManageLive = capabilities?.canManageMediaUploads == true ||
+        profile?.isDeveloper == true;
     final canViewAnalytics = capabilities?.canManageMembersBasic == true ||
         capabilities?.canViewFinance == true ||
         capabilities?.canApproveHighImpactEvents == true ||
@@ -140,6 +142,12 @@ class _MoreTabScreen extends StatelessWidget {
         Icons.favorite_outline,
       ),
       const _MoreAction('Live', '/live_streaming', Icons.live_tv_outlined),
+      if (canManageLive)
+        const _MoreAction(
+          'Manage Live',
+          '/admin/live_stream',
+          Icons.settings_input_antenna_outlined,
+        ),
       if (canViewAnalytics)
         const _MoreAction('Analytics', '/analytics', Icons.analytics_outlined),
       if (canManageRoles)

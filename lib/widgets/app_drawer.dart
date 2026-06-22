@@ -17,6 +17,8 @@ class AppDrawer extends StatelessWidget {
     final userProfile = userProvider.userProfile;
     final isPlainMember = _isPlainMember(userProfile);
     final canViewAnalytics = _canViewAnalytics(userProfile);
+    final canManageLive = userProfile?.isDeveloper == true ||
+        userProfile?.capabilities.canManageMediaUploads == true;
 
     return Drawer(
       backgroundColor: theme.scaffoldBackgroundColor,
@@ -64,6 +66,12 @@ class AppDrawer extends StatelessWidget {
                       'Counseling', '/counseling'),
                   _buildDrawerItem(context, Icons.live_tv_outlined,
                       'Live Streaming', '/live_streaming'),
+                  if (canManageLive)
+                    _buildDrawerItem(
+                        context,
+                        Icons.settings_input_antenna_outlined,
+                        'Manage Live',
+                        '/admin/live_stream'),
                   if (canViewAnalytics)
                     _buildDrawerItem(context, Icons.analytics_outlined,
                         'Analytics', '/analytics'),

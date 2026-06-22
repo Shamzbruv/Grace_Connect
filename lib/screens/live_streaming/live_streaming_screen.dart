@@ -451,6 +451,10 @@ class _LiveStreamingScreenState extends State<LiveStreamingScreen>
 
   @override
   Widget build(BuildContext context) {
+    final profile = context.watch<UserRoleProvider>().userProfile;
+    final canManageLive = profile?.isDeveloper == true ||
+        profile?.capabilities.canManageMediaUploads == true;
+
     return Scaffold(
       appBar: AppBar(
         title: Text('Live Service',
@@ -458,6 +462,14 @@ class _LiveStreamingScreenState extends State<LiveStreamingScreen>
         backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
         foregroundColor: Theme.of(context).appBarTheme.foregroundColor,
         actions: [
+          if (canManageLive)
+            IconButton(
+              icon: const Icon(Icons.settings_input_antenna_outlined),
+              tooltip: 'Manage live stream',
+              onPressed: () => Navigator.of(context).pushNamed(
+                '/admin/live_stream',
+              ),
+            ),
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: () {
@@ -543,6 +555,16 @@ class _LiveStreamingScreenState extends State<LiveStreamingScreen>
                               Theme.of(context).colorScheme.onSurface,
                         ),
                       ),
+                      if (canManageLive) ...[
+                        const SizedBox(height: 12),
+                        OutlinedButton.icon(
+                          onPressed: () => Navigator.of(context)
+                              .pushNamed('/admin/live_stream'),
+                          icon:
+                              const Icon(Icons.settings_input_antenna_outlined),
+                          label: const Text('Manage Live Stream'),
+                        ),
+                      ],
                     ],
                   ),
                 ),

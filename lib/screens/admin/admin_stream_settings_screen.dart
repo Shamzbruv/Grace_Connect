@@ -171,6 +171,15 @@ class _AdminStreamSettingsScreenState extends State<AdminStreamSettingsScreen> {
 
   Future<void> _handleLiveToggle(bool isLive) async {
     final previousValue = _isLive;
+    if (isLive && _urlController.text.trim().isEmpty) {
+      AppFeedback.show(
+        context,
+        'Paste a valid YouTube live link before going live.',
+        type: AppFeedbackType.warning,
+      );
+      return;
+    }
+
     setState(() => _isLive = isLive);
     final saved = await _saveSettings();
     if (!saved && mounted) {

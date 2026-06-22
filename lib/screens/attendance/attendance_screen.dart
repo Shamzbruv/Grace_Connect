@@ -113,14 +113,16 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       final prompt = await _attendanceService.getCurrentCheckInPrompt(churchId);
       if (mounted) setState(() => _checkInPrompt = prompt);
     } catch (e) {
+      debugPrint('Could not check active service: $e');
       if (!mounted) return;
       setState(() {
-        _checkInPrompt = AttendanceCheckInPrompt(
+        _checkInPrompt = const AttendanceCheckInPrompt(
           hasActiveService: false,
           canMarkPresent: false,
           isInsideGeofence: false,
           alreadyMarked: false,
-          message: 'Could not check active service: $e',
+          message:
+              'Could not reach attendance right now. Tap Recheck and make sure your connection is active.',
         );
       });
     } finally {
@@ -233,8 +235,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           }
 
           if (snapshot.hasError) {
-            return Center(
-                child: Text('Error loading attendance: ${snapshot.error}'));
+            return _buildAttendanceLoadError(context, user.churchId);
           }
 
           final records = snapshot.data ?? [];
@@ -330,6 +331,51 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
             ),
           );
         },
+      ),
+    );
+  }
+
+  Widget _buildAttendanceLoadError(BuildContext context, String churchId) {
+    final theme = Theme.of(context);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.wifi_off_outlined,
+              size: 48,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(height: 14),
+            Text(
+              'Attendance could not load right now.',
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w800,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Check your connection and try again. Your existing records will reappear as soon as Grace Connect reconnects.',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 18),
+            FilledButton.icon(
+              onPressed: () {
+                setState(() => _attendanceHistoryStream = null);
+                unawaited(_refreshSetupStatus(churchId));
+                unawaited(_refreshCheckInPrompt(churchId));
+              },
+              icon: const Icon(Icons.refresh),
+              label: const Text('Retry'),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -56,7 +56,31 @@ function validateQuestion(value: unknown): QuizQuestion | null {
   };
 }
 
-function selectFiveQuestions(aiResponse: unknown): { questions: QuizQuestion[]; source: "ai" | "fallback" } {
+function seedScore(seed: string): number {
+  let hash = 2166136261;
+  for (let index = 0; index < seed.length; index++) {
+    hash ^= seed.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function seededQuestionSet(
+  questions: QuizQuestion[],
+  seed: string,
+): QuizQuestion[] {
+  const decorated = questions.map((question, index) => ({
+    question,
+    score: seedScore(`${seed}:${index}:${question.question}`),
+  }));
+  decorated.sort((left, right) => left.score - right.score);
+  return decorated.slice(0, 5).map((item) => item.question);
+}
+
+function selectFiveQuestions(
+  aiResponse: unknown,
+  seed: string,
+): { questions: QuizQuestion[]; source: "ai" | "fallback" } {
   const candidates = Array.isArray((aiResponse as AiQuizResponse | null)?.questions)
     ? (aiResponse as AiQuizResponse).questions ?? []
     : [];
@@ -66,9 +90,9 @@ function selectFiveQuestions(aiResponse: unknown): { questions: QuizQuestion[]; 
     unique.set(question.question.toLowerCase(), question);
   }
   if (unique.size >= 5) {
-    return { questions: Array.from(unique.values()).slice(0, 5), source: "ai" };
+    return { questions: seededQuestionSet(Array.from(unique.values()), seed), source: "ai" };
   }
-  return { questions: fallbackQuizQuestions.slice(0, 5), source: "fallback" };
+  return { questions: seededQuestionSet(fallbackQuizQuestions, seed), source: "fallback" };
 }
 
 Deno.serve(async (request) => {
@@ -109,6 +133,7 @@ Deno.serve(async (request) => {
 
   const prompt = `You are creating Bible Quiz questions for Grace Connect, a Christian church app.
 Generate 12 fact-based, respectful, clear multiple-choice questions strictly grounded in Scripture.
+Today’s Jamaica date key is ${quizDate}; avoid repeating common starter questions from previous days.
 Each question must have four options and one unambiguous correct answer.
 Provide a concise explanation and one or more accurate Bible references supporting the answer.
 Avoid denomination-specific interpretations, trick questions, unclear wording, prophecy-date predictions, prosperity claims, and copyrighted Bible quotations.
@@ -122,9 +147,9 @@ Return valid JSON only in this shape:
   } catch (_) {
     aiResponse = null;
   }
-  const selected = selectFiveQuestions(aiResponse);
 
   let published = 0;
+  const sources = new Set<string>();
   for (const churchId of churchIds) {
     const existing = await client
       .from("daily_bible_quizzes")
@@ -136,6 +161,9 @@ Return valid JSON only in this shape:
     if (existing.data?.status === "published" && existing.data?.notification_sent_at) {
       continue;
     }
+
+    const selected = selectFiveQuestions(aiResponse, `${quizDate}:${churchId}`);
+    sources.add(selected.source);
 
     const { data: quiz, error: quizError } = await client
       .from("daily_bible_quizzes")
@@ -218,6 +246,6 @@ Return valid JSON only in this shape:
     quiz_date: quizDate,
     churches_checked: churchIds.length,
     quizzes_published: published,
-    source: selected.source,
+    source: Array.from(sources).join(",") || "none",
   });
 });

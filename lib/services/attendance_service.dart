@@ -89,9 +89,11 @@ class AttendanceService {
       FlutterLocalNotificationsPlugin();
 
   StreamSubscription<Position>? _positionStreamSubscription;
+  Timer? _activeServicePollTimer;
   DateTime? _entryTime;
   String? _currentServiceId;
   bool _isMonitoring = false;
+  bool _isPollingLocation = false;
   String _lastDebugStatus = 'Auto-attendance has not started yet.';
 
   // Singleton pattern for continuous monitoring
@@ -194,6 +196,33 @@ class AttendanceService {
       _setMonitoring(false);
       _updateDebugStatus('Error: $e');
     });
+
+    unawaited(_pollCurrentLocationForAttendance());
+    _activeServicePollTimer?.cancel();
+    _activeServicePollTimer = Timer.periodic(
+      const Duration(seconds: 60),
+      (_) => unawaited(_pollCurrentLocationForAttendance()),
+    );
+  }
+
+  Future<void> _pollCurrentLocationForAttendance() async {
+    if (_isPollingLocation || !_isMonitoring) return;
+
+    _isPollingLocation = true;
+    try {
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
+      );
+      await _checkLocationLogic(position);
+    } catch (error) {
+      debugPrint('Auto-attendance polling failed: $error');
+      _updateDebugStatus(
+          'Auto-attendance polling failed. Tap Recheck if this continues.');
+    } finally {
+      _isPollingLocation = false;
+    }
   }
 
   Future<void> _checkLocationLogic(Position position) async {
@@ -358,7 +387,8 @@ class AttendanceService {
         // 5. Mark Present
         _updateDebugStatus('Marking present...');
         await _markPresent(userId, churchId, activeServiceId,
-            activeServiceStartTime, activeServiceName);
+            activeServiceStartTime, activeServiceName,
+            detectedAt: _entryTime);
       }
     } else {
       // Service changed while inside? Reset
@@ -415,6 +445,7 @@ class AttendanceService {
     String? serviceStartTime,
     String? serviceName, {
     String method = 'auto_geofence',
+    DateTime? detectedAt,
   }) async {
     // Check duplication
     final todayStart =
@@ -438,7 +469,7 @@ class AttendanceService {
     int? minutesLate;
 
     if (serviceStartTime != null) {
-      final now = DateTime.now();
+      final now = detectedAt ?? DateTime.now();
       final startParts = _parseTimeParts(serviceStartTime);
       if (startParts != null) {
         final scheduleTime = DateTime(
@@ -491,6 +522,7 @@ class AttendanceService {
 
     final activeService = await getActiveService(churchId);
     if (activeService == null) {
+      await finalizePastDueServices(churchId);
       await _markPastDueAbsencesForUser(user.id, churchId);
       return const AttendanceCheckInPrompt(
         hasActiveService: false,
@@ -616,6 +648,7 @@ class AttendanceService {
     }
 
     final activeService = await getActiveService(churchId);
+    final detectedAt = await _readDwellEntry(user.id, prompt.serviceId!);
     await _markPresent(
       user.id,
       churchId,
@@ -623,6 +656,7 @@ class AttendanceService {
       activeService?['startTime'] as String?,
       prompt.serviceName,
       method: 'manual_geofence',
+      detectedAt: detectedAt,
     );
   }
 
@@ -702,6 +736,11 @@ class AttendanceService {
       churchLocation.longitude,
     );
     final isInside = distance <= churchLocation.radiusMeters;
+    if (isInside) {
+      await _readOrStartDwellEntry(user.id, serviceId);
+    } else {
+      await _clearDwellEntry(user.id, serviceId);
+    }
 
     return AttendanceCheckInPrompt(
       hasActiveService: true,
@@ -738,6 +777,7 @@ class AttendanceService {
     }
 
     final activeService = await getActiveService(churchId);
+    final detectedAt = await _readDwellEntry(user.id, prompt.serviceId!);
     await _markPresent(
       user.id,
       churchId,
@@ -745,6 +785,7 @@ class AttendanceService {
       activeService?['startTime'] as String?,
       prompt.serviceName,
       method: 'manual_geofence',
+      detectedAt: detectedAt,
     );
   }
 
@@ -870,6 +911,12 @@ class AttendanceService {
     return now;
   }
 
+  Future<DateTime?> _readDwellEntry(String userId, String serviceId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final stored = prefs.getString(_dwellKey(userId, serviceId));
+    return stored == null ? null : DateTime.tryParse(stored);
+  }
+
   Future<void> _saveDwellEntry(
       String userId, String serviceId, DateTime entryTime) async {
     final prefs = await SharedPreferences.getInstance();
@@ -918,6 +965,21 @@ class AttendanceService {
     }
   }
 
+  Future<void> finalizePastDueServices(String churchId) async {
+    try {
+      final response = await _supabase.functions.invoke(
+        'finalize-service-attendance',
+        body: {'church_id': churchId},
+      );
+      final data = response.data;
+      if (data is Map && data['error'] != null) {
+        debugPrint('Attendance finalizer returned an error: ${data['error']}');
+      }
+    } catch (error) {
+      debugPrint('Attendance finalizer unavailable: $error');
+    }
+  }
+
   bool _isSchedulePastDue(DateTime now, ServiceSchedule schedule) {
     final endParts = _parseTimeParts(schedule.endTime);
     if (endParts == null) return false;
@@ -931,26 +993,36 @@ class AttendanceService {
   }
 
   Stream<List<AttendanceRecord>> getAttendanceHistory(String userId) async* {
-    final initialRows = await _supabase
+    var lastGoodRecords = const <AttendanceRecord>[];
+
+    while (true) {
+      try {
+        final records = await _fetchAttendanceHistory(userId);
+        lastGoodRecords = records;
+        yield records;
+      } catch (error) {
+        debugPrint('Attendance history refresh failed: $error');
+        if (lastGoodRecords.isNotEmpty) {
+          yield lastGoodRecords;
+        } else {
+          rethrow;
+        }
+      }
+
+      await Future<void>.delayed(const Duration(seconds: 45));
+    }
+  }
+
+  Future<List<AttendanceRecord>> _fetchAttendanceHistory(String userId) async {
+    final rows = await _supabase
         .from('attendance')
         .select()
         .eq('user_id', userId)
         .order('timestamp', ascending: false);
 
-    yield initialRows
+    return rows
         .map<AttendanceRecord>((record) => AttendanceRecord.fromMap(record))
         .toList();
-
-    yield* _supabase
-        .from('attendance')
-        .stream(primaryKey: ['id'])
-        .eq('user_id', userId)
-        .order('timestamp', ascending: false)
-        .map((records) {
-          return records
-              .map((record) => AttendanceRecord.fromMap(record))
-              .toList();
-        });
   }
 
   Future<AttendanceSetupStatus> getSetupStatus(String churchId) async {
@@ -1077,7 +1149,10 @@ class AttendanceService {
 
   void stopMonitoring() {
     _positionStreamSubscription?.cancel();
+    _activeServicePollTimer?.cancel();
     _positionStreamSubscription = null;
+    _activeServicePollTimer = null;
+    _isPollingLocation = false;
     _entryTime = null;
     _currentServiceId = null;
     _setMonitoring(false);
