@@ -11,6 +11,8 @@ class Post {
   final String? mediaUrl;
   final String? mediaPath;
   final String? mediaType;
+  final String mediaFit;
+  final double? mediaAspectRatio;
   final DateTime? expiresAt;
   final bool visibleToAllChurches;
 
@@ -27,6 +29,8 @@ class Post {
     this.mediaUrl,
     this.mediaPath,
     this.mediaType,
+    this.mediaFit = 'cover',
+    this.mediaAspectRatio,
     this.expiresAt,
     this.visibleToAllChurches = false,
   });
@@ -47,6 +51,9 @@ class Post {
       mediaUrl: data['media_url'],
       mediaPath: data['media_path'] ?? data['mediaPath'],
       mediaType: data['media_type'],
+      mediaFit: (data['media_fit'] ?? data['mediaFit'] ?? 'cover').toString(),
+      mediaAspectRatio: _nullableDouble(
+          data['media_aspect_ratio'] ?? data['mediaAspectRatio']),
       expiresAt: _nullableDate(data['expires_at'] ?? data['expiresAt']),
       visibleToAllChurches: data['visible_to_all_churches'] == true ||
           data['visibleToAllChurches'] == true,
@@ -65,6 +72,8 @@ class Post {
       'media_url': mediaUrl,
       'media_path': mediaPath,
       'media_type': mediaType,
+      'media_fit': mediaFit,
+      'media_aspect_ratio': mediaAspectRatio,
       'expires_at': (expiresAt ?? DateTime.now().add(const Duration(days: 30)))
           .toUtc()
           .toIso8601String(),
@@ -76,5 +85,12 @@ class Post {
   static DateTime? _nullableDate(dynamic value) {
     if (value is String) return DateTime.tryParse(value)?.toLocal();
     return null;
+  }
+
+  static double? _nullableDouble(dynamic value) {
+    if (value is double) return value;
+    if (value is int) return value.toDouble();
+    if (value is num) return value.toDouble();
+    return double.tryParse(value?.toString() ?? '');
   }
 }

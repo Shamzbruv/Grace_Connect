@@ -6,6 +6,7 @@ import '../../providers/user_role_provider.dart';
 import '../../services/church_service.dart';
 import '../../services/notification_service.dart';
 import '../../models/church_model.dart';
+import '../../utils/youtube_url_utils.dart';
 import '../../widgets/ui/app_feedback.dart';
 import '../../widgets/ui/app_loader.dart';
 
@@ -80,7 +81,7 @@ class _AdminStreamSettingsScreenState extends State<AdminStreamSettingsScreen> {
       return;
     }
 
-    final videoId = YoutubePlayer.convertUrlToId(url);
+    final videoId = YoutubeUrlUtils.extractVideoId(url);
     if (videoId == null) {
       if (!quiet) {
         AppFeedback.show(
@@ -120,8 +121,9 @@ class _AdminStreamSettingsScreenState extends State<AdminStreamSettingsScreen> {
 
     // Validate ID one last time
     final streamUrl = _urlController.text.trim();
-    final videoId = YoutubePlayer.convertUrlToId(streamUrl);
-    if (videoId == null && streamUrl.isNotEmpty) {
+    final normalizedStreamUrl =
+        streamUrl.isEmpty ? '' : YoutubeUrlUtils.normalizeWatchUrl(streamUrl);
+    if (normalizedStreamUrl == null && streamUrl.isNotEmpty) {
       AppFeedback.show(
         context,
         'Please enter a valid YouTube URL.',
@@ -131,20 +133,21 @@ class _AdminStreamSettingsScreenState extends State<AdminStreamSettingsScreen> {
     }
 
     final wasLive = _church!.isLive;
-    final shouldNotifyLive = _isLive && !wasLive && streamUrl.isNotEmpty;
+    final shouldNotifyLive =
+        _isLive && !wasLive && normalizedStreamUrl?.isNotEmpty == true;
 
     setState(() => _isLoading = true);
     try {
       await ChurchService().updateStreamSettings(
         _church!.id,
-        streamUrl,
+        normalizedStreamUrl ?? '',
         _isLive,
       );
       if (shouldNotifyLive) {
         await _notifyChurchLiveNow();
       }
       if (mounted) {
-        _syncSavedChurchState(streamUrl);
+        _syncSavedChurchState(normalizedStreamUrl ?? '');
         final message = shouldNotifyLive
             ? 'Stream settings saved and members were notified.'
             : 'Stream settings updated successfully!';
@@ -275,7 +278,7 @@ class _AdminStreamSettingsScreenState extends State<AdminStreamSettingsScreen> {
                   if (value == null || value.isEmpty) {
                     return null; // Empty is allowed (turn off stream)
                   }
-                  if (YoutubePlayer.convertUrlToId(value) == null) {
+                  if (YoutubeUrlUtils.extractVideoId(value) == null) {
                     return 'Invalid YouTube URL';
                   }
                   return null;

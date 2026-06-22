@@ -633,6 +633,7 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
                       message: messages[index],
                       isMe: messages[index].senderId == _currentUid,
                       onLongPress: () => _showMessageActions(messages[index]),
+                      onOpenReplyContext: _openReplyContext,
                     );
                   },
                 );
@@ -775,6 +776,95 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
       ),
     );
   }
+
+  void _openReplyContext(Map<String, dynamic> replyContext) {
+    if (replyContext['type'] != 'community_story') return;
+    final mediaUrl = replyContext['media_url']?.toString();
+    final mediaType = replyContext['media_type']?.toString();
+    final caption = replyContext['caption']?.toString().trim() ?? '';
+    final author = replyContext['author_name']?.toString().trim() ?? 'Status';
+
+    showDialog<void>(
+      context: context,
+      barrierColor: Colors.black87,
+      builder: (context) {
+        return Scaffold(
+          backgroundColor: Colors.black,
+          body: Stack(
+            fit: StackFit.expand,
+            children: [
+              if (mediaType == 'image' && mediaUrl?.isNotEmpty == true)
+                CachedNetworkImage(
+                  imageUrl: mediaUrl!,
+                  fit: BoxFit.contain,
+                  errorWidget: (_, __, ___) => const Center(
+                    child: Icon(Icons.broken_image_outlined,
+                        color: Colors.white70, size: 48),
+                  ),
+                )
+              else
+                const Center(
+                  child: Icon(Icons.auto_stories_outlined,
+                      color: Colors.white70, size: 58),
+                ),
+              const DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.black87,
+                      Colors.transparent,
+                      Colors.black87
+                    ],
+                    stops: [0, 0.45, 1],
+                  ),
+                ),
+              ),
+              Positioned(
+                left: 18,
+                right: 70,
+                top: MediaQuery.of(context).padding.top + 12,
+                child: Text(
+                  author,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 18,
+                  ),
+                ),
+              ),
+              Positioned(
+                top: MediaQuery.of(context).padding.top + 2,
+                right: 8,
+                child: IconButton(
+                  icon: const Icon(Icons.close, color: Colors.white),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ),
+              if (caption.isNotEmpty)
+                Positioned(
+                  left: 24,
+                  right: 24,
+                  bottom: MediaQuery.of(context).padding.bottom + 32,
+                  child: Text(
+                    caption,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 18,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
 }
 
 class _PendingAttachmentPreview extends StatelessWidget {
@@ -891,11 +981,13 @@ class _MessageBubble extends StatelessWidget {
     required this.message,
     required this.isMe,
     required this.onLongPress,
+    required this.onOpenReplyContext,
   });
 
   final DirectMessage message;
   final bool isMe;
   final VoidCallback onLongPress;
+  final ValueChanged<Map<String, dynamic>> onOpenReplyContext;
 
   @override
   Widget build(BuildContext context) {
@@ -926,6 +1018,15 @@ class _MessageBubble extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
+                if (message.replyContext.isNotEmpty) ...[
+                  _ReplyContextPreview(
+                    replyContext: message.replyContext,
+                    isMe: isMe,
+                    textColor: textColor,
+                    onTap: () => onOpenReplyContext(message.replyContext),
+                  ),
+                  const SizedBox(height: 8),
+                ],
                 if (message.hasMedia) ...[
                   _MessageMediaPreview(message: message, textColor: textColor),
                   if (message.text.isNotEmpty) const SizedBox(height: 8),
@@ -955,6 +1056,109 @@ class _MessageBubble extends StatelessWidget {
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ReplyContextPreview extends StatelessWidget {
+  const _ReplyContextPreview({
+    required this.replyContext,
+    required this.isMe,
+    required this.textColor,
+    required this.onTap,
+  });
+
+  final Map<String, dynamic> replyContext;
+  final bool isMe;
+  final Color textColor;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final author = replyContext['author_name']?.toString().trim() ?? 'Status';
+    final caption = replyContext['caption']?.toString().trim() ?? '';
+    final mediaUrl = replyContext['media_url']?.toString();
+    final mediaType = replyContext['media_type']?.toString();
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        width: 260,
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: isMe
+              ? Colors.white.withValues(alpha: 0.16)
+              : theme.colorScheme.surface.withValues(alpha: 0.62),
+          borderRadius: BorderRadius.circular(12),
+          border: Border(
+            left: BorderSide(
+              color: isMe
+                  ? Colors.white.withValues(alpha: 0.7)
+                  : theme.colorScheme.primary,
+              width: 3,
+            ),
+          ),
+        ),
+        child: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: SizedBox(
+                width: 42,
+                height: 52,
+                child: mediaType == 'image' && mediaUrl?.isNotEmpty == true
+                    ? CachedNetworkImage(
+                        imageUrl: mediaUrl!,
+                        fit: BoxFit.cover,
+                        errorWidget: (_, __, ___) => Icon(
+                          Icons.broken_image_outlined,
+                          color: textColor.withValues(alpha: 0.75),
+                        ),
+                      )
+                    : ColoredBox(
+                        color: textColor.withValues(alpha: 0.12),
+                        child: Icon(
+                          Icons.auto_stories_outlined,
+                          color: textColor.withValues(alpha: 0.75),
+                        ),
+                      ),
+              ),
+            ),
+            const SizedBox(width: 9),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    '$author status',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: textColor,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 12,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    caption.isEmpty ? 'Tap to view status' : caption,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: textColor.withValues(alpha: 0.82),
+                      fontSize: 12,
+                      height: 1.25,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );

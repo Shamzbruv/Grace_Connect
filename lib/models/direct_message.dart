@@ -14,6 +14,7 @@ class DirectMessage {
     this.readAt,
     this.deletedFor = const [],
     this.expiresAt,
+    this.replyContext = const {},
   });
 
   final String id;
@@ -30,6 +31,7 @@ class DirectMessage {
   final DateTime? readAt;
   final List<String> deletedFor;
   final DateTime? expiresAt;
+  final Map<String, dynamic> replyContext;
 
   bool get hasMedia => mediaUrl?.isNotEmpty == true;
   bool get isDelivered => deliveredAt != null || isRead || readAt != null;
@@ -57,6 +59,7 @@ class DirectMessage {
       readAt: _nullableDate(data['read_at'] ?? data['readAt']),
       deletedFor: _parseStringList(data['deleted_for'] ?? data['deletedFor']),
       expiresAt: _nullableDate(data['expires_at'] ?? data['expiresAt']),
+      replyContext: _parseMap(data['reply_context'] ?? data['replyContext']),
     );
   }
 
@@ -81,5 +84,11 @@ class DirectMessage {
   static List<String> _parseStringList(dynamic value) {
     if (value is List) return value.map((item) => item.toString()).toList();
     return const [];
+  }
+
+  static Map<String, dynamic> _parseMap(dynamic value) {
+    if (value is Map<String, dynamic>) return value;
+    if (value is Map) return Map<String, dynamic>.from(value);
+    return const {};
   }
 }

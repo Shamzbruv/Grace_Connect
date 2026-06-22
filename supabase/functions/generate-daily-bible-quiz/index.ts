@@ -65,22 +65,43 @@ function seedScore(seed: string): number {
   return hash >>> 0;
 }
 
-function seededQuestionSet(
+async function seededQuestionSet(
   questions: QuizQuestion[],
   seed: string,
-): QuizQuestion[] {
-  const decorated = questions.map((question, index) => ({
-    question,
-    score: seedScore(`${seed}:${index}:${question.question}`),
+  blockedHashes: Set<string>,
+): Promise<{ questions: QuizQuestion[]; reusedRecent: boolean }> {
+  const annotated = [];
+  for (let index = 0; index < questions.length; index++) {
+    const question = questions[index];
+    annotated.push({
+      question,
+      hash: await hashQuestion(question.question),
+      index,
+    });
+  }
+
+  const fresh = annotated.filter((item) => !blockedHashes.has(item.hash));
+  const pool = fresh.length >= 5 ? fresh : annotated;
+  const decorated = pool.map((item) => ({
+    question: item.question,
+    score: seedScore(`${seed}:${item.index}:${item.question.question}`),
   }));
   decorated.sort((left, right) => left.score - right.score);
-  return decorated.slice(0, 5).map((item) => item.question);
+  return {
+    questions: decorated.slice(0, 5).map((item) => item.question),
+    reusedRecent: fresh.length < 5,
+  };
 }
 
-function selectFiveQuestions(
+async function selectFiveQuestions(
   aiResponse: unknown,
   seed: string,
-): { questions: QuizQuestion[]; source: "ai" | "fallback" } {
+  recentQuestionHashes: Set<string>,
+): Promise<{
+  questions: QuizQuestion[];
+  source: "ai" | "fallback";
+  reusedRecent: boolean;
+}> {
   const candidates = Array.isArray((aiResponse as AiQuizResponse | null)?.questions)
     ? (aiResponse as AiQuizResponse).questions ?? []
     : [];
@@ -90,9 +111,62 @@ function selectFiveQuestions(
     unique.set(question.question.toLowerCase(), question);
   }
   if (unique.size >= 5) {
-    return { questions: seededQuestionSet(Array.from(unique.values()), seed), source: "ai" };
+    const selected = await seededQuestionSet(
+      Array.from(unique.values()),
+      seed,
+      recentQuestionHashes,
+    );
+    return { ...selected, source: "ai" };
   }
-  return { questions: seededQuestionSet(fallbackQuizQuestions, seed), source: "fallback" };
+  const selected = await seededQuestionSet(
+    fallbackQuizQuestions,
+    seed,
+    recentQuestionHashes,
+  );
+  return { ...selected, source: "fallback" };
+}
+
+function daysBeforeJamaicaDate(dateKey: string, days: number): string {
+  const date = new Date(`${dateKey}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() - days);
+  return date.toISOString().slice(0, 10);
+}
+
+async function recentQuestionHashes(
+  client: ReturnType<typeof serviceClient>,
+  churchId: string,
+  quizDate: string,
+): Promise<Set<string>> {
+  try {
+    const cutoffDate = daysBeforeJamaicaDate(quizDate, 60);
+    const { data: quizzes } = await client
+      .from("daily_bible_quizzes")
+      .select("id")
+      .eq("church_id", churchId)
+      .neq("quiz_date", quizDate)
+      .gte("quiz_date", cutoffDate)
+      .order("quiz_date", { ascending: false })
+      .limit(80);
+
+    const quizIds = (quizzes ?? [])
+      .map((quiz) => String(quiz.id ?? "").trim())
+      .filter(Boolean);
+    if (quizIds.length === 0) return new Set();
+
+    const { data: rows } = await client
+      .from("daily_bible_quiz_questions")
+      .select("question_hash")
+      .in("quiz_id", quizIds)
+      .limit(500);
+
+    return new Set(
+      (rows ?? [])
+        .map((row) => String(row.question_hash ?? "").trim())
+        .filter(Boolean),
+    );
+  } catch (_) {
+    return new Set();
+  }
 }
 
 Deno.serve(async (request) => {
@@ -132,8 +206,9 @@ Deno.serve(async (request) => {
   }
 
   const prompt = `You are creating Bible Quiz questions for Grace Connect, a Christian church app.
-Generate 12 fact-based, respectful, clear multiple-choice questions strictly grounded in Scripture.
+Generate 20 fact-based, respectful, clear multiple-choice questions strictly grounded in Scripture.
 Today’s Jamaica date key is ${quizDate}; avoid repeating common starter questions from previous days.
+Use a varied mix of Old Testament, Gospels, Acts, Epistles, wisdom literature, prophets, parables, miracles, women and men of faith, and Christian living.
 Each question must have four options and one unambiguous correct answer.
 Provide a concise explanation and one or more accurate Bible references supporting the answer.
 Avoid denomination-specific interpretations, trick questions, unclear wording, prophecy-date predictions, prosperity claims, and copyrighted Bible quotations.
@@ -162,8 +237,20 @@ Return valid JSON only in this shape:
       continue;
     }
 
-    const selected = selectFiveQuestions(aiResponse, `${quizDate}:${churchId}`);
+    const recentHashes = await recentQuestionHashes(client, churchId, quizDate);
+    const selected = await selectFiveQuestions(
+      aiResponse,
+      `${quizDate}:${churchId}`,
+      recentHashes,
+    );
     sources.add(selected.source);
+    const validationNotes = selected.source === "fallback"
+      ? selected.reusedRecent
+        ? "AI response unavailable/invalid. Curated bank used; recent repeats were avoided where possible."
+        : "AI response unavailable/invalid. Varied curated bank used."
+      : selected.reusedRecent
+        ? "AI generated the quiz. Recent repeats were avoided where possible."
+        : null;
 
     const { data: quiz, error: quizError } = await client
       .from("daily_bible_quizzes")
@@ -176,7 +263,7 @@ Return valid JSON only in this shape:
         status: "published",
         generation_source: selected.source,
         generation_status: selected.source === "ai" ? "generated" : "fallback",
-        validation_notes: selected.source === "fallback" ? "Fallback question bank used." : null,
+        validation_notes: validationNotes,
       }, { onConflict: "church_id,quiz_date" })
       .select("id")
       .single();

@@ -322,6 +322,7 @@ class DirectMessageService {
     String? mediaPath,
     String mediaType = 'text',
     int? durationSeconds,
+    Map<String, dynamic>? replyContext,
   }) async {
     final uid = _currentUid;
     final cleanText = text.trim();
@@ -334,6 +335,10 @@ class DirectMessageService {
 
     final now = DateTime.now().toUtc();
     final expiresAt = now.add(const Duration(days: 30));
+    final cleanReplyContext = replyContext == null
+        ? const <String, dynamic>{}
+        : Map<String, dynamic>.from(replyContext)
+      ..removeWhere((_, value) => value == null);
     final payload = {
       'id': const Uuid().v4(),
       'conversation_id': conversationId,
@@ -343,6 +348,7 @@ class DirectMessageService {
       'media_path': mediaPath,
       'media_type': mediaType,
       'duration_seconds': durationSeconds,
+      'reply_context': cleanReplyContext,
       'created_at': now.toIso8601String(),
       'expires_at': expiresAt.toIso8601String(),
     };
@@ -360,7 +366,11 @@ class DirectMessageService {
       });
     }
 
-    final preview = _previewForMessage(cleanText, mediaType);
+    final preview = _previewForMessage(
+      cleanText,
+      mediaType,
+      replyContext: cleanReplyContext,
+    );
     try {
       await _supabase.from('direct_conversations').update({
         'last_message': preview,
@@ -543,7 +553,14 @@ class DirectMessageService {
     return conversations;
   }
 
-  String _previewForMessage(String text, String mediaType) {
+  String _previewForMessage(
+    String text,
+    String mediaType, {
+    Map<String, dynamic> replyContext = const {},
+  }) {
+    if (replyContext['type'] == 'community_story') {
+      return text.isEmpty ? 'Replied to a status' : 'Status reply: $text';
+    }
     if (text.isNotEmpty) return text;
     return switch (mediaType) {
       'image' => 'Photo',
@@ -554,7 +571,11 @@ class DirectMessageService {
   }
 
   String previewForMessage(DirectMessage message) {
-    return _previewForMessage(message.text.trim(), message.mediaType);
+    return _previewForMessage(
+      message.text.trim(),
+      message.mediaType,
+      replyContext: message.replyContext,
+    );
   }
 
   Future<void> _refreshConversationPreview(String conversationId) async {

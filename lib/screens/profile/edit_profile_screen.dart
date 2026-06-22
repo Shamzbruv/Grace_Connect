@@ -4,11 +4,9 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../providers/user_role_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../services/profile_service.dart';
-import 'dart:io';
 import 'dart:typed_data';
-import 'package:image_picker/image_picker.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:intl/intl.dart';
+import '../../utils/profile_photo_picker.dart';
 
 class EditProfileScreen extends StatefulWidget {
   const EditProfileScreen({super.key});
@@ -26,7 +24,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   late DateTime _memberSince;
 
   bool _isLoading = false;
-  File? _imageFile;
   Uint8List? _imageBytes;
   String? _imageName;
 
@@ -50,18 +47,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   }
 
   Future<void> _pickImage() async {
-    final pickedFile =
-        await ImagePicker().pickImage(source: ImageSource.gallery);
-    if (pickedFile != null) {
-      final bytes = await pickedFile.readAsBytes();
-      setState(() {
-        if (!kIsWeb) {
-          _imageFile = File(pickedFile.path);
-        }
-        _imageBytes = bytes;
-        _imageName = pickedFile.name;
-      });
-    }
+    final pickedPhoto = await pickProfilePhotoWithCropOption(context);
+    if (pickedPhoto == null) return;
+    setState(() {
+      _imageBytes = pickedPhoto.bytes;
+      _imageName = pickedPhoto.fileName;
+    });
   }
 
   Future<void> _saveProfile() async {
@@ -79,9 +70,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       if (_imageBytes != null && _imageName != null) {
         photoUrl = await ProfileService()
             .uploadProfilePhotoBytes(_imageBytes!, _imageName!);
-      } else if (_imageFile != null) {
-        // Fallback for non-web if bytes somehow aren't there
-        photoUrl = await ProfileService().uploadProfilePhoto(_imageFile!);
       }
 
       await Supabase.instance.client.from('users').update({
@@ -146,14 +134,11 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                                 colorScheme.surfaceContainerHighest,
                             backgroundImage: _imageBytes != null
                                 ? MemoryImage(_imageBytes!)
-                                : (_imageFile != null
-                                    ? FileImage(_imageFile!)
-                                    : (user?.photoUrl.isNotEmpty ?? false)
-                                        ? NetworkImage(user!.photoUrl)
-                                            as ImageProvider
-                                        : null),
+                                : (user?.photoUrl.isNotEmpty ?? false)
+                                    ? NetworkImage(user!.photoUrl)
+                                        as ImageProvider
+                                    : null,
                             child: (_imageBytes == null &&
-                                    _imageFile == null &&
                                     (user?.photoUrl.isEmpty ?? true))
                                 ? Icon(Icons.add_a_photo,
                                     size: 24,

@@ -1,8 +1,5 @@
-import 'dart:io';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../widgets/ui/app_scaffold.dart';
@@ -12,6 +9,7 @@ import '../../providers/user_role_provider.dart';
 import '../../services/account_deletion_service.dart';
 import '../../services/auth_flow_service.dart';
 import '../../services/profile_service.dart';
+import '../../utils/profile_photo_picker.dart';
 
 class AccountSettingsScreen extends StatefulWidget {
   const AccountSettingsScreen({super.key});
@@ -22,7 +20,6 @@ class AccountSettingsScreen extends StatefulWidget {
 
 class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
   final ProfileService _profileService = ProfileService();
-  final ImagePicker _picker = ImagePicker();
   final _formKey = GlobalKey<FormState>();
 
   late TextEditingController _nameController;
@@ -54,21 +51,15 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
     try {
       final userProvider =
           Provider.of<UserRoleProvider>(context, listen: false);
-      final XFile? image =
-          await _picker.pickImage(source: ImageSource.gallery, maxWidth: 800);
-      if (image == null) return;
+      final pickedPhoto = await pickProfilePhotoWithCropOption(context);
+      if (pickedPhoto == null) return;
 
       setState(() => _isLoading = true);
 
-      if (kIsWeb) {
-        await _profileService.uploadProfilePhotoBytes(
-          await image.readAsBytes(),
-          image.name,
-        );
-      } else {
-        final File file = File(image.path);
-        await _profileService.uploadProfilePhoto(file);
-      }
+      await _profileService.uploadProfilePhotoBytes(
+        pickedPhoto.bytes,
+        pickedPhoto.fileName,
+      );
 
       // Refresh provider
       await userProvider.fetchUserProfile();

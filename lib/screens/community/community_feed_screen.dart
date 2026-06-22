@@ -21,6 +21,7 @@ import '../../models/church_model.dart';
 import '../../models/community_story.dart';
 import '../../models/post.dart';
 import '../../models/user_profile.dart';
+import '../../utils/media_display_format.dart';
 import 'post_detail_screen.dart';
 import '../messages/message_thread_screen.dart';
 import 'package:image_picker/image_picker.dart';
@@ -74,6 +75,8 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
   XFile? _selectedMedia;
   Uint8List? _selectedImagePreviewBytes;
   String? _mediaType; // 'image' or 'video'
+  MediaDisplayFormat _postMediaFormat = MediaDisplayFormat.fill;
+  double? _postMediaAspectRatio;
 
   @override
   void initState() {
@@ -221,11 +224,14 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
 
     if (image != null) {
       final previewBytes = await image.readAsBytes();
+      final aspectRatio = await imageAspectRatioFromBytes(previewBytes);
       if (!mounted) return;
       setState(() {
         _selectedMedia = image;
         _selectedImagePreviewBytes = previewBytes;
         _mediaType = 'image';
+        _postMediaFormat = MediaDisplayFormat.full;
+        _postMediaAspectRatio = aspectRatio;
       });
     }
   }
@@ -252,6 +258,8 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
         _selectedMedia = video;
         _selectedImagePreviewBytes = null;
         _mediaType = 'video';
+        _postMediaFormat = MediaDisplayFormat.fill;
+        _postMediaAspectRatio = null;
       });
     }
   }
@@ -261,6 +269,8 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
     XFile? selectedStoryMedia;
     Uint8List? selectedStoryPreviewBytes;
     String? selectedStoryType;
+    var selectedStoryFormat = MediaDisplayFormat.full;
+    double? selectedStoryAspectRatio;
     var shareWithAllChurches = false;
 
     await showModalBottomSheet<void>(
@@ -274,11 +284,14 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
             final image = await picker.pickImage(source: source);
             if (image == null) return;
             final bytes = await image.readAsBytes();
+            final aspectRatio = await imageAspectRatioFromBytes(bytes);
             if (!sheetContext.mounted) return;
             setSheetState(() {
               selectedStoryMedia = image;
               selectedStoryPreviewBytes = bytes;
               selectedStoryType = 'image';
+              selectedStoryFormat = MediaDisplayFormat.full;
+              selectedStoryAspectRatio = aspectRatio;
             });
           }
 
@@ -329,7 +342,9 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                               : DecorationImage(
                                   image:
                                       MemoryImage(selectedStoryPreviewBytes!),
-                                  fit: BoxFit.cover,
+                                  fit: boxFitForMedia(
+                                    selectedStoryFormat.mediaFit,
+                                  ),
                                 ),
                         ),
                         child: selectedStoryPreviewBytes == null
@@ -353,6 +368,15 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                     ),
                   ),
                   const SizedBox(height: 12),
+                  if (selectedStoryPreviewBytes != null) ...[
+                    _MediaFormatSelector(
+                      selectedFormat: selectedStoryFormat,
+                      onSelected: (format) => setSheetState(
+                        () => selectedStoryFormat = format,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
                   AppTextField(
                     controller: captionController,
                     hint: 'Add a short caption...',
@@ -376,6 +400,8 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                                 caption: captionController.text,
                                 media: selectedStoryMedia,
                                 mediaType: selectedStoryType,
+                                mediaFormat: selectedStoryFormat,
+                                imageAspectRatio: selectedStoryAspectRatio,
                                 visibleToAllChurches: shareWithAllChurches,
                               );
                               if (sheetContext.mounted) {
@@ -405,6 +431,8 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
     required String caption,
     required XFile? media,
     required String? mediaType,
+    required MediaDisplayFormat mediaFormat,
+    required double? imageAspectRatio,
     required bool visibleToAllChurches,
   }) async {
     if (_isPostingStory) return;
@@ -447,6 +475,8 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
         mediaUrl: mediaUrl,
         mediaPath: mediaPath,
         mediaType: mediaType,
+        mediaFit: mediaFormat.mediaFit,
+        mediaAspectRatio: mediaFormat.aspectRatio ?? imageAspectRatio,
         visibleToAllChurches: visibleToAllChurches,
         createdAt: DateTime.now(),
         expiresAt: DateTime.now().add(const Duration(hours: 24)),
@@ -504,7 +534,8 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
 
       final userProvider =
           Provider.of<UserRoleProvider>(context, listen: false);
-      final churchId = userProvider.userProfile?.placeId;
+      final profile = userProvider.userProfile;
+      final churchId = profile?.placeId;
 
       if (churchId == null || churchId.isEmpty) {
         if (mounted) {
@@ -533,13 +564,18 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
         );
       }
 
-      String authorName = user.userMetadata?['full_name'] ?? 'Anonymous Member';
+      final authorName = profile?.fullName.isNotEmpty == true
+          ? profile!.fullName
+          : user.userMetadata?['full_name'] ?? 'Anonymous Member';
+      final authorPhoto = profile?.photoUrl.isNotEmpty == true
+          ? profile!.photoUrl
+          : user.userMetadata?['avatar_url'];
 
       final newPost = Post(
         id: '', // Handled by DB
         authorName: authorName,
         authorId: user.id,
-        authorPhoto: user.userMetadata?['avatar_url'],
+        authorPhoto: authorPhoto,
         content: _postController.text.trim(),
         timestamp: DateTime.now(),
         likes: [],
@@ -548,6 +584,8 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
         mediaUrl: mediaUrl,
         mediaPath: mediaPath,
         mediaType: _mediaType,
+        mediaFit: _postMediaFormat.mediaFit,
+        mediaAspectRatio: _postMediaFormat.aspectRatio ?? _postMediaAspectRatio,
         expiresAt: DateTime.now().add(const Duration(days: 30)),
         visibleToAllChurches: _postVisibleToAllChurches,
       );
@@ -559,6 +597,8 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
         _selectedMedia = null;
         _selectedImagePreviewBytes = null;
         _mediaType = null;
+        _postMediaFormat = MediaDisplayFormat.fill;
+        _postMediaAspectRatio = null;
         _postVisibleToAllChurches = false;
         _feedRefreshToken++;
       });
@@ -2240,15 +2280,23 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                 post.mediaType == 'image') ...[
               const SizedBox(height: 12),
               AspectRatio(
-                aspectRatio: 4 / 3,
+                aspectRatio: safeMediaAspectRatio(
+                  post.mediaAspectRatio,
+                  fallback: 4 / 3,
+                ),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(8),
-                  child: CachedNetworkImage(
-                    imageUrl: post.mediaUrl!,
-                    placeholder: (context, url) => const AppSkeletonListItem(),
-                    errorWidget: (context, url, error) =>
-                        const Center(child: Icon(Icons.error)),
-                    fit: BoxFit.cover,
+                  child: ColoredBox(
+                    color:
+                        Theme.of(context).colorScheme.surfaceContainerHighest,
+                    child: CachedNetworkImage(
+                      imageUrl: post.mediaUrl!,
+                      placeholder: (context, url) =>
+                          const AppSkeletonListItem(),
+                      errorWidget: (context, url, error) =>
+                          const Center(child: Icon(Icons.error)),
+                      fit: boxFitForMedia(post.mediaFit),
+                    ),
                   ),
                 ),
               ),
@@ -2513,8 +2561,8 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
             Align(
               alignment: Alignment.centerLeft,
               child: SizedBox(
-                height: 88,
-                width: 88,
+                height: 112,
+                width: 132,
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(12),
                   child: Stack(
@@ -2528,7 +2576,8 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                               ? DecorationImage(
                                   image:
                                       MemoryImage(_selectedImagePreviewBytes!),
-                                  fit: BoxFit.cover,
+                                  fit:
+                                      boxFitForMedia(_postMediaFormat.mediaFit),
                                 )
                               : null,
                         ),
@@ -2552,6 +2601,8 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                               _selectedMedia = null;
                               _selectedImagePreviewBytes = null;
                               _mediaType = null;
+                              _postMediaFormat = MediaDisplayFormat.fill;
+                              _postMediaAspectRatio = null;
                             });
                             onMediaChanged?.call();
                           },
@@ -2563,6 +2614,15 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
               ),
             ),
             const SizedBox(height: 8),
+            if (_mediaType == 'image')
+              _MediaFormatSelector(
+                selectedFormat: _postMediaFormat,
+                onSelected: (format) {
+                  setState(() => _postMediaFormat = format);
+                  onMediaChanged?.call();
+                },
+              ),
+            if (_mediaType == 'image') const SizedBox(height: 8),
           ],
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
@@ -2711,13 +2771,20 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
         currentUser: currentUser,
         otherUserId: story.authorId,
       );
-      final caption = story.caption?.trim();
-      final statusLine = caption == null || caption.isEmpty
-          ? 'your status'
-          : 'your status: "$caption"';
       await _messageService.sendMessage(
         conversationId: conversation.id,
-        text: 'Replied to $statusLine\n\n$cleanText',
+        text: cleanText,
+        replyContext: {
+          'type': 'community_story',
+          'story_id': story.id,
+          'author_id': story.authorId,
+          'author_name': story.authorName,
+          'caption': story.caption,
+          'media_url': story.mediaUrl,
+          'media_type': story.mediaType,
+          'media_fit': story.mediaFit,
+          'created_at': story.createdAt.toUtc().toIso8601String(),
+        },
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -2937,14 +3004,17 @@ class _StatusViewerDialogState extends State<_StatusViewerDialog> {
       return Stack(
         fit: StackFit.expand,
         children: [
-          CachedNetworkImage(
-            imageUrl: story.mediaUrl!,
-            fit: BoxFit.cover,
-            placeholder: (context, url) => const Center(
-              child: CircularProgressIndicator(color: Colors.white),
+          ColoredBox(
+            color: Colors.black,
+            child: CachedNetworkImage(
+              imageUrl: story.mediaUrl!,
+              fit: boxFitForMedia(story.mediaFit),
+              placeholder: (context, url) => const Center(
+                child: CircularProgressIndicator(color: Colors.white),
+              ),
+              errorWidget: (context, url, error) =>
+                  const Icon(Icons.error, color: Colors.white),
             ),
-            errorWidget: (context, url, error) =>
-                const Icon(Icons.error, color: Colors.white),
           ),
           const DecoratedBox(
             decoration: BoxDecoration(
@@ -3159,6 +3229,50 @@ class _StatusViewerDialogState extends State<_StatusViewerDialog> {
     final trimmed = name.trim();
     if (trimmed.isEmpty) return '?';
     return trimmed.characters.first.toUpperCase();
+  }
+}
+
+class _MediaFormatSelector extends StatelessWidget {
+  const _MediaFormatSelector({
+    required this.selectedFormat,
+    required this.onSelected,
+  });
+
+  final MediaDisplayFormat selectedFormat;
+  final ValueChanged<MediaDisplayFormat> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Photo format',
+          style: theme.textTheme.labelLarge?.copyWith(
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 8),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              for (final format in MediaDisplayFormat.values) ...[
+                ChoiceChip(
+                  label: Text(format.label),
+                  selected: selectedFormat == format,
+                  tooltip: format.description,
+                  onSelected: (_) => onSelected(format),
+                ),
+                const SizedBox(width: 8),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
   }
 }
 

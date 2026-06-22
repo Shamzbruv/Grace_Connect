@@ -18,7 +18,8 @@ class ProfileService {
       await _supabase.storage.from('avatars').upload(path, imageFile,
           fileOptions: const FileOptions(cacheControl: '3600', upsert: true));
 
-      final downloadUrl = _supabase.storage.from('avatars').getPublicUrl(path);
+      final downloadUrl =
+          _cacheBustedUrl(_supabase.storage.from('avatars').getPublicUrl(path));
 
       try {
         await _supabase
@@ -32,6 +33,8 @@ class ProfileService {
       await _supabase.auth.updateUser(UserAttributes(
         data: {'avatar_url': downloadUrl},
       ));
+
+      await _syncProfilePhotoReferences(user.id, downloadUrl);
 
       return downloadUrl;
     } catch (e) {
@@ -51,7 +54,8 @@ class ProfileService {
       await _supabase.storage.from('avatars').uploadBinary(path, imageBytes,
           fileOptions: const FileOptions(cacheControl: '3600', upsert: true));
 
-      final downloadUrl = _supabase.storage.from('avatars').getPublicUrl(path);
+      final downloadUrl =
+          _cacheBustedUrl(_supabase.storage.from('avatars').getPublicUrl(path));
 
       try {
         await _supabase
@@ -65,6 +69,8 @@ class ProfileService {
       await _supabase.auth.updateUser(UserAttributes(
         data: {'avatar_url': downloadUrl},
       ));
+
+      await _syncProfilePhotoReferences(user.id, downloadUrl);
 
       return downloadUrl;
     } catch (e) {
@@ -156,6 +162,46 @@ class ProfileService {
       }
     } catch (e) {
       throw Exception('Profile update failed: $e');
+    }
+  }
+
+  String _cacheBustedUrl(String url) {
+    final separator = url.contains('?') ? '&' : '?';
+    return '$url${separator}v=${DateTime.now().millisecondsSinceEpoch}';
+  }
+
+  Future<void> _syncProfilePhotoReferences(
+    String userId,
+    String photoUrl,
+  ) async {
+    try {
+      await _supabase.rpc(
+        'sync_user_profile_photo_references',
+        params: {'photo_url': photoUrl},
+      );
+      return;
+    } catch (error) {
+      debugPrint('Profile photo reference RPC unavailable: $error');
+    }
+
+    final updates = [
+      () => _supabase
+          .from('community_posts')
+          .update({'author_photo': photoUrl}).eq('author_id', userId),
+      () => _supabase
+          .from('community_stories')
+          .update({'author_photo': photoUrl}).eq('author_id', userId),
+      () => _supabase
+          .from('community_comments')
+          .update({'author_photo': photoUrl}).eq('author_id', userId),
+    ];
+
+    for (final update in updates) {
+      try {
+        await update();
+      } catch (error) {
+        debugPrint('Profile photo reference sync skipped: $error');
+      }
     }
   }
 }

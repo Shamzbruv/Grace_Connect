@@ -109,7 +109,16 @@ class CommunityService {
   }
 
   Future<void> addStory(CommunityStory story) async {
-    await _supabase.from(_storiesTable).insert(story.toMap());
+    final data = story.toMap();
+    try {
+      await _supabase.from(_storiesTable).insert(data);
+    } on PostgrestException catch (error) {
+      if (!_isMissingMediaDisplayColumn(error)) rethrow;
+      final fallbackData = Map<String, dynamic>.from(data)
+        ..remove('media_fit')
+        ..remove('media_aspect_ratio');
+      await _supabase.from(_storiesTable).insert(fallbackData);
+    }
   }
 
   Future<CommunityStory?> toggleStoryLike(String storyId) async {
@@ -344,7 +353,16 @@ class CommunityService {
   }
 
   Future<void> addPost(Post post) async {
-    await _supabase.from(_postsTable).insert(post.toMap());
+    final data = post.toMap();
+    try {
+      await _supabase.from(_postsTable).insert(data);
+    } on PostgrestException catch (error) {
+      if (!_isMissingMediaDisplayColumn(error)) rethrow;
+      final fallbackData = Map<String, dynamic>.from(data)
+        ..remove('media_fit')
+        ..remove('media_aspect_ratio');
+      await _supabase.from(_postsTable).insert(fallbackData);
+    }
   }
 
   Future<void> deletePost(Post post) async {
@@ -507,5 +525,14 @@ class CommunityService {
     }
 
     return uri.pathSegments.sublist(bucketIndex + 1).join('/');
+  }
+
+  bool _isMissingMediaDisplayColumn(PostgrestException error) {
+    final message = error.message.toLowerCase();
+    return message.contains('media_fit') ||
+        message.contains('media_aspect_ratio') ||
+        message.contains('schema cache') ||
+        error.code == 'PGRST204' ||
+        error.code == '42703';
   }
 }

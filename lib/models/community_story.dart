@@ -9,6 +9,8 @@ class CommunityStory {
     this.mediaUrl,
     this.mediaPath,
     this.mediaType,
+    this.mediaFit = 'cover',
+    this.mediaAspectRatio,
     this.likes = const [],
     this.visibleToAllChurches = false,
     required this.createdAt,
@@ -24,6 +26,8 @@ class CommunityStory {
   final String? mediaUrl;
   final String? mediaPath;
   final String? mediaType;
+  final String mediaFit;
+  final double? mediaAspectRatio;
   final List<String> likes;
   final bool visibleToAllChurches;
   final DateTime createdAt;
@@ -42,6 +46,9 @@ class CommunityStory {
       mediaUrl: data['media_url'] ?? data['mediaUrl'],
       mediaPath: data['media_path'] ?? data['mediaPath'],
       mediaType: data['media_type'] ?? data['mediaType'],
+      mediaFit: (data['media_fit'] ?? data['mediaFit'] ?? 'cover').toString(),
+      mediaAspectRatio: _nullableDouble(
+          data['media_aspect_ratio'] ?? data['mediaAspectRatio']),
       likes: _parseStringList(data['likes']),
       visibleToAllChurches: data['visible_to_all_churches'] == true ||
           data['visibleToAllChurches'] == true,
@@ -60,6 +67,8 @@ class CommunityStory {
       'media_url': mediaUrl,
       'media_path': mediaPath,
       'media_type': mediaType,
+      'media_fit': mediaFit,
+      'media_aspect_ratio': mediaAspectRatio,
       'likes': likes,
       'visible_to_all_churches': visibleToAllChurches,
       'created_at': createdAt.toUtc().toIso8601String(),
@@ -80,6 +89,8 @@ class CommunityStory {
       mediaUrl: mediaUrl,
       mediaPath: mediaPath,
       mediaType: mediaType,
+      mediaFit: mediaFit,
+      mediaAspectRatio: mediaAspectRatio,
       likes: likes ?? this.likes,
       visibleToAllChurches: visibleToAllChurches,
       createdAt: createdAt,
@@ -99,5 +110,12 @@ class CommunityStory {
       return value.map((item) => item.toString()).toList();
     }
     return const [];
+  }
+
+  static double? _nullableDouble(dynamic value) {
+    if (value is double) return value;
+    if (value is int) return value.toDouble();
+    if (value is num) return value.toDouble();
+    return double.tryParse(value?.toString() ?? '');
   }
 }

@@ -9,9 +9,7 @@ import 'family_link_sheet.dart';
 import '../../models/family_relationship.dart';
 import '../../services/family_service.dart';
 import '../../services/profile_service.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
-import 'dart:io';
+import '../../utils/profile_photo_picker.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -27,23 +25,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _handlePhotoUpload() async {
     final userProvider = Provider.of<UserRoleProvider>(context, listen: false);
-    final picker = ImagePicker();
-    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+    final pickedPhoto = await pickProfilePhotoWithCropOption(context);
 
-    if (pickedFile == null) return;
+    if (pickedPhoto == null) return;
 
     setState(() => _isUploading = true);
 
     try {
-      if (kIsWeb) {
-        await _profileService.uploadProfilePhotoBytes(
-          await pickedFile.readAsBytes(),
-          pickedFile.name,
-        );
-      } else {
-        final file = File(pickedFile.path);
-        await _profileService.uploadProfilePhoto(file);
-      }
+      await _profileService.uploadProfilePhotoBytes(
+        pickedPhoto.bytes,
+        pickedPhoto.fileName,
+      );
       await userProvider.refreshProfile();
 
       if (!mounted) return;

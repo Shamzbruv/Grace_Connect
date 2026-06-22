@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:timeago/timeago.dart' as timeago;
 import '../../models/post.dart';
 import '../../services/community_service.dart';
+import '../../utils/media_display_format.dart';
 import '../../widgets/ui/app_scaffold.dart';
 import '../../widgets/ui/app_text_field.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -226,18 +227,30 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                             if (post.mediaUrl != null &&
                                 post.mediaType == 'image') ...[
                               const SizedBox(height: 16),
-                              ClipRRect(
-                                borderRadius: BorderRadius.circular(8),
-                                child: CachedNetworkImage(
-                                  imageUrl: post.mediaUrl!,
-                                  placeholder: (context, url) => const Center(
-                                      child: Padding(
-                                    padding: EdgeInsets.all(16.0),
-                                    child: CircularProgressIndicator(),
-                                  )),
-                                  errorWidget: (context, url, error) =>
-                                      const Icon(Icons.error),
-                                  fit: BoxFit.cover,
+                              AspectRatio(
+                                aspectRatio: safeMediaAspectRatio(
+                                  post.mediaAspectRatio,
+                                  fallback: 4 / 3,
+                                ),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: ColoredBox(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .surfaceContainerHighest,
+                                    child: CachedNetworkImage(
+                                      imageUrl: post.mediaUrl!,
+                                      placeholder: (context, url) =>
+                                          const Center(
+                                              child: Padding(
+                                        padding: EdgeInsets.all(16.0),
+                                        child: CircularProgressIndicator(),
+                                      )),
+                                      errorWidget: (context, url, error) =>
+                                          const Icon(Icons.error),
+                                      fit: boxFitForMedia(post.mediaFit),
+                                    ),
+                                  ),
                                 ),
                               ),
                             ],

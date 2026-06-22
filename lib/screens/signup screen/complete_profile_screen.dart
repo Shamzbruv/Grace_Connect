@@ -2,15 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'dart:io';
 import 'dart:typed_data';
-import 'package:image_picker/image_picker.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_typeahead/flutter_typeahead.dart';
 import '../../models/user_profile.dart'; // Ensure this model exists
 import '../../providers/user_role_provider.dart';
 import '../../services/church_service.dart';
 import '../../services/profile_service.dart';
+import '../../utils/profile_photo_picker.dart';
 import '../../widgets/app_scaffold.dart';
 import '../../widgets/app_button.dart';
 import '../../widgets/app_card.dart';
@@ -28,7 +26,6 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
   final _churchSearchController = TextEditingController();
 
   bool _isLoading = false;
-  File? _imageFile;
   Uint8List? _imageBytes;
   String? _imageName;
   String? _selectedChurchId;
@@ -42,18 +39,12 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
   }
 
   Future<void> _pickImage() async {
-    final pickedFile =
-        await ImagePicker().pickImage(source: ImageSource.gallery);
-    if (pickedFile != null) {
-      final bytes = await pickedFile.readAsBytes();
-      setState(() {
-        if (!kIsWeb) {
-          _imageFile = File(pickedFile.path);
-        }
-        _imageBytes = bytes;
-        _imageName = pickedFile.name;
-      });
-    }
+    final pickedPhoto = await pickProfilePhotoWithCropOption(context);
+    if (pickedPhoto == null) return;
+    setState(() {
+      _imageBytes = pickedPhoto.bytes;
+      _imageName = pickedPhoto.fileName;
+    });
   }
 
   Future<void> _handleCompleteProfile() async {
@@ -80,9 +71,6 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
         if (_imageBytes != null && _imageName != null) {
           finalPhotoUrl = await ProfileService()
               .uploadProfilePhotoBytes(_imageBytes!, _imageName!);
-        } else if (_imageFile != null) {
-          finalPhotoUrl =
-              await ProfileService().uploadProfilePhoto(_imageFile!);
         }
 
         final placeId = _selectedChurchId ??
@@ -224,10 +212,8 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
                                   .surfaceContainerHighest,
                               backgroundImage: _imageBytes != null
                                   ? MemoryImage(_imageBytes!)
-                                  : (_imageFile != null
-                                      ? FileImage(_imageFile!)
-                                      : null),
-                              child: (_imageBytes == null && _imageFile == null)
+                                  : null,
+                              child: _imageBytes == null
                                   ? Icon(Icons.add_a_photo,
                                       size: 32,
                                       color: Theme.of(context)

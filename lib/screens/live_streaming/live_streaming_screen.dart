@@ -7,6 +7,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../providers/user_role_provider.dart';
 import '../../services/attendance_service.dart';
 import '../../services/church_service.dart';
+import '../../utils/youtube_url_utils.dart';
 import '../../widgets/ui/app_feedback.dart';
 import '../../widgets/ui/app_loader.dart';
 
@@ -75,7 +76,7 @@ class _LiveStreamingScreenState extends State<LiveStreamingScreen>
     final activeService = await _attendanceService.getActiveService(churchId);
     if (mounted) {
       if (church != null && church.isLive && church.liveStreamUrl != null) {
-        final videoId = YoutubePlayer.convertUrlToId(church.liveStreamUrl!);
+        final videoId = YoutubeUrlUtils.extractVideoId(church.liveStreamUrl!);
         if (videoId != null) {
           _controller = YoutubePlayerController(
             initialVideoId: videoId,
