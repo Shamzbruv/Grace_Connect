@@ -32,16 +32,21 @@ class _DailyWordScreenState extends State<DailyWordScreen> {
     _future = _load();
   }
 
-  Future<_DailyWordData> _load() async {
+  Future<_DailyWordData> _load({bool forceRegenerate = false}) async {
     final selected = widget.motivationId?.isNotEmpty == true
         ? await _service.fetchById(widget.motivationId!)
-        : await _service.fetchToday(generateIfMissing: true);
+        : await _service.fetchToday(
+            generateIfMissing: true,
+            forceRegenerate: forceRegenerate,
+          );
     final recent = await _service.fetchRecent();
     return _DailyWordData(selected: selected, recent: recent);
   }
 
   void _refresh() {
-    setState(() => _future = _load());
+    setState(() {
+      _future = _load(forceRegenerate: widget.motivationId?.isNotEmpty != true);
+    });
   }
 
   Future<void> _shareDailyWordImage(DailyMotivation motivation) async {

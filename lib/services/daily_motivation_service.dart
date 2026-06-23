@@ -8,8 +8,18 @@ class DailyMotivationService {
 
   final SupabaseClient _client;
 
-  Future<DailyMotivation?> fetchToday({bool generateIfMissing = false}) async {
+  Future<DailyMotivation?> fetchToday({
+    bool generateIfMissing = false,
+    bool forceRegenerate = false,
+  }) async {
     final today = _jamaicaDateKey();
+    if (forceRegenerate) {
+      try {
+        await _invoke('generate-daily-motivation');
+      } catch (_) {
+        // Fall through to the latest published item if regeneration is unavailable.
+      }
+    }
     final data = await _client
         .from('daily_motivations')
         .select()

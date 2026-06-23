@@ -131,7 +131,7 @@ async function selectFiveQuestions(
       seed,
       recentQuestionHashes,
     );
-    return { ...selected, source: "ai" };
+    if (!selected.reusedRecent) return { ...selected, source: "ai" };
   }
   const selected = await seededQuestionSet(
     fallbackQuizQuestions,
@@ -139,6 +139,26 @@ async function selectFiveQuestions(
     recentQuestionHashes,
   );
   return { ...selected, source: "fallback" };
+}
+
+async function existingQuizHasFiveFreshQuestions(
+  client: ReturnType<typeof serviceClient>,
+  quizId: string,
+  recentHashes: Set<string>,
+): Promise<boolean> {
+  try {
+    const { data: rows, error } = await client
+      .from("daily_bible_quiz_questions")
+      .select("question_hash")
+      .eq("quiz_id", quizId);
+    if (error || !rows || rows.length !== 5) return false;
+    return rows.every((row) => {
+      const hash = String(row.question_hash ?? "").trim();
+      return hash.length > 0 && !recentHashes.has(hash);
+    });
+  } catch (_) {
+    return false;
+  }
 }
 
 function daysBeforeJamaicaDate(dateKey: string, days: number): string {
@@ -264,6 +284,7 @@ Deno.serve(async (request) => {
 Generate 20 fact-based, respectful, clear multiple-choice questions strictly grounded in Scripture.
 Today’s Jamaica date key is ${quizDate}; avoid repeating common starter questions from previous days.
 Use a varied mix of Old Testament, Gospels, Acts, Epistles, wisdom literature, prophets, parables, miracles, women and men of faith, and Christian living.
+Do not generate the same five-question format each day. Vary the books, people, events, and categories heavily.
 Each question must have four options and one unambiguous correct answer.
 Provide a concise explanation and one or more accurate Bible references supporting the answer.
 Avoid denomination-specific interpretations, trick questions, unclear wording, prophecy-date predictions, prosperity claims, and copyrighted Bible quotations.
@@ -300,12 +321,18 @@ Return valid JSON only in this shape:
       .eq("quiz_date", quizDate)
       .maybeSingle();
 
-    if (existing.data?.status === "published" && existing.data?.notification_sent_at) {
-      skippedExisting++;
-      continue;
-    }
-
     const recentHashes = await recentQuestionHashes(client, churchId, quizDate);
+    if (existing.data?.status === "published" && existing.data?.notification_sent_at) {
+      const existingIsFresh = await existingQuizHasFiveFreshQuestions(
+        client,
+        String(existing.data.id),
+        recentHashes,
+      );
+      if (existingIsFresh) {
+        skippedExisting++;
+        continue;
+      }
+    }
     const selected = await selectFiveQuestions(
       aiResponse,
       `${quizDate}:${churchId}`,
