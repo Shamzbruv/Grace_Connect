@@ -33,6 +33,7 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
   Timer? _questionTimer;
   Timer? _heartbeatTimer;
   Timer? _countdownTimer;
+  DateTime? _lastCountdownAutoRefreshAt;
   int _secondsLeft = 30;
   bool _submitting = false;
   bool _active = false;
@@ -45,6 +46,7 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
     _loadStatus();
     unawaited(_loadLeaderboard(quizMonth: _selectedQuizMonth));
     _countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      _refreshWhenCountdownExpires();
       if (mounted) setState(() {});
     });
   }
@@ -60,7 +62,11 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (!_active || state == AppLifecycleState.resumed) return;
+    if (state == AppLifecycleState.resumed) {
+      if (!_active) _loadStatus();
+      return;
+    }
+    if (!_active) return;
     final attemptId = _attempt?['id']?.toString();
     if (attemptId != null && attemptId.isNotEmpty) {
       unawaited(_service.abandon(attemptId));
@@ -76,6 +82,7 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
       _question = null;
       _lastFeedback = null;
       _completion = null;
+      _lastCountdownAutoRefreshAt = null;
       _statusFuture = _service.status(generateIfMissing: true);
     });
   }
@@ -243,6 +250,20 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
     return '${hours}h ${minutes}m ${seconds}s';
   }
 
+  void _refreshWhenCountdownExpires() {
+    final target = _nextRefreshAt;
+    if (!mounted ||
+        _active ||
+        target == null ||
+        DateTime.now().isBefore(target)) {
+      return;
+    }
+    final last = _lastCountdownAutoRefreshAt;
+    if (last != null && DateTime.now().difference(last).inMinutes < 1) return;
+    _lastCountdownAutoRefreshAt = DateTime.now();
+    _loadStatus();
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -311,7 +332,7 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
           );
         }
         final data = snapshot.data ?? const {};
-        _nextRefreshAt ??=
+        _nextRefreshAt =
             DateTime.tryParse(data['next_refresh_at']?.toString() ?? '');
         final attempt = data['attempt'];
         if (attempt is Map && attempt.isNotEmpty) {

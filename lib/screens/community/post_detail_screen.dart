@@ -30,7 +30,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   }
 
   Future<void> _handlePostComment() async {
-    if (_commentController.text.trim().isEmpty) return;
+    if (_isPosting) return;
+    final content = _commentController.text.trim();
+    if (content.isEmpty) return;
 
     setState(() => _isPosting = true);
 
@@ -41,7 +43,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       String authorName = user.userMetadata?['full_name'] ?? 'Anonymous';
 
       await _communityService.addComment(widget.post.id, {
-        'content': _commentController.text.trim(),
+        'content': content,
         'author_id': user.id,
         'author_name': authorName,
         'author_photo': user.userMetadata?['avatar_url'],
@@ -319,7 +321,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                             child: Center(child: CircularProgressIndicator()));
                       }
 
-                      final comments = snapshot.data ?? [];
+                      final comments = _dedupeComments(snapshot.data ?? []);
                       if (comments.isEmpty) {
                         return const Padding(
                             padding: EdgeInsets.all(32),
@@ -421,5 +423,23 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         ],
       ),
     );
+  }
+
+  List<Map<String, dynamic>> _dedupeComments(
+      List<Map<String, dynamic>> comments) {
+    final seen = <String>{};
+    final unique = <Map<String, dynamic>>[];
+    for (final comment in comments) {
+      final id = comment['id']?.toString();
+      final fallbackKey = [
+        comment['post_id'],
+        comment['author_id'],
+        comment['content'],
+        comment['created_at'],
+      ].join('|');
+      final key = id == null || id.isEmpty ? fallbackKey : id;
+      if (seen.add(key)) unique.add(comment);
+    }
+    return unique;
   }
 }

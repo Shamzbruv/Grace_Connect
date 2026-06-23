@@ -41,6 +41,16 @@ Deno.serve(async (request) => {
       .maybeSingle();
     if (!quiz) return jsonResponse({ error: "Daily Quiz is not available yet." }, 404);
 
+    const { count: questionCount, error: questionCountError } = await client
+      .from("daily_bible_quiz_questions")
+      .select("id", { count: "exact", head: true })
+      .eq("quiz_id", quiz.id);
+    if (questionCountError || questionCount !== 5) {
+      return jsonResponse({
+        error: "Daily Quiz is still being prepared. Please refresh in a moment.",
+      }, 409);
+    }
+
     const { data: existing } = await client
       .from("quiz_attempts")
       .select("id, status, total_score, correct_answers, failure_reason")

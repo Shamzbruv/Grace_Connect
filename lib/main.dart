@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:ui';
 import 'package:flutter/foundation.dart';
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'providers/user_role_provider.dart';
 import 'services/attendance_service.dart';
@@ -72,6 +74,7 @@ Future<void> main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+  await _configureCrashReporting();
 
   await Supabase.initialize(
     url: 'https://nimgsgnkcvddomrgkawb.supabase.co',
@@ -95,6 +98,18 @@ Future<void> main() async {
       child: const MyApp(),
     ),
   );
+}
+
+Future<void> _configureCrashReporting() async {
+  if (kIsWeb) return;
+  FlutterError.onError = (details) {
+    FirebaseCrashlytics.instance.recordFlutterFatalError(details);
+  };
+  PlatformDispatcher.instance.onError = (error, stack) {
+    FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
+    return true;
+  };
+  await FirebaseCrashlytics.instance.setCrashlyticsCollectionEnabled(true);
 }
 
 class MyApp extends StatefulWidget {
@@ -135,7 +150,22 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
 
     if (!mounted) return;
     try {
-      await context.read<UserRoleProvider>().refreshProfile();
+      final roleProvider = context.read<UserRoleProvider>();
+      await roleProvider.refreshProfile();
+      if (!kIsWeb) {
+        await FirebaseCrashlytics.instance.setCustomKey(
+          'church_id',
+          roleProvider.user?.placeId ?? '',
+        );
+        await FirebaseCrashlytics.instance.setCustomKey(
+          'is_admin',
+          roleProvider.user?.isAdmin ?? false,
+        );
+        await FirebaseCrashlytics.instance.setCustomKey(
+          'is_pastor',
+          roleProvider.user?.isPastor ?? false,
+        );
+      }
     } catch (error) {
       debugPrint('Profile refresh on resume skipped: $error');
     }

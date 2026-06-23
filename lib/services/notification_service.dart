@@ -215,7 +215,39 @@ class NotificationService {
       android: androidDetails,
       iOS: iosDetails,
     );
-    await _localNotifications.show(0, title, body, details, payload: route);
+    await _localNotifications.show(
+      _notificationId(
+        title: title ?? '',
+        body: body ?? '',
+        route: route,
+        type: type,
+      ),
+      title,
+      body,
+      details,
+      payload: route,
+    );
+  }
+
+  int _notificationId({
+    required String title,
+    required String body,
+    required String? route,
+    required String? type,
+  }) {
+    final seed = '${type ?? 'general'}|${route ?? ''}|$title|$body';
+    var hash = 0;
+    for (final unit in seed.codeUnits) {
+      hash = 0x1fffffff & (hash + unit);
+      hash = 0x1fffffff & (hash + ((0x0007ffff & hash) << 10));
+      hash ^= hash >> 6;
+    }
+    hash = 0x1fffffff & (hash + ((0x03ffffff & hash) << 3));
+    hash ^= hash >> 11;
+    hash = 0x1fffffff & (hash + ((0x00003fff & hash) << 15));
+    return hash == 0
+        ? DateTime.now().millisecondsSinceEpoch & 0x7fffffff
+        : hash;
   }
 
   Future<void> _createAndroidNotificationChannels() async {
@@ -439,9 +471,17 @@ class NotificationService {
     debugPrint("Unsubscribed from topic: $topic");
   }
 
+  Future<void> unsubscribeFromChurchTopics(String churchId) async {
+    if (kIsWeb || churchId.trim().isEmpty) return;
+    await unsubscribeFromTopic('church_$churchId');
+    for (final suffix in topicMap.keys) {
+      await unsubscribeFromTopic('church_${churchId}_$suffix');
+    }
+  }
+
   /// Syncs user subscriptions based on SharedPreferences and Church ID
   Future<void> syncSubscriptions(String churchId) async {
-    if (kIsWeb) return;
+    if (kIsWeb || churchId.trim().isEmpty) return;
 
     final prefs = await SharedPreferences.getInstance();
 

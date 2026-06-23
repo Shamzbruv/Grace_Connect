@@ -107,7 +107,14 @@ class UserRoleProvider with ChangeNotifier {
     _userProfile = profile;
     _isLoading = false;
 
-    if (previousChurchId != profile.churchId || profile.churchId.isNotEmpty) {
+    if (previousChurchId != null &&
+        previousChurchId.isNotEmpty &&
+        previousChurchId != profile.churchId) {
+      unawaited(NotificationService().unsubscribeFromChurchTopics(
+        previousChurchId,
+      ));
+    }
+    if (previousChurchId != profile.churchId && profile.churchId.isNotEmpty) {
       unawaited(NotificationService().syncSubscriptions(profile.churchId));
     }
     NotificationService().watchForegroundNotifications(profile.uid);

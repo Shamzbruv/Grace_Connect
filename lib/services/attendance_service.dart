@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -91,6 +92,7 @@ class AttendanceService {
       FlutterLocalNotificationsPlugin();
 
   StreamSubscription<Position>? _positionStreamSubscription;
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
   Timer? _activeServicePollTimer;
   DateTime? _entryTime;
   String? _currentServiceId;
@@ -119,6 +121,7 @@ class AttendanceService {
   Future<void> initialize() async {
     final prefs = await SharedPreferences.getInstance();
     final autoCheckInEnabled = prefs.getBool('auto_check_in') ?? true;
+    _startPendingAttendanceSync();
     unawaited(flushPendingAttendance());
     if (!autoCheckInEnabled) {
       stopMonitoring();
@@ -851,6 +854,12 @@ class AttendanceService {
       await _supabase.from('attendance').insert(record.toMap());
       unawaited(flushPendingAttendance());
     } catch (error) {
+      if (!_isRetryableAttendanceWriteError(error)) {
+        _updateDebugStatus(
+            'Attendance could not be saved. Please refresh and try again.');
+        debugPrint('Attendance insert rejected without queueing: $error');
+        rethrow;
+      }
       await _queueAttendanceRecord(record);
       _updateDebugStatus(
           'Attendance saved on this device and will sync when online.');
@@ -892,7 +901,9 @@ class AttendanceService {
         }
       } catch (error) {
         debugPrint('Pending attendance sync failed: $error');
-        remaining.add(encoded);
+        if (_isRetryableAttendanceWriteError(error)) {
+          remaining.add(encoded);
+        }
       }
     }
 
@@ -931,6 +942,41 @@ class AttendanceService {
       record['status'] ?? '',
       dateKey,
     ].join('|');
+  }
+
+  bool _isRetryableAttendanceWriteError(Object error) {
+    final text = error.toString().toLowerCase();
+    if (SupabaseResilience.isAuthSessionError(error)) return false;
+    if (text.contains('permission') ||
+        text.contains('row-level security') ||
+        text.contains('rls') ||
+        text.contains('duplicate') ||
+        text.contains('violates') ||
+        text.contains('invalid input') ||
+        text.contains('not-null') ||
+        text.contains('foreign key') ||
+        text.contains('401') ||
+        text.contains('403') ||
+        text.contains('23505') ||
+        text.contains('23502') ||
+        text.contains('23503') ||
+        text.contains('42501') ||
+        text.contains('22p02')) {
+      return false;
+    }
+    return text.contains('timeout') ||
+        text.contains('timed out') ||
+        text.contains('connection') ||
+        text.contains('network') ||
+        text.contains('socket') ||
+        text.contains('failed host lookup') ||
+        text.contains('software caused connection abort') ||
+        text.contains('service unavailable') ||
+        text.contains('bad gateway') ||
+        text.contains('gateway timeout') ||
+        text.contains('502') ||
+        text.contains('503') ||
+        text.contains('504');
   }
 
   Future<void> _showPostServiceNotification(String status) async {
@@ -1263,5 +1309,14 @@ class AttendanceService {
     _currentServiceId = null;
     _setMonitoring(false);
     _updateDebugStatus('Monitoring stopped');
+  }
+
+  void _startPendingAttendanceSync() {
+    _connectivitySubscription ??=
+        Connectivity().onConnectivityChanged.listen((results) {
+      final hasConnection =
+          results.any((result) => result != ConnectivityResult.none);
+      if (hasConnection) unawaited(flushPendingAttendance());
+    });
   }
 }

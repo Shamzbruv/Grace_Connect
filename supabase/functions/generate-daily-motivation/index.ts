@@ -183,10 +183,12 @@ Return valid JSON only, with title, message, scripture_reference, and topic.`;
     if (result.sent) pushesSent++;
   }
 
-  await client
-    .from("daily_motivations")
-    .update({ notification_sent_at: new Date().toISOString() })
-    .eq("id", saved.id);
+  if (pushesSent > 0 || churches.size === 0) {
+    await client
+      .from("daily_motivations")
+      .update({ notification_sent_at: new Date().toISOString() })
+      .eq("id", saved.id);
+  }
 
   return jsonResponse({
     ok: true,

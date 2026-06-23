@@ -26,6 +26,12 @@ type GenerationRunPatch = {
   metadata?: Record<string, unknown>;
 };
 
+type GenerationIssue = {
+  church_id: string;
+  stage: string;
+  message: string;
+};
+
 async function hashQuestion(question: string): Promise<string> {
   const hash = await crypto.subtle.digest(
     "SHA-256",
@@ -285,6 +291,7 @@ Return valid JSON only in this shape:
   const sources = new Set<string>();
   let skippedExisting = 0;
   let failedChurches = 0;
+  const issues: GenerationIssue[] = [];
   for (const churchId of churchIds) {
     const existing = await client
       .from("daily_bible_quizzes")
@@ -321,9 +328,10 @@ Return valid JSON only in this shape:
         quiz_date: quizDate,
         available_at: availableAt.toISOString(),
         expires_at: expiresAt.toISOString(),
-        status: "published",
+        status: "draft",
         generation_source: selected.source,
-        generation_status: selected.source === "ai" ? "generated" : "fallback",
+        generation_status: "pending",
+        notification_sent_at: null,
         validation_notes: validationNotes,
       }, { onConflict: "church_id,quiz_date" })
       .select("id")
@@ -331,8 +339,21 @@ Return valid JSON only in this shape:
 
     if (quizError || !quiz) {
       failedChurches++;
+      issues.push({
+        church_id: churchId,
+        stage: "quiz_upsert",
+        message: quizError?.message ?? "Quiz row could not be saved.",
+      });
       continue;
     }
+
+    await client
+      .from("daily_bible_quizzes")
+      .update({
+        status: "draft",
+        notification_sent_at: null,
+      })
+      .eq("id", quiz.id);
 
     await client.from("daily_bible_quiz_questions").delete().eq("quiz_id", quiz.id);
     const questionRows = [];
@@ -360,8 +381,51 @@ Return valid JSON only in this shape:
       .insert(questionRows);
     if (questionError) {
       failedChurches++;
+      issues.push({
+        church_id: churchId,
+        stage: "question_insert",
+        message: questionError.message,
+      });
+      await client
+        .from("daily_bible_quizzes")
+        .update({
+          status: "failed",
+          generation_status: "failed",
+          validation_notes: `Question insert failed: ${questionError.message}`,
+        })
+        .eq("id", quiz.id);
       continue;
     }
+
+    const { count: questionCount, error: countError } = await client
+      .from("daily_bible_quiz_questions")
+      .select("id", { count: "exact", head: true })
+      .eq("quiz_id", quiz.id);
+    if (countError || questionCount !== 5) {
+      failedChurches++;
+      issues.push({
+        church_id: churchId,
+        stage: "question_validation",
+        message: countError?.message ?? `Expected 5 questions, found ${questionCount ?? 0}.`,
+      });
+      await client
+        .from("daily_bible_quizzes")
+        .update({
+          status: "failed",
+          generation_status: "failed",
+          validation_notes: countError?.message ?? `Expected 5 questions, found ${questionCount ?? 0}.`,
+        })
+        .eq("id", quiz.id);
+      continue;
+    }
+
+    await client
+      .from("daily_bible_quizzes")
+      .update({
+        status: "published",
+        generation_status: selected.source === "ai" ? "generated" : "fallback",
+      })
+      .eq("id", quiz.id);
 
     const title = "Daily Bible Quiz Is Ready";
     const body = "Today’s 5-question Bible challenge is now live. Can you earn 100 points?";
@@ -378,7 +442,7 @@ Return valid JSON only in this shape:
       preferenceColumn: "notifyDailyQuiz",
     });
 
-    await sendTopicPush(client, {
+    const pushResult = await sendTopicPush(client, {
       topic: `church_${churchId}_quiz`,
       title,
       body,
@@ -388,10 +452,18 @@ Return valid JSON only in this shape:
       entityId: quiz.id,
     });
 
-    await client
-      .from("daily_bible_quizzes")
-      .update({ notification_sent_at: new Date().toISOString() })
-      .eq("id", quiz.id);
+    if (pushResult.sent) {
+      await client
+        .from("daily_bible_quizzes")
+        .update({ notification_sent_at: new Date().toISOString() })
+        .eq("id", quiz.id);
+    } else {
+      issues.push({
+        church_id: churchId,
+        stage: "push_notification",
+        message: pushResult.reason ?? "Quiz push notification was not sent.",
+      });
+    }
     published++;
   }
 
@@ -401,9 +473,13 @@ Return valid JSON only in this shape:
     quizzes_published: published,
     ai_status: aiStatus,
     source_summary: Array.from(sources).join(",") || "none",
+    error_message: issues.length
+      ? issues.map((issue) => `${issue.church_id}:${issue.stage}:${issue.message}`).slice(0, 5).join(" | ")
+      : null,
     metadata: {
       skipped_existing: skippedExisting,
       failed_churches: failedChurches,
+      issues,
     },
   });
 

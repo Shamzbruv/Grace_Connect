@@ -452,7 +452,20 @@ class CommunityService {
         .stream(primaryKey: ['id'])
         .eq('post_id', postId)
         .order('created_at', ascending: false)
-        .map((data) => data.map((e) => Map<String, dynamic>.from(e)).toList());
+        .map((data) => _dedupeRowsById(
+              data.map((e) => Map<String, dynamic>.from(e)).toList(),
+            ));
+  }
+
+  List<Map<String, dynamic>> _dedupeRowsById(List<Map<String, dynamic>> rows) {
+    final seen = <String>{};
+    final unique = <Map<String, dynamic>>[];
+    for (final row in rows) {
+      final id = row['id']?.toString();
+      final key = id == null || id.isEmpty ? row.toString() : id;
+      if (seen.add(key)) unique.add(row);
+    }
+    return unique;
   }
 
   List<CommunityStory> _normalizeStories(

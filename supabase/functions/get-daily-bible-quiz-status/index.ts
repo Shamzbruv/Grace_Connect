@@ -41,6 +41,22 @@ Deno.serve(async (request) => {
       });
     }
 
+    const { count: questionCount, error: questionCountError } = await client
+      .from("daily_bible_quiz_questions")
+      .select("id", { count: "exact", head: true })
+      .eq("quiz_id", quiz.id);
+    if (questionCountError || questionCount !== 5) {
+      return jsonResponse({
+        ok: true,
+        available: false,
+        can_start: false,
+        status: "not_ready",
+        quiz,
+        question_count: questionCount ?? 0,
+        next_refresh_at: refreshAt.toISOString(),
+      });
+    }
+
     const { data: attempt } = await client
       .from("quiz_attempts")
       .select("id, status, total_score, correct_answers, failure_reason, completed_at, failed_at")
