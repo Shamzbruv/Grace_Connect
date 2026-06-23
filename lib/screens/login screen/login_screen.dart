@@ -7,6 +7,7 @@ import '../../widgets/app_scaffold.dart';
 import '../../widgets/app_card.dart';
 import '../../widgets/app_text_field.dart';
 import '../../widgets/app_button.dart';
+import '../../widgets/app_snackbar.dart';
 
 import '../../models/user_profile.dart';
 import '../../providers/user_role_provider.dart';
@@ -54,8 +55,10 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _handleLogin() async {
     if (_emailController.text.isEmpty || _passwordController.text.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please fill in all fields')),
+      AppSnackbar.show(
+        context,
+        'Please fill in all fields',
+        tone: AppSnackbarTone.warning,
       );
       return;
     }
@@ -92,21 +95,28 @@ class _LoginScreenState extends State<LoginScreen> {
 
       await _fetchUserProfile(user);
     } on AuthException catch (e) {
+      await _resetAuthStateAfterFailedAttempt();
       if (mounted) {
         if (AuthFlowService.isEmailNotConfirmed(e)) {
           await _showEmailNotConfirmedDialog(_emailController.text.trim());
         } else {
-          ScaffoldMessenger.of(context)
-              .showSnackBar(SnackBar(content: Text(e.message)));
+          AppSnackbar.show(context, e.message, tone: AppSnackbarTone.error);
         }
       }
       if (mounted) setState(() => _isLoading = false);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Error: $e')));
+        AppSnackbar.show(context, 'Error: $e', tone: AppSnackbarTone.error);
       }
       if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _resetAuthStateAfterFailedAttempt() async {
+    try {
+      await Supabase.instance.client.auth.signOut(scope: SignOutScope.local);
+    } catch (error) {
+      debugPrint('Failed-login auth cleanup skipped: $error');
     }
   }
 
@@ -133,27 +143,30 @@ class _LoginScreenState extends State<LoginScreen> {
                   Navigator.pop(dialogContext);
                 }
                 if (!mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                      content: Text('Verification email sent again.')),
+                AppSnackbar.show(
+                  context,
+                  'Verification email sent again.',
+                  tone: AppSnackbarTone.success,
                 );
               } on AuthException catch (error) {
                 if (dialogContext.mounted) {
                   Navigator.pop(dialogContext);
                 }
                 if (!mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text(error.message)),
+                AppSnackbar.show(
+                  context,
+                  error.message,
+                  tone: AppSnackbarTone.error,
                 );
               } catch (error) {
                 if (dialogContext.mounted) {
                   Navigator.pop(dialogContext);
                 }
                 if (!mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                      content:
-                          Text('Could not resend verification email: $error')),
+                AppSnackbar.show(
+                  context,
+                  'Could not resend verification email: $error',
+                  tone: AppSnackbarTone.error,
                 );
               }
             },
@@ -197,8 +210,10 @@ class _LoginScreenState extends State<LoginScreen> {
       debugPrint('Error fetching profile: $e');
       await Supabase.instance.client.auth.signOut();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error fetching profile: $e')),
+        AppSnackbar.show(
+          context,
+          'Error fetching profile: $e',
+          tone: AppSnackbarTone.error,
         );
         setState(() => _isLoading = false);
       }

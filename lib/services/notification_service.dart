@@ -11,6 +11,7 @@ import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/app_notification.dart';
+import 'supabase_resilience.dart';
 
 class _NotificationSoundProfile {
   const _NotificationSoundProfile({
@@ -253,13 +254,17 @@ class NotificationService {
   }
 
   void _navigateToRoute(String? route) {
-    final cleanRoute = route?.trim();
-    if (cleanRoute == null || cleanRoute.isEmpty) return;
+    final cleanRoute = normalizeRoute(route);
+    if (cleanRoute == null) return;
 
     void pushRoute() {
       final navigator = navigatorKey.currentState;
       if (navigator == null) return;
-      navigator.pushNamed(cleanRoute);
+      try {
+        navigator.pushNamed(cleanRoute);
+      } catch (error) {
+        debugPrint('Notification route failed ($cleanRoute): $error');
+      }
     }
 
     if (navigatorKey.currentState == null) {
@@ -267,6 +272,27 @@ class NotificationService {
     } else {
       pushRoute();
     }
+  }
+
+  @visibleForTesting
+  static String? normalizeRoute(String? route) {
+    final cleanRoute = route?.trim();
+    if (cleanRoute == null || cleanRoute.isEmpty) return null;
+
+    final uri = Uri.tryParse(cleanRoute);
+    if (uri == null) return cleanRoute.startsWith('/') ? cleanRoute : null;
+    if (uri.hasScheme || uri.hasAuthority) {
+      final path = uri.path.isNotEmpty
+          ? uri.path
+          : uri.host.isNotEmpty
+              ? '/${uri.host}'
+              : '';
+      if (!path.startsWith('/')) return null;
+      final query = uri.query.isEmpty ? '' : '?${uri.query}';
+      return '$path$query';
+    }
+    if (!uri.path.startsWith('/')) return null;
+    return uri.toString();
   }
 
   Future<void> sendNotification(
@@ -309,14 +335,28 @@ class NotificationService {
   }
 
   Stream<List<AppNotification>> watchNotifications(String userId) {
-    return _supabase
-        .from('notifications')
-        .stream(primaryKey: ['id'])
-        .eq('user_id', userId)
-        .order('created_at', ascending: false)
-        .limit(100)
-        .map(
-            (rows) => rows.map((row) => AppNotification.fromMap(row)).toList());
+    return SupabaseResilience.guardedStream<List<AppNotification>>(
+      debugLabel: 'Notifications',
+      emptyValue: const <AppNotification>[],
+      yieldEmptyOnInitialFailure: true,
+      fetchInitial: () async {
+        final rows = await _supabase
+            .from('notifications')
+            .select()
+            .eq('user_id', userId)
+            .order('created_at', ascending: false)
+            .limit(100);
+        return rows.map((row) => AppNotification.fromMap(row)).toList();
+      },
+      subscribe: () => _supabase
+          .from('notifications')
+          .stream(primaryKey: ['id'])
+          .eq('user_id', userId)
+          .order('created_at', ascending: false)
+          .limit(100)
+          .map((rows) =>
+              rows.map((row) => AppNotification.fromMap(row)).toList()),
+    );
   }
 
   Stream<int> watchUnreadCount(String userId) {

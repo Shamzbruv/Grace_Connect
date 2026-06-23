@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -8,6 +9,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import '../models/church_location.dart';
 import '../models/service_schedule.dart';
 import '../models/attendance_record.dart';
+import 'supabase_resilience.dart';
 
 class AttendanceSetupStatus {
   final bool autoCheckInEnabled;
@@ -95,6 +97,8 @@ class AttendanceService {
   bool _isMonitoring = false;
   bool _isPollingLocation = false;
   String _lastDebugStatus = 'Auto-attendance has not started yet.';
+  static const String _pendingAttendanceQueueKey =
+      'pending_attendance_records_v1';
 
   // Singleton pattern for continuous monitoring
   static final AttendanceService _instance = AttendanceService._internal();
@@ -115,6 +119,7 @@ class AttendanceService {
   Future<void> initialize() async {
     final prefs = await SharedPreferences.getInstance();
     final autoCheckInEnabled = prefs.getBool('auto_check_in') ?? true;
+    unawaited(flushPendingAttendance());
     if (!autoCheckInEnabled) {
       stopMonitoring();
       _updateDebugStatus('Auto check-in disabled in settings.');
@@ -498,7 +503,7 @@ class AttendanceService {
       serviceName: serviceName,
     );
 
-    await _supabase.from('attendance').insert(record.toMap());
+    await _insertAttendanceRecord(record);
     debugPrint('Marked present successfully: $status');
     _updateDebugStatus('Success! Marked present ($status)');
     await _clearDwellEntry(userId, serviceId);
@@ -837,8 +842,95 @@ class AttendanceService {
     );
 
     // 4. Save
-    await _supabase.from('attendance').insert(record.toMap());
+    await _insertAttendanceRecord(record);
     debugPrint('Marked remote present successfully');
+  }
+
+  Future<void> _insertAttendanceRecord(AttendanceRecord record) async {
+    try {
+      await _supabase.from('attendance').insert(record.toMap());
+      unawaited(flushPendingAttendance());
+    } catch (error) {
+      await _queueAttendanceRecord(record);
+      _updateDebugStatus(
+          'Attendance saved on this device and will sync when online.');
+      debugPrint('Attendance queued for sync: $error');
+    }
+  }
+
+  Future<void> _queueAttendanceRecord(AttendanceRecord record) async {
+    final prefs = await SharedPreferences.getInstance();
+    final queue = prefs.getStringList(_pendingAttendanceQueueKey) ?? <String>[];
+    final recordMap = record.toMap();
+    final dedupeKey = _attendanceDedupeKey(recordMap);
+    final withoutDuplicate = queue.where((encoded) {
+      try {
+        final item = jsonDecode(encoded);
+        return item is! Map || _attendanceDedupeKey(item) != dedupeKey;
+      } catch (_) {
+        return false;
+      }
+    }).toList();
+    withoutDuplicate.add(jsonEncode(recordMap));
+    await prefs.setStringList(_pendingAttendanceQueueKey, withoutDuplicate);
+  }
+
+  Future<void> flushPendingAttendance() async {
+    final prefs = await SharedPreferences.getInstance();
+    final queue = prefs.getStringList(_pendingAttendanceQueueKey) ?? <String>[];
+    if (queue.isEmpty) return;
+
+    final remaining = <String>[];
+    for (final encoded in queue) {
+      try {
+        final decoded = jsonDecode(encoded);
+        if (decoded is! Map) continue;
+        final record = Map<String, dynamic>.from(decoded);
+        final exists = await _queuedAttendanceAlreadySynced(record);
+        if (!exists) {
+          await _supabase.from('attendance').insert(record);
+        }
+      } catch (error) {
+        debugPrint('Pending attendance sync failed: $error');
+        remaining.add(encoded);
+      }
+    }
+
+    await prefs.setStringList(_pendingAttendanceQueueKey, remaining);
+    if (remaining.isEmpty) {
+      _updateDebugStatus('Pending attendance sync complete.');
+    }
+  }
+
+  Future<bool> _queuedAttendanceAlreadySynced(
+      Map<String, dynamic> record) async {
+    final userId = record['user_id']?.toString() ?? '';
+    final serviceId = record['service_id']?.toString() ?? '';
+    final timestamp = DateTime.tryParse(record['timestamp']?.toString() ?? '');
+    if (userId.isEmpty || serviceId.isEmpty || timestamp == null) return false;
+
+    final dayStart = DateTime(timestamp.year, timestamp.month, timestamp.day);
+    final rows = await _supabase
+        .from('attendance')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('service_id', serviceId)
+        .gte('timestamp', dayStart.toIso8601String())
+        .limit(1);
+    return rows.isNotEmpty;
+  }
+
+  String _attendanceDedupeKey(Map<dynamic, dynamic> record) {
+    final timestamp = DateTime.tryParse(record['timestamp']?.toString() ?? '');
+    final dateKey = timestamp == null
+        ? DateTime.now().toIso8601String().substring(0, 10)
+        : timestamp.toIso8601String().substring(0, 10);
+    return [
+      record['user_id'] ?? '',
+      record['service_id'] ?? '',
+      record['status'] ?? '',
+      dateKey,
+    ].join('|');
   }
 
   Future<void> _showPostServiceNotification(String status) async {
@@ -961,7 +1053,7 @@ class AttendanceService {
         status: 'absent',
         serviceName: schedule.name,
       );
-      await _supabase.from('attendance').insert(record.toMap());
+      await _insertAttendanceRecord(record);
     }
   }
 
@@ -1002,6 +1094,20 @@ class AttendanceService {
         yield records;
       } catch (error) {
         debugPrint('Attendance history refresh failed: $error');
+        if (SupabaseResilience.isAuthSessionError(error) &&
+            await SupabaseResilience.refreshSession(
+              context: 'Attendance history',
+            )) {
+          try {
+            final records = await _fetchAttendanceHistory(userId);
+            lastGoodRecords = records;
+            yield records;
+            await Future<void>.delayed(const Duration(seconds: 45));
+            continue;
+          } catch (retryError) {
+            debugPrint('Attendance history retry failed: $retryError');
+          }
+        }
         if (lastGoodRecords.isNotEmpty) {
           yield lastGoodRecords;
         } else {

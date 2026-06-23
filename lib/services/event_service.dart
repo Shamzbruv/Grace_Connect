@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 import '../models/event_model.dart';
+import 'supabase_resilience.dart';
 
 class EventService {
   final SupabaseClient _supabase = Supabase.instance.client;
@@ -15,30 +16,27 @@ class EventService {
     bool includeSharedEvents = false,
   }) async* {
     unawaited(cleanupPastEvents());
-    var lastKnown = <EventModel>[];
-
-    try {
-      lastKnown = await fetchEvents(
+    await for (final events
+        in SupabaseResilience.guardedStream<List<EventModel>>(
+      debugLabel: 'Events',
+      emptyValue: const <EventModel>[],
+      yieldEmptyOnInitialFailure: true,
+      fetchInitial: () => fetchEvents(
         churchId,
         includeSharedEvents: includeSharedEvents,
-      );
-      yield lastKnown;
-    } catch (_) {
-      // Realtime below may still recover.
-    }
-
-    await for (final events in _supabase
-        .from(_collection)
-        .stream(primaryKey: ['id'])
-        .order('date', ascending: true)
-        .limit(200)
-        .map((docs) => _normalizeEvents(
-              docs,
-              churchId,
-              includeSharedEvents: includeSharedEvents,
-            ))) {
-      lastKnown = events;
-      yield lastKnown;
+      ),
+      subscribe: () => _supabase
+          .from(_collection)
+          .stream(primaryKey: ['id'])
+          .order('date', ascending: true)
+          .limit(200)
+          .map((docs) => _normalizeEvents(
+                docs,
+                churchId,
+                includeSharedEvents: includeSharedEvents,
+              )),
+    )) {
+      yield events;
     }
   }
 
@@ -80,16 +78,28 @@ class EventService {
   // Get upcoming events (limited)
   Stream<List<EventModel>> getUpcomingEvents(String churchId, {int limit = 3}) {
     unawaited(cleanupPastEvents());
-    return _supabase
-        .from(_collection)
-        .stream(primaryKey: ['id'])
-        .eq('churchId', churchId)
-        .order('date', ascending: true)
-        .map((docs) => docs
-            .map((doc) => EventModel.fromMap(doc))
+    return SupabaseResilience.guardedStream<List<EventModel>>(
+      debugLabel: 'Upcoming events',
+      emptyValue: const <EventModel>[],
+      yieldEmptyOnInitialFailure: true,
+      fetchInitial: () async {
+        final events = await fetchEvents(churchId);
+        return events
             .where((event) => !_isPastEvent(event))
-            .toList())
-        .map((events) => events.take(limit).toList());
+            .take(limit)
+            .toList();
+      },
+      subscribe: () => _supabase
+          .from(_collection)
+          .stream(primaryKey: ['id'])
+          .eq('churchId', churchId)
+          .order('date', ascending: true)
+          .map((docs) => docs
+              .map((doc) => EventModel.fromMap(doc))
+              .where((event) => !_isPastEvent(event))
+              .toList())
+          .map((events) => events.take(limit).toList()),
+    );
   }
 
   Future<void> cleanupPastEvents() async {

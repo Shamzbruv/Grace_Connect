@@ -16,6 +16,15 @@ import {
 import { fallbackQuizQuestions, QuizQuestion } from "../_shared/quiz_bank.ts";
 
 type AiQuizResponse = { questions?: QuizQuestion[] };
+type GenerationRunPatch = {
+  completed_at?: string;
+  churches_checked?: number;
+  quizzes_published?: number;
+  ai_status?: string;
+  source_summary?: string;
+  error_message?: string | null;
+  metadata?: Record<string, unknown>;
+};
 
 async function hashQuestion(question: string): Promise<string> {
   const hash = await crypto.subtle.digest(
@@ -169,6 +178,41 @@ async function recentQuestionHashes(
   }
 }
 
+async function createGenerationRun(
+  client: ReturnType<typeof serviceClient>,
+  quizDate: string,
+  triggerSource: string,
+): Promise<string | null> {
+  try {
+    const { data, error } = await client
+      .from("quiz_generation_runs")
+      .insert({
+        run_date: quizDate,
+        trigger_source: triggerSource,
+        ai_status: "not_called",
+      })
+      .select("id")
+      .single();
+    if (error || !data?.id) return null;
+    return String(data.id);
+  } catch (_) {
+    return null;
+  }
+}
+
+async function updateGenerationRun(
+  client: ReturnType<typeof serviceClient>,
+  runId: string | null,
+  patch: GenerationRunPatch,
+): Promise<void> {
+  if (!runId) return;
+  try {
+    await client.from("quiz_generation_runs").update(patch).eq("id", runId);
+  } catch (_) {
+    // Observability must never block quiz publishing.
+  }
+}
+
 Deno.serve(async (request) => {
   const options = handleOptions(request);
   if (options) return options;
@@ -177,6 +221,11 @@ Deno.serve(async (request) => {
   const client = serviceClient();
   const cronAuthorized = hasCronSecret(request, "DAILY_QUIZ_CRON_SECRET");
   const quizDate = jamaicaDateString();
+  const runId = await createGenerationRun(
+    client,
+    quizDate,
+    cronAuthorized ? "cron" : "user",
+  );
   const availableAt = nextJamaicaRefresh(7, new Date(Date.now() - 24 * 60 * 60 * 1000));
   const expiresAt = nextJamaicaRefresh(7);
   let churchIds: string[] = [];
@@ -217,14 +266,25 @@ Return valid JSON only in this shape:
 {"questions":[{"question":"string","options":["string","string","string","string"],"correct_option_index":0,"correct_answer":"string","explanation":"string","scripture_references":["Book Chapter:Verse"],"category":"string","difficulty":"easy"}]}`;
 
   let aiResponse: unknown = null;
+  let aiStatus = "not_called";
   try {
     aiResponse = await callHuggingFaceJson(prompt);
+    aiStatus = Array.isArray((aiResponse as AiQuizResponse | null)?.questions)
+      ? "received"
+      : "invalid";
   } catch (_) {
     aiResponse = null;
+    aiStatus = "failed";
   }
+  await updateGenerationRun(client, runId, {
+    churches_checked: churchIds.length,
+    ai_status: aiStatus,
+  });
 
   let published = 0;
   const sources = new Set<string>();
+  let skippedExisting = 0;
+  let failedChurches = 0;
   for (const churchId of churchIds) {
     const existing = await client
       .from("daily_bible_quizzes")
@@ -234,6 +294,7 @@ Return valid JSON only in this shape:
       .maybeSingle();
 
     if (existing.data?.status === "published" && existing.data?.notification_sent_at) {
+      skippedExisting++;
       continue;
     }
 
@@ -268,7 +329,10 @@ Return valid JSON only in this shape:
       .select("id")
       .single();
 
-    if (quizError || !quiz) continue;
+    if (quizError || !quiz) {
+      failedChurches++;
+      continue;
+    }
 
     await client.from("daily_bible_quiz_questions").delete().eq("quiz_id", quiz.id);
     const questionRows = [];
@@ -294,7 +358,10 @@ Return valid JSON only in this shape:
     const { error: questionError } = await client
       .from("daily_bible_quiz_questions")
       .insert(questionRows);
-    if (questionError) continue;
+    if (questionError) {
+      failedChurches++;
+      continue;
+    }
 
     const title = "Daily Bible Quiz Is Ready";
     const body = "Today’s 5-question Bible challenge is now live. Can you earn 100 points?";
@@ -327,6 +394,18 @@ Return valid JSON only in this shape:
       .eq("id", quiz.id);
     published++;
   }
+
+  await updateGenerationRun(client, runId, {
+    completed_at: new Date().toISOString(),
+    churches_checked: churchIds.length,
+    quizzes_published: published,
+    ai_status: aiStatus,
+    source_summary: Array.from(sources).join(",") || "none",
+    metadata: {
+      skipped_existing: skippedExisting,
+      failed_churches: failedChurches,
+    },
+  });
 
   return jsonResponse({
     ok: true,
