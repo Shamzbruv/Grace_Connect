@@ -73,6 +73,29 @@ class MembershipService {
 
   final SupabaseClient _client;
 
+  static const String _legalDocumentVersion = '2026-06-24';
+
+  /// Accept all required policies for church membership.
+  /// Must be called before requestMembership().
+  Future<void> acceptRequiredMemberPolicies() async {
+    const requiredKeys = [
+      'terms',
+      'privacy',
+      'community_guidelines',
+      'age_policy',
+      'location_disclosure',
+    ];
+
+    for (final key in requiredKeys) {
+      await _client.rpc('accept_policy_document', params: {
+        'target_document_key': key,
+        'target_document_version': _legalDocumentVersion,
+        'acceptance_source': 'flutter_signup',
+        'metadata': {'isAdultConfirmed': true, 'locationNoticeAccepted': true},
+      });
+    }
+  }
+
   Future<MembershipContext> getCurrentContext() async {
     final user = _client.auth.currentUser;
     if (user == null) return MembershipContext.unauthenticated;
@@ -115,6 +138,10 @@ class MembershipService {
     required String churchId,
     String? message,
   }) async {
+    // Accept all required policies before submitting the request.
+    // The server will reject if these are missing or outdated.
+    await acceptRequiredMemberPolicies();
+
     await _client.rpc(
       'request_church_membership',
       params: {

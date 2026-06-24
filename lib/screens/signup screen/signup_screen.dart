@@ -78,21 +78,7 @@ class _SignupScreenState extends State<SignupScreen> {
             'full_name': _nameController.text.trim(),
             'phone': _phoneController.text.trim(),
             'phoneNumber': _phoneController.text.trim(),
-            'requestedChurchId': _selectedChurchId,
-            'requestedChurchName': _selectedChurchName,
-            'roles': ['Member'],
-            'accountState': 'active',
-            'joinDate': DateTime.now().toIso8601String(),
-            'acceptedPolicyKeys': [
-              'terms',
-              'privacy',
-              'community_guidelines',
-              'age_policy',
-            ],
-            'legalDocumentVersion': _legalDocumentVersion,
-            'legalAcceptedAt': DateTime.now().toIso8601String(),
-            'legalAcceptanceSource': 'flutter_signup',
-            'isAdultConfirmed': _isAdultConfirmed,
+            'signupSource': 'flutter_signup',
           },
         );
 
