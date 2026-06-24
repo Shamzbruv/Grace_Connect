@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../../widgets/ui/app_scaffold.dart';
 import '../../widgets/ui/app_card.dart';
 
-enum LegalDocumentType { terms, privacy }
+enum LegalDocumentType { terms, privacy, communityGuidelines, agePolicy }
 
 class LegalDocumentScreen extends StatelessWidget {
   const LegalDocumentScreen({
@@ -20,6 +20,8 @@ class LegalDocumentScreen extends StatelessWidget {
     final sections = switch (documentType) {
       LegalDocumentType.terms => _termsSections,
       LegalDocumentType.privacy => _privacySections,
+      LegalDocumentType.communityGuidelines => _communityGuidelinesSections,
+      LegalDocumentType.agePolicy => _agePolicySections,
     };
 
     return AppScaffold(
@@ -98,5 +100,31 @@ const _privacySections = [
   _LegalSection(
     'Support Requests',
     'When you submit support requests, device and app details may be included so issues can be diagnosed and fixed.',
+  ),
+];
+
+const _communityGuidelinesSections = [
+  _LegalSection(
+    'Faith-Centered Conduct',
+    'Use Grace Connect with kindness, truthfulness, respect, and care for the church community. Harassment, abuse, threats, impersonation, and harmful content are not allowed.',
+  ),
+  _LegalSection(
+    'Private Church Content',
+    'Prayer requests, member conversations, internal announcements, groups, attendance, care, and counselling information are for approved church members and authorized leaders only.',
+  ),
+  _LegalSection(
+    'Moderation',
+    'Church leaders and Grace Connect platform staff may review reports, remove harmful content, restrict access, or escalate urgent safety concerns when needed.',
+  ),
+];
+
+const _agePolicySections = [
+  _LegalSection(
+    '18+ Use',
+    'Grace Connect is intended for adults who are 18 years of age or older. By creating an account, you confirm that you meet this age requirement.',
+  ),
+  _LegalSection(
+    'Youth and Minors',
+    'Youth ministry content and family information must be handled by authorized adults according to church policy, platform rules, and applicable law.',
   ),
 ];

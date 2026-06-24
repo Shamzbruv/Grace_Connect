@@ -23,24 +23,24 @@ class MembershipGate extends StatefulWidget {
 }
 
 class _MembershipGateState extends State<MembershipGate> {
-  late Future<MembershipContext> _contextFuture;
+  late Stream<MembershipContext> _contextStream;
 
   @override
   void initState() {
     super.initState();
-    _contextFuture = MembershipService().getCurrentContext();
+    _contextStream = MembershipService().watchCurrentContext();
   }
 
   void _refresh() {
     setState(() {
-      _contextFuture = MembershipService().getCurrentContext();
+      _contextStream = MembershipService().watchCurrentContext();
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<MembershipContext>(
-      future: _contextFuture,
+    return StreamBuilder<MembershipContext>(
+      stream: _contextStream,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
@@ -88,6 +88,11 @@ class _MembershipGateState extends State<MembershipGate> {
             message:
                 'Your request to join ${membership.churchName ?? 'this church'} is waiting for church leadership approval.',
             onRefresh: _refresh,
+            secondaryActionLabel: 'Cancel Request',
+            onSecondaryAction: () async {
+              await MembershipService().cancelMembershipRequest();
+              _refresh();
+            },
           );
         }
 
@@ -298,12 +303,16 @@ class _StatusScreen extends StatelessWidget {
     required this.title,
     required this.message,
     required this.onRefresh,
+    this.secondaryActionLabel,
+    this.onSecondaryAction,
   });
 
   final IconData icon;
   final String title;
   final String message;
   final VoidCallback onRefresh;
+  final String? secondaryActionLabel;
+  final Future<void> Function()? onSecondaryAction;
 
   @override
   Widget build(BuildContext context) {
@@ -345,6 +354,18 @@ class _StatusScreen extends StatelessWidget {
                     icon: Icons.refresh,
                     onPressed: onRefresh,
                   ),
+                  if (secondaryActionLabel != null &&
+                      onSecondaryAction != null) ...[
+                    const SizedBox(height: 12),
+                    AppButton(
+                      text: secondaryActionLabel!,
+                      icon: Icons.cancel_outlined,
+                      isSecondary: true,
+                      onPressed: () {
+                        onSecondaryAction!.call();
+                      },
+                    ),
+                  ],
                   const SizedBox(height: 12),
                   TextButton(
                     onPressed: () async {

@@ -98,6 +98,19 @@ class MembershipService {
     );
   }
 
+  Stream<MembershipContext> watchCurrentContext() async* {
+    yield await getCurrentContext();
+
+    final user = _client.auth.currentUser;
+    if (user == null) return;
+
+    yield* _client
+        .from('church_memberships')
+        .stream(primaryKey: ['id'])
+        .eq('user_id', user.id)
+        .asyncMap((_) => getCurrentContext());
+  }
+
   Future<void> requestMembership({
     required String churchId,
     String? message,
@@ -109,5 +122,9 @@ class MembershipService {
         'request_note': message,
       },
     );
+  }
+
+  Future<void> cancelMembershipRequest() async {
+    await _client.rpc('cancel_membership_request');
   }
 }

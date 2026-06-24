@@ -16,6 +16,8 @@ import 'theme/app_theme.dart';
 import 'screens/dashboard/variants/admin_dashboard.dart';
 import 'screens/admin/finance_dashboard_screen.dart';
 import 'screens/admin/attendance_insights_screen.dart';
+import 'screens/admin/church_applications_screen.dart';
+import 'screens/admin/membership_requests_screen.dart';
 import 'screens/admin/role_management_screen.dart';
 import 'screens/admin/schedule_management_screen.dart';
 import 'screens/admin/admin_stream_settings_screen.dart';
@@ -206,6 +208,10 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
               '/complete_profile': (context) =>
                   _protected(const CompleteProfileScreen()),
               '/members': (context) => _protected(const MembersListScreen()),
+              '/membership_requests': (context) =>
+                  _protected(const MembershipRequestsScreen()),
+              '/church_applications': (context) =>
+                  _protected(const ChurchApplicationsScreen()),
               '/attendance': (context) => _protected(const AttendanceScreen()),
               '/attendance_insights': (context) =>
                   _protected(const AttendanceInsightsScreen()),
@@ -273,17 +279,24 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
                   _protected(const AppSettingsScreen()),
               '/settings/feedback': (context) =>
                   _protected(const FeedbackScreen()),
-              '/settings/terms': (context) => _protected(
-                    const LegalDocumentScreen(
-                      title: 'Terms of Service',
-                      documentType: LegalDocumentType.terms,
-                    ),
+              '/settings/terms': (context) => const LegalDocumentScreen(
+                    title: 'Terms of Service',
+                    documentType: LegalDocumentType.terms,
                   ),
               '/settings/privacy_policy': (context) =>
-                  _protected(const LegalDocumentScreen(
+                  const LegalDocumentScreen(
                     title: 'Privacy Policy',
                     documentType: LegalDocumentType.privacy,
-                  )),
+                  ),
+              '/settings/community_guidelines': (context) =>
+                  const LegalDocumentScreen(
+                    title: 'Community Guidelines',
+                    documentType: LegalDocumentType.communityGuidelines,
+                  ),
+              '/settings/age_policy': (context) => const LegalDocumentScreen(
+                    title: '18+ Age Policy',
+                    documentType: LegalDocumentType.agePolicy,
+                  ),
               '/support': (context) => _protected(const SupportScreen()),
               '/settings/support': (context) =>
                   _protected(const SupportScreen()),

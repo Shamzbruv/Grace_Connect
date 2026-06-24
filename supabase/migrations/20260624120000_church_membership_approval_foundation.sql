@@ -103,16 +103,13 @@ set display_name = coalesce(nullif(display_name, ''), nullif(name, ''), "placeId
     denomination_label = coalesce(nullif(denomination_label, ''), nullif(denomination, '')),
     church_status = case
       when lower(coalesce(church_status, '')) = 'approved' then 'approved'
-      when lower(coalesce(status, '')) in ('active', 'approved', 'verified') then 'approved'
+      when lower(coalesce(status, '')) in ('active', 'approved', 'verified') then 'legacy_review_required'
       when lower(coalesce(status, '')) in ('archived') then 'archived'
       else coalesce(nullif(church_status, ''), 'suspended')
     end,
-    public_visibility = case
-      when lower(coalesce(status, '')) in ('active', 'approved', 'verified') then true
-      else public_visibility
-    end,
+    public_visibility = lower(coalesce(church_status, '')) = 'approved',
     approved_at = case
-      when lower(coalesce(status, '')) in ('active', 'approved', 'verified') then coalesce(approved_at, "createdAt", now())
+      when lower(coalesce(church_status, '')) = 'approved' then approved_at
       else approved_at
     end
 where display_name is null
@@ -131,11 +128,45 @@ create table if not exists public.policy_documents (
   document_key text not null,
   title text not null,
   document_version text not null,
+  effective_date date,
   content_url text,
+  content_hash text,
+  required_for text[] not null default '{}'::text[],
   is_active boolean not null default true,
   created_at timestamptz not null default now(),
   unique (document_key, document_version)
 );
+
+alter table public.policy_documents
+  add column if not exists effective_date date,
+  add column if not exists content_hash text,
+  add column if not exists required_for text[] not null default '{}'::text[];
+
+insert into public.policy_documents (
+  document_key,
+  title,
+  document_version,
+  effective_date,
+  content_url,
+  required_for
+)
+values
+  ('terms', 'Terms and Conditions', '2026-06-24', '2026-06-24', 'terms.html', array['member_signup', 'church_application']),
+  ('privacy', 'Privacy Policy', '2026-06-24', '2026-06-24', 'privacy.html', array['member_signup', 'church_application']),
+  ('community_guidelines', 'Community Guidelines', '2026-06-24', '2026-06-24', 'community-guidelines.html', array['member_signup', 'church_application']),
+  ('age_policy', '18+ Age Policy', '2026-06-24', '2026-06-24', 'age-policy.html', array['member_signup', 'church_application']),
+  ('location_disclosure', 'Background Location Disclosure', '2026-06-24', '2026-06-24', 'location-disclosure.html', array['attendance_location']),
+  ('church_admin_access', 'Admin and Staff Access Policy', '2026-06-24', '2026-06-24', 'admin-access-policy.html', array['church_application']),
+  ('church_registration_authority', 'Church Registration Authority Declaration', '2026-06-24', '2026-06-24', 'admin-access-policy.html', array['church_application']),
+  ('pastoral_care_disclaimer', 'Pastoral Care Disclaimer', '2026-06-24', '2026-06-24', 'pastoral-care-disclaimer.html', array['prayer_counseling']),
+  ('giving_refund_policy', 'Giving and Refund Policy', '2026-06-24', '2026-06-24', 'donation-refund-policy.html', array['giving']),
+  ('data_retention', 'Data Retention Schedule', '2026-06-24', '2026-06-24', 'data-retention.html', array['member_signup', 'church_application'])
+on conflict (document_key, document_version) do update
+  set title = excluded.title,
+      effective_date = excluded.effective_date,
+      content_url = excluded.content_url,
+      required_for = excluded.required_for,
+      is_active = true;
 
 create table if not exists public.policy_acceptances (
   id uuid primary key default gen_random_uuid(),
@@ -362,10 +393,14 @@ as $$
   select public.is_active_member_of(target_church_id)
     and exists (
       select 1
-      from public.users u
-      left join unnest(coalesce(u.roles, '{}'::text[])) as user_role(role_name) on true
-      where u.id = auth.uid()
-        and public.normalize_role_name(user_role.role_name) in (
+      from public.church_memberships cm
+      join public.church_member_roles cmr
+        on cmr.membership_id = cm.id
+       and cmr.revoked_at is null
+      where cm.user_id = auth.uid()
+        and cm.church_id = target_church_id
+        and cm.membership_status = 'active'
+        and public.normalize_role_name(cmr.role_name) in (
           'pastor',
           'senior_pastor',
           'assistant_pastor',
@@ -388,10 +423,14 @@ as $$
   select public.current_active_church_id() is not null
     and exists (
       select 1
-      from public.users u
-      cross join unnest(coalesce(u.roles, '{}'::text[])) as user_role(role_name)
-      where u.id = auth.uid()
-        and public.normalize_role_name(user_role.role_name) = any (
+      from public.church_memberships cm
+      join public.church_member_roles cmr
+        on cmr.membership_id = cm.id
+       and cmr.revoked_at is null
+      where cm.user_id = auth.uid()
+        and cm.church_id = public.current_active_church_id()
+        and cm.membership_status = 'active'
+        and public.normalize_role_name(cmr.role_name) = any (
           select public.normalize_role_name(required_role)
           from unnest(required_roles) as required_role
         )
@@ -430,6 +469,59 @@ as $$
     )
   order by name
   limit 25;
+$$;
+
+create or replace function public.accept_policy_document(
+  target_document_key text,
+  target_document_version text,
+  acceptance_source text default 'app',
+  metadata jsonb default '{}'::jsonb
+)
+returns uuid
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  actor_id uuid := auth.uid();
+  inserted_id uuid;
+begin
+  if actor_id is null then
+    raise exception 'Not authenticated';
+  end if;
+
+  if not exists (
+    select 1
+    from public.policy_documents pd
+    where pd.document_key = target_document_key
+      and pd.document_version = target_document_version
+      and pd.is_active = true
+  ) then
+    raise exception 'Policy document is not active or does not exist.';
+  end if;
+
+  insert into public.policy_acceptances (
+    user_id,
+    document_key,
+    document_version,
+    source,
+    ip_or_device_metadata
+  )
+  values (
+    actor_id,
+    target_document_key,
+    target_document_version,
+    coalesce(nullif(trim(acceptance_source), ''), 'app'),
+    coalesce(metadata, '{}'::jsonb)
+  )
+  on conflict (user_id, document_key, document_version) do update
+    set accepted_at = now(),
+        source = excluded.source,
+        ip_or_device_metadata = excluded.ip_or_device_metadata
+  returning id into inserted_id;
+
+  return inserted_id;
+end;
 $$;
 
 create or replace function public.request_church_membership(
@@ -766,6 +858,57 @@ begin
 end;
 $$;
 
+create or replace function public.cancel_membership_request()
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  actor_id uuid := auth.uid();
+  cancelled_count integer;
+begin
+  if actor_id is null then
+    raise exception 'Not authenticated';
+  end if;
+
+  update public.church_memberships
+  set membership_status = 'cancelled',
+      decision_reason = 'Cancelled by requester.'
+  where user_id = actor_id
+    and membership_status = 'pending';
+
+  get diagnostics cancelled_count = row_count;
+
+  if cancelled_count > 0 and not exists (
+    select 1
+    from public.church_memberships
+    where user_id = actor_id
+      and membership_status = 'active'
+  ) then
+    update public.users
+    set "accountState" = 'active',
+        "placeId" = null,
+        "placeName" = null,
+        roles = array['Member']
+    where id = actor_id;
+  end if;
+
+  insert into public.church_approval_audit_events (
+    actor_user_id,
+    target_user_id,
+    event_type,
+    details
+  )
+  values (
+    actor_id,
+    actor_id,
+    'membership_request_cancelled',
+    jsonb_build_object('cancelledCount', cancelled_count)
+  );
+end;
+$$;
+
 create or replace function public.remove_church_member(
   target_user_id uuid,
   target_church_id text,
@@ -842,6 +985,22 @@ begin
     'membership_removed',
     jsonb_build_object('reason', nullif(trim(coalesce(removal_note, '')), ''))
   );
+
+  begin
+    perform public.create_notification(
+      target_user_id,
+      actor_id,
+      'membership_removed',
+      'Church access removed',
+      'You are no longer connected to this church in Grace Connect.',
+      target_church_id,
+      'church_memberships',
+      target_user_id::text,
+      '/'
+    );
+  exception when undefined_function then
+    null;
+  end;
 end;
 $$;
 
@@ -990,6 +1149,22 @@ begin
     raise exception 'Church name is required.';
   end if;
 
+  select id
+    into inserted_id
+  from public.church_registration_requests
+  where requested_by_user_id = actor_id
+    and application_status in (
+      'submitted',
+      'under_review',
+      'needs_information'
+    )
+  order by created_at desc
+  limit 1;
+
+  if inserted_id is not null then
+    return inserted_id;
+  end if;
+
   insert into public.church_registration_requests (
     requested_by_user_id,
     church_name_submitted,
@@ -1050,6 +1225,7 @@ declare
   denom record;
   church_place_id text;
   final_name text;
+  founder_membership_id uuid;
 begin
   if actor_id is null or not public.can_review_church_registrations() then
     raise exception 'Only platform reviewers can approve church registrations.';
@@ -1067,6 +1243,15 @@ begin
 
   if request_row.application_status = 'approved' then
     raise exception 'This church registration is already approved.';
+  end if;
+
+  if exists (
+    select 1
+    from public.church_memberships
+    where user_id = request_row.requested_by_user_id
+      and membership_status = 'active'
+  ) then
+    raise exception 'The church applicant already has an active church membership. A platform reviewer must transfer or resolve that membership before approval.';
   end if;
 
   select *
@@ -1149,9 +1334,20 @@ begin
     now(),
     'Initial leader approved with church registration.'
   )
-  on conflict (user_id)
-    where membership_status = 'active'
-  do nothing;
+  returning id into founder_membership_id;
+
+  insert into public.church_member_roles (
+    membership_id,
+    role_name,
+    assigned_by
+  )
+  values
+    (founder_membership_id, 'Admin', actor_id),
+    (founder_membership_id, 'Pastor', actor_id)
+  on conflict (membership_id, role_name) do update
+    set revoked_at = null,
+        assigned_by = excluded.assigned_by,
+        assigned_at = now();
 
   update public.users
   set "placeId" = church_place_id,
@@ -1286,6 +1482,137 @@ begin
           else coalesce(public.users."accountState", 'active')
         end;
 
+  if jsonb_typeof(meta->'acceptedPolicyKeys') = 'array'
+     and nullif(meta->>'legalDocumentVersion', '') is not null then
+    insert into public.policy_acceptances (
+      user_id,
+      document_key,
+      document_version,
+      source,
+      ip_or_device_metadata
+    )
+    select
+      new.id,
+      accepted_keys.document_key,
+      meta->>'legalDocumentVersion',
+      coalesce(nullif(meta->>'legalAcceptanceSource', ''), 'signup'),
+      jsonb_build_object(
+        'acceptedAt', coalesce(nullif(meta->>'legalAcceptedAt', ''), now()::text),
+        'isAdultConfirmed', coalesce((meta->>'isAdultConfirmed')::boolean, false),
+        'source', coalesce(nullif(meta->>'legalAcceptanceSource', ''), 'signup')
+      )
+    from jsonb_array_elements_text(meta->'acceptedPolicyKeys') as accepted_keys(document_key)
+    where exists (
+      select 1
+      from public.policy_documents pd
+      where pd.document_key = accepted_keys.document_key
+        and pd.document_version = meta->>'legalDocumentVersion'
+        and pd.is_active = true
+    )
+    on conflict (user_id, document_key, document_version) do nothing;
+  end if;
+
+  if lower(coalesce(meta->>'churchRegistrationRequest', 'false')) = 'true'
+     and nullif(meta->>'churchNameSubmitted', '') is not null
+     and not exists (
+       select 1
+       from public.church_registration_requests crr
+       where crr.requested_by_user_id = new.id
+         and crr.application_status in (
+           'submitted',
+           'under_review',
+           'needs_information'
+         )
+     ) then
+    insert into public.church_registration_requests (
+      requested_by_user_id,
+      church_name_submitted,
+      location_name,
+      address,
+      parish,
+      denomination_id,
+      custom_denomination_name,
+      pastor_name,
+      pastor_email,
+      pastor_phone
+    )
+    values (
+      new.id,
+      meta->>'churchNameSubmitted',
+      nullif(meta->>'locationName', ''),
+      nullif(meta->>'churchAddress', ''),
+      nullif(meta->>'churchParish', ''),
+      (
+        select id
+        from public.denominations d
+        where lower(d.display_name) = lower(coalesce(meta->>'denomination', ''))
+           or lower(d.code) = lower(coalesce(meta->>'denomination', ''))
+        limit 1
+      ),
+      nullif(meta->>'denomination', ''),
+      nullif(meta->>'pastorName', ''),
+      coalesce(nullif(meta->>'pastorEmail', ''), new.email),
+      nullif(meta->>'pastorPhone', '')
+    );
+
+    insert into public.church_approval_audit_events (
+      actor_user_id,
+      target_user_id,
+      event_type,
+      details
+    )
+    values (
+      new.id,
+      new.id,
+      'church_registration_submitted',
+      jsonb_build_object(
+        'source', 'auth_signup_metadata',
+        'churchName', meta->>'churchNameSubmitted'
+      )
+    );
+  end if;
+
+  if nullif(meta->>'requestedChurchId', '') is not null
+     and not exists (
+       select 1
+       from public.church_memberships cm
+       where cm.user_id = new.id
+         and cm.membership_status in ('pending', 'active')
+     )
+     and public.is_approved_church(meta->>'requestedChurchId') then
+    insert into public.church_memberships (
+      user_id,
+      church_id,
+      membership_status,
+      request_message
+    )
+    values (
+      new.id,
+      meta->>'requestedChurchId',
+      'pending',
+      'Requested from signup.'
+    );
+
+    update public.users
+    set "accountState" = 'pending'
+    where id = new.id;
+
+    insert into public.church_approval_audit_events (
+      actor_user_id,
+      target_user_id,
+      church_id,
+      event_type,
+      details
+    )
+    values (
+      new.id,
+      new.id,
+      meta->>'requestedChurchId',
+      'membership_requested',
+      jsonb_build_object('source', 'auth_signup_metadata')
+    );
+  end if;
+
   return new;
 end;
 $$;
@@ -1325,11 +1652,6 @@ create policy "Users view own policy acceptances"
   using (user_id = auth.uid());
 
 drop policy if exists "Users create own policy acceptances" on public.policy_acceptances;
-create policy "Users create own policy acceptances"
-  on public.policy_acceptances
-  for insert
-  to authenticated
-  with check (user_id = auth.uid());
 
 drop policy if exists "Users view own church registration requests" on public.church_registration_requests;
 create policy "Users view own church registration requests"
@@ -1367,29 +1689,14 @@ create policy "Members view relevant memberships"
   );
 
 drop policy if exists "Members create own pending membership" on public.church_memberships;
-create policy "Members create own pending membership"
-  on public.church_memberships
-  for insert
-  to authenticated
-  with check (
-    user_id = auth.uid()
-    and membership_status = 'pending'
-    and public.is_approved_church(church_id)
-  );
 
 drop policy if exists "Church leaders update membership decisions" on public.church_memberships;
 create policy "Church leaders update membership decisions"
   on public.church_memberships
   for update
   to authenticated
-  using (
-    user_id = auth.uid()
-    or public.can_manage_church_members(church_id)
-  )
-  with check (
-    user_id = auth.uid()
-    or public.can_manage_church_members(church_id)
-  );
+  using (public.can_manage_church_members(church_id))
+  with check (public.can_manage_church_members(church_id));
 
 drop policy if exists "Leaders view church member roles" on public.church_member_roles;
 create policy "Leaders view church member roles"
@@ -1435,7 +1742,9 @@ grant execute on function public.can_manage_church_members(text) to authenticate
 grant execute on function public.can_review_church_registrations() to authenticated;
 grant execute on function public.get_current_membership_context() to authenticated;
 grant execute on function public.get_public_church_directory(text) to anon, authenticated;
+grant execute on function public.accept_policy_document(text, text, text, jsonb) to authenticated;
 grant execute on function public.request_church_membership(text, text) to authenticated;
+grant execute on function public.cancel_membership_request() to authenticated;
 grant execute on function public.approve_church_membership(uuid, text) to authenticated;
 grant execute on function public.decline_church_membership(uuid, text) to authenticated;
 grant execute on function public.remove_church_member(uuid, text, text) to authenticated;
