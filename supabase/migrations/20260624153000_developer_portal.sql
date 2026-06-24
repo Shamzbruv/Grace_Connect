@@ -159,24 +159,6 @@ declare
   match_count integer;
   safe_matches jsonb;
 begin
-  select count(*)
-    into match_count
-    from public.churches c
-   where normalized_name <> ''
-     and (
-       lower(regexp_replace(coalesce(c.display_name, c.name, ''), '[^a-z0-9]+', '', 'g')) = normalized_name
-       or (
-         normalized_location <> ''
-         and lower(regexp_replace(coalesce(c.location_name, ''), '[^a-z0-9]+', '', 'g')) = normalized_location
-       )
-       or (
-         normalized_address <> ''
-         and lower(regexp_replace(coalesce(c.address, ''), '[^a-z0-9]+', '', 'g')) = normalized_address
-       )
-       or coalesce(c.parish, '') ilike '%' || coalesce(nullif(parish, ''), '__no_parish_match__') || '%'
-       or coalesce(c.denomination_label, c.denomination, '') ilike '%' || coalesce(nullif(denomination_id, ''), '__no_denomination_match__') || '%'
-     );
-
   select coalesce(jsonb_agg(jsonb_build_object(
     'name', coalesce(nullif(c.display_name, ''), nullif(c.name, ''), 'Possible match'),
     'address', c.address,
@@ -185,23 +167,23 @@ begin
   )), '[]'::jsonb)
     into safe_matches
     from (
-      select *
+      select c.*,
+      case
+        when lower(regexp_replace(coalesce(c.display_name, c.name, ''), '[^a-z0-9]+', '', 'g')) = normalized_name and nullif(parish, '') is not null and lower(coalesce(c.parish, '')) = lower(parish) then 100
+        when lower(regexp_replace(coalesce(c.display_name, c.name, ''), '[^a-z0-9]+', '', 'g')) = normalized_name and nullif(normalized_address, '') is not null and lower(regexp_replace(coalesce(c.address, ''), '[^a-z0-9]+', '', 'g')) = normalized_address then 100
+        when normalized_location <> '' and lower(regexp_replace(coalesce(c.location_name, ''), '[^a-z0-9]+', '', 'g')) = normalized_location and c.denomination_id::text = denomination_id and nullif(parish, '') is not null and lower(coalesce(c.parish, '')) = lower(parish) then 100
+        when lower(regexp_replace(coalesce(c.display_name, c.name, ''), '[^a-z0-9]+', '', 'g')) like '%' || normalized_name || '%' and nullif(parish, '') is not null and lower(coalesce(c.parish, '')) = lower(parish) then 50
+        when normalized_address <> '' and lower(regexp_replace(coalesce(c.address, ''), '[^a-z0-9]+', '', 'g')) like '%' || normalized_address || '%' and c.denomination_id::text = denomination_id then 50
+        else 0
+      end as match_score
       from public.churches c
       where normalized_name <> ''
-        and (
-          lower(regexp_replace(coalesce(c.display_name, c.name, ''), '[^a-z0-9]+', '', 'g')) = normalized_name
-          or (
-            normalized_location <> ''
-            and lower(regexp_replace(coalesce(c.location_name, ''), '[^a-z0-9]+', '', 'g')) = normalized_location
-          )
-          or (
-            normalized_address <> ''
-            and lower(regexp_replace(coalesce(c.address, ''), '[^a-z0-9]+', '', 'g')) = normalized_address
-          )
-        )
-      order by c."createdAt" desc nulls last
-      limit 5
-    ) c;
+    ) c
+    where c.match_score >= 50
+    order by c.match_score desc, c."createdAt" desc nulls last
+    limit 5;
+
+  match_count := jsonb_array_length(safe_matches);
 
   return jsonb_build_object(
     'has_conflict', match_count > 0,
@@ -309,8 +291,12 @@ begin
         coalesce(d.display_name, crr.custom_denomination_name) as denomination,
         crr.location_name,
         crr.pastor_name as pastor_or_admin_name,
-        crr.pastor_email as pastor_or_admin_email,
-        crr.pastor_phone as pastor_or_admin_phone,
+        case when dev.developer_role in ('super_developer', 'security_admin') then crr.pastor_email
+             when crr.pastor_email is not null and position('@' in crr.pastor_email) > 0 then substr(crr.pastor_email, 1, 3) || '***@' || split_part(crr.pastor_email, '@', 2)
+             else crr.pastor_email end as pastor_or_admin_email,
+        case when dev.developer_role in ('super_developer', 'security_admin') then crr.pastor_phone
+             when crr.pastor_phone is not null and length(crr.pastor_phone) >= 4 then '***-***-' || right(crr.pastor_phone, 4)
+             else crr.pastor_phone end as pastor_or_admin_phone,
         crr.requested_by_user_id::text as "ownerUserId",
         crr.application_status as status,
         crr.application_status as approval_status,
@@ -396,9 +382,13 @@ begin
         cm.id,
         u.uid,
         u.id as user_id,
-        u.email,
+        case when dev.developer_role in ('super_developer', 'security_admin') then u.email
+             when u.email is not null and position('@' in u.email) > 0 then substr(u.email, 1, 3) || '***@' || split_part(u.email, '@', 2)
+             else u.email end as email,
         u."fullName",
-        u.phone,
+        case when dev.developer_role in ('super_developer', 'security_admin') then u.phone
+             when u.phone is not null and length(u.phone) >= 4 then '***-***-' || right(u.phone, 4)
+             else u.phone end as phone,
         cm.church_id as "placeId",
         coalesce(nullif(c.display_name, ''), nullif(c.name, ''), cm.church_id) as "placeName",
         u.roles,
@@ -444,9 +434,13 @@ begin
       select
         u.id,
         u.uid,
-        u.email,
+        case when dev.developer_role in ('super_developer', 'security_admin') then u.email
+             when u.email is not null and position('@' in u.email) > 0 then substr(u.email, 1, 3) || '***@' || split_part(u.email, '@', 2)
+             else u.email end as email,
         u."fullName",
-        u.phone,
+        case when dev.developer_role in ('super_developer', 'security_admin') then u.phone
+             when u.phone is not null and length(u.phone) >= 4 then '***-***-' || right(u.phone, 4)
+             else u.phone end as phone,
         u."placeId",
         u."placeName",
         u.roles,
@@ -590,7 +584,11 @@ begin
 end;
 $$;
 
-create or replace function public.developer_approve_member_request(p_user_id uuid)
+create or replace function public.developer_approve_member_request(
+  p_user_id uuid,
+  p_reason text,
+  p_emergency_override boolean default false
+)
 returns jsonb
 language plpgsql
 security definer
@@ -600,8 +598,17 @@ declare
   dev public.developer_accounts;
   target record;
   church_name text;
+  leader record;
 begin
-  select * into dev from public.require_developer(array['super_developer', 'support_developer', 'security_admin']);
+  select * into dev from public.require_developer(array['super_developer', 'security_admin']);
+
+  if not p_emergency_override then
+    raise exception 'Emergency override flag is required to approve member requests.';
+  end if;
+
+  if nullif(trim(coalesce(p_reason, '')), '') is null then
+    raise exception 'A typed reason is required for emergency override.';
+  end if;
 
   select *
     into target
@@ -617,7 +624,7 @@ begin
      set membership_status = 'active',
          reviewed_by = dev.user_id,
          reviewed_at = now(),
-         decision_reason = 'Approved from developer portal.'
+         decision_reason = 'Platform Override: ' || trim(p_reason)
    where id = target.id;
 
   update public.church_memberships
@@ -640,7 +647,36 @@ begin
          roles = case when roles is null or array_length(roles, 1) is null then array['Member'] else roles end
    where id = target.user_id;
 
-  perform public.log_developer_action('member_request_approved', 'church_membership', target.id::text, jsonb_build_object('userId', target.user_id, 'churchId', target.church_id));
+  for leader in
+    select cm.user_id as id
+    from public.church_memberships cm
+    join public.church_member_roles cmr on cmr.membership_id = cm.id
+    where cm.church_id = target.church_id
+      and cm.membership_status = 'active'
+      and cmr.revoked_at is null
+      and public.normalize_role_name(cmr.role_name) in (
+        'pastor', 'senior_pastor', 'assistant_pastor', 'acting_pastor',
+        'church_admin', 'admin', 'administrator', 'secretary', 'church_secretary'
+      )
+  loop
+    begin
+      perform public.create_notification(
+        leader.id,
+        dev.user_id,
+        'membership_approved_override',
+        'Membership Emergency Override',
+        'A membership request was approved by platform support: ' || trim(p_reason),
+        target.church_id,
+        'church_memberships',
+        target.id::text,
+        '/members'
+      );
+    exception when undefined_function then
+      null;
+    end;
+  end loop;
+
+  perform public.log_developer_action('member_request_approved_override', 'church_membership', target.id::text, jsonb_build_object('userId', target.user_id, 'churchId', target.church_id, 'reason', trim(p_reason)));
   return jsonb_build_object('ok', true);
 end;
 $$;

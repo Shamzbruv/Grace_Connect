@@ -619,11 +619,13 @@ begin
   );
 
   for leader in
-    select u.id
-    from public.users u
-    cross join unnest(coalesce(u.roles, '{}'::text[])) as role_name
-    where u."placeId" = clean_church_id
-      and public.normalize_role_name(role_name) in (
+    select cm.user_id as id
+    from public.church_memberships cm
+    join public.church_member_roles cmr on cmr.membership_id = cm.id
+    where cm.church_id = clean_church_id
+      and cm.membership_status = 'active'
+      and cmr.revoked_at is null
+      and public.normalize_role_name(cmr.role_name) in (
         'pastor',
         'senior_pastor',
         'assistant_pastor',
@@ -633,13 +635,6 @@ begin
         'administrator',
         'secretary',
         'church_secretary'
-      )
-      and exists (
-        select 1
-        from public.church_memberships cm
-        where cm.user_id = u.id
-          and cm.church_id = clean_church_id
-          and cm.membership_status = 'active'
       )
   loop
     begin
@@ -1140,6 +1135,8 @@ as $$
 declare
   actor_id uuid := auth.uid();
   inserted_id uuid;
+  denom_code text;
+  final_church_name text := trim(church_name);
 begin
   if actor_id is null then
     raise exception 'Not authenticated';
@@ -1165,6 +1162,17 @@ begin
     return inserted_id;
   end if;
 
+  if denomination is not null then
+    select code into denom_code from public.denominations where id = denomination;
+    if denom_code = 'ntcog' then
+      if nullif(trim(coalesce(location, '')), '') is not null then
+        final_church_name := trim(location) || ' NTCOG';
+      else
+        final_church_name := trim(regexp_replace(final_church_name, '(?i)\s*(new testament church of god|ntcog)\s*', '', 'g')) || ' NTCOG';
+      end if;
+    end if;
+  end if;
+
   insert into public.church_registration_requests (
     requested_by_user_id,
     church_name_submitted,
@@ -1180,7 +1188,7 @@ begin
   )
   values (
     actor_id,
-    trim(church_name),
+    final_church_name,
     nullif(trim(coalesce(location, '')), ''),
     nullif(trim(coalesce(church_address, '')), ''),
     nullif(trim(coalesce(church_parish, '')), ''),
@@ -1203,7 +1211,7 @@ begin
     actor_id,
     actor_id,
     'church_registration_submitted',
-    jsonb_build_object('requestId', inserted_id, 'churchName', trim(church_name))
+    jsonb_build_object('requestId', inserted_id, 'churchName', final_church_name)
   );
 
   return inserted_id;
@@ -1752,3 +1760,11 @@ grant execute on function public.leave_church() to authenticated;
 grant execute on function public.submit_church_registration(text, text, text, text, uuid, text, text, text, text, uuid) to authenticated;
 grant execute on function public.approve_church_registration(uuid, text) to authenticated;
 grant execute on function public.reject_church_registration(uuid, text) to authenticated;
+
+
+create or replace function public.get_active_denominations()
+returns table (id uuid, code text, display_name text)
+language sql
+security definer
+set search_path to public
+as $$\n  select id, code, display_name from public.denominations where is_active = true order by sort_order asc;\n$$;
