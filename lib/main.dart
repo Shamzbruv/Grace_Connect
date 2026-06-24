@@ -16,6 +16,8 @@ import 'theme/app_theme.dart';
 import 'screens/dashboard/variants/admin_dashboard.dart';
 import 'screens/admin/finance_dashboard_screen.dart';
 import 'screens/admin/attendance_insights_screen.dart';
+import 'screens/admin/church_applications_screen.dart';
+import 'screens/admin/membership_requests_screen.dart';
 import 'screens/admin/role_management_screen.dart';
 import 'screens/admin/schedule_management_screen.dart';
 import 'screens/admin/admin_stream_settings_screen.dart';
@@ -26,6 +28,7 @@ import 'screens/login screen/login_screen.dart';
 import 'screens/login screen/auth_callback_screen.dart';
 import 'screens/login screen/forgot_password_screen.dart';
 import 'screens/login screen/reset_password_screen.dart';
+import 'screens/membership/membership_gate_screen.dart';
 import 'screens/signup screen/signup_screen.dart';
 import 'screens/signup screen/church_signup_screen.dart';
 import 'screens/signup screen/complete_profile_screen.dart';
@@ -205,6 +208,10 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
               '/complete_profile': (context) =>
                   _protected(const CompleteProfileScreen()),
               '/members': (context) => _protected(const MembersListScreen()),
+              '/membership_requests': (context) =>
+                  _protected(const MembershipRequestsScreen()),
+              '/church_applications': (context) =>
+                  _protected(const ChurchApplicationsScreen()),
               '/attendance': (context) => _protected(const AttendanceScreen()),
               '/attendance_insights': (context) =>
                   _protected(const AttendanceInsightsScreen()),
@@ -272,17 +279,24 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
                   _protected(const AppSettingsScreen()),
               '/settings/feedback': (context) =>
                   _protected(const FeedbackScreen()),
-              '/settings/terms': (context) => _protected(
-                    const LegalDocumentScreen(
-                      title: 'Terms of Service',
-                      documentType: LegalDocumentType.terms,
-                    ),
+              '/settings/terms': (context) => const LegalDocumentScreen(
+                    title: 'Terms of Service',
+                    documentType: LegalDocumentType.terms,
                   ),
               '/settings/privacy_policy': (context) =>
-                  _protected(const LegalDocumentScreen(
+                  const LegalDocumentScreen(
                     title: 'Privacy Policy',
                     documentType: LegalDocumentType.privacy,
-                  )),
+                  ),
+              '/settings/community_guidelines': (context) =>
+                  const LegalDocumentScreen(
+                    title: 'Community Guidelines',
+                    documentType: LegalDocumentType.communityGuidelines,
+                  ),
+              '/settings/age_policy': (context) => const LegalDocumentScreen(
+                    title: '18+ Age Policy',
+                    documentType: LegalDocumentType.agePolicy,
+                  ),
               '/support': (context) => _protected(const SupportScreen()),
               '/settings/support': (context) =>
                   _protected(const SupportScreen()),
@@ -406,7 +420,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
           // immediately so relaunching the app does not wait forever for a
           // fresh auth stream event.
           if (AuthFlowService.isConfirmedUser(supabaseUser)) {
-            return const MainTabsScreen();
+            return const MembershipGate(child: MainTabsScreen());
           }
 
           if (snapshot.connectionState == ConnectionState.waiting) {

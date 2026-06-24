@@ -30,6 +30,10 @@ class _SignupScreenState extends State<SignupScreen> {
   bool _isLoading = false;
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
+  bool _acceptedPolicies = false;
+  bool _isAdultConfirmed = false;
+
+  static const String _legalDocumentVersion = '2026-06-24';
 
   @override
   void dispose() {
@@ -44,15 +48,20 @@ class _SignupScreenState extends State<SignupScreen> {
 
   Future<void> _handleSignup() async {
     if (_formKey.currentState!.validate()) {
-      if (_selectedChurchId == null) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Please select a church from the dropdown')));
-        return;
-      }
-
       if (_passwordController.text != _confirmPasswordController.text) {
         ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Passwords do not match')));
+        return;
+      }
+
+      if (!_acceptedPolicies || !_isAdultConfirmed) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Please confirm the required policies and 18+ age requirement.',
+            ),
+          ),
+        );
         return;
       }
 
@@ -60,17 +69,6 @@ class _SignupScreenState extends State<SignupScreen> {
 
       try {
         final supabase = Supabase.instance.client;
-
-        // 1. Check if this church is already registered in Supabase
-        final churchQuery = await supabase
-            .from('churches')
-            .select('id')
-            .eq('placeId', _selectedChurchId!)
-            .maybeSingle();
-
-        final bool churchExists = churchQuery != null;
-        final String accountState =
-            churchExists ? 'active' : 'awaiting_church_signup';
 
         // 2. Create User in Supabase Auth
         final AuthResponse res = await AuthFlowService.signUpWithEmail(
@@ -80,11 +78,21 @@ class _SignupScreenState extends State<SignupScreen> {
             'full_name': _nameController.text.trim(),
             'phone': _phoneController.text.trim(),
             'phoneNumber': _phoneController.text.trim(),
-            'placeId': _selectedChurchId!,
-            'placeName': _selectedChurchName,
+            'requestedChurchId': _selectedChurchId,
+            'requestedChurchName': _selectedChurchName,
             'roles': ['Member'],
-            'accountState': accountState,
+            'accountState': 'active',
             'joinDate': DateTime.now().toIso8601String(),
+            'acceptedPolicyKeys': [
+              'terms',
+              'privacy',
+              'community_guidelines',
+              'age_policy',
+            ],
+            'legalDocumentVersion': _legalDocumentVersion,
+            'legalAcceptedAt': DateTime.now().toIso8601String(),
+            'legalAcceptanceSource': 'flutter_signup',
+            'isAdultConfirmed': _isAdultConfirmed,
           },
         );
 
@@ -97,14 +105,14 @@ class _SignupScreenState extends State<SignupScreen> {
             email: user.email ?? '',
             fullName: _nameController.text.trim(),
             phoneNumber: _phoneController.text.trim(),
-            placeId: _selectedChurchId!,
-            placeName: _selectedChurchName,
+            placeId: '',
+            placeName: '',
             roles: ['Member'],
             joinDate: DateTime.now(),
             photoUrl: '', // Will be added in CompleteProfileScreen
             bio: '', // Will be added in CompleteProfileScreen
             isDeveloper: false,
-            accountState: accountState,
+            accountState: 'active',
           );
 
           try {
@@ -122,7 +130,7 @@ class _SignupScreenState extends State<SignupScreen> {
         await _showVerificationDialog(
           title: 'Account Created!',
           message:
-              'Welcome, ${_nameController.text.trim()}!\n\nA verification link has been sent to ${_emailController.text.trim()}.\n\nPlease check your inbox AND Spam/Junk folder to verify your account before logging in.',
+              'Welcome, ${_nameController.text.trim()}!\n\nA verification link has been sent to ${_emailController.text.trim()}.\n\nAfter verifying your email, you can submit a church membership request for approval.',
         );
       } on AuthException catch (e) {
         if (mounted) {
@@ -261,7 +269,7 @@ class _SignupScreenState extends State<SignupScreen> {
                           keyboardType: TextInputType.emailAddress),
                       const SizedBox(height: 16),
 
-                      // Church search — searches local list + Supabase, no Firestore
+                      // Church search only returns approved public churches.
                       TypeAheadField<Map<String, String>>(
                         controller: _churchSearchController,
                         builder: (context, controller, focusNode) {
@@ -303,7 +311,7 @@ class _SignupScreenState extends State<SignupScreen> {
                         emptyBuilder: (context) => const Padding(
                           padding: EdgeInsets.all(16.0),
                           child: Text(
-                              'Church not found. Try a different spelling or register a new church below.'),
+                              'No approved churches match that search. You can still create an account and request a church later.'),
                         ),
                       ),
 
@@ -333,6 +341,60 @@ class _SignupScreenState extends State<SignupScreen> {
                                   _obscureConfirmPassword =
                                       !_obscureConfirmPassword))),
 
+                      const SizedBox(height: 16),
+
+                      CheckboxListTile(
+                        value: _acceptedPolicies,
+                        onChanged: (value) => setState(
+                          () => _acceptedPolicies = value ?? false,
+                        ),
+                        contentPadding: EdgeInsets.zero,
+                        controlAffinity: ListTileControlAffinity.leading,
+                        title: Wrap(
+                          spacing: 4,
+                          runSpacing: 4,
+                          children: [
+                            const Text('I accept the'),
+                            _LegalLink(
+                              label: 'Terms',
+                              routeName: '/settings/terms',
+                            ),
+                            const Text(','),
+                            _LegalLink(
+                              label: 'Privacy Policy',
+                              routeName: '/settings/privacy_policy',
+                            ),
+                            const Text(', and'),
+                            _LegalLink(
+                              label: 'Community Guidelines',
+                              routeName: '/settings/community_guidelines',
+                            ),
+                            const Text('.'),
+                          ],
+                        ),
+                      ),
+                      CheckboxListTile(
+                        value: _isAdultConfirmed,
+                        onChanged: (value) => setState(
+                          () => _isAdultConfirmed = value ?? false,
+                        ),
+                        contentPadding: EdgeInsets.zero,
+                        controlAffinity: ListTileControlAffinity.leading,
+                        title: Wrap(
+                          spacing: 4,
+                          runSpacing: 4,
+                          children: [
+                            const Text(
+                                'I confirm I am 18 or older and accept the'),
+                            _LegalLink(
+                              label: '18+ Age Policy',
+                              routeName: '/settings/age_policy',
+                            ),
+                            const Text('.'),
+                          ],
+                        ),
+                      ),
+
                       const SizedBox(height: 24),
 
                       AppButton(
@@ -358,6 +420,31 @@ class _SignupScreenState extends State<SignupScreen> {
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LegalLink extends StatelessWidget {
+  const _LegalLink({
+    required this.label,
+    required this.routeName,
+  });
+
+  final String label;
+  final String routeName;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: () => Navigator.pushNamed(context, routeName),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: Theme.of(context).colorScheme.primary,
+          decoration: TextDecoration.underline,
+          fontWeight: FontWeight.w600,
         ),
       ),
     );

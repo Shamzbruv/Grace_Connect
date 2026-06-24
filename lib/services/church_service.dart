@@ -36,14 +36,14 @@ class ChurchService {
   Future<List<String>> fetchDenominations() async {
     try {
       final rows = await _supabase
-          .from('churches')
-          .select('denomination')
-          .order('denomination')
+          .from('denominations')
+          .select('display_name')
+          .eq('is_active', true)
+          .order('sort_order')
           .limit(200);
       return rows
-          .map<String>((row) => (row['denomination'] ?? '').toString().trim())
+          .map<String>((row) => (row['display_name'] ?? '').toString().trim())
           .where((denomination) => denomination.isNotEmpty)
-          .toSet()
           .toList()
         ..sort();
     } catch (error) {
@@ -58,7 +58,11 @@ class ChurchService {
     int limit = 50,
   }) async {
     try {
-      var builder = _supabase.from('churches').select();
+      var builder = _supabase
+          .from('churches')
+          .select()
+          .eq('church_status', 'approved')
+          .eq('public_visibility', true);
 
       final cleanDenomination = denomination?.trim();
       if (cleanDenomination != null && cleanDenomination.isNotEmpty) {
@@ -110,148 +114,38 @@ class ChurchService {
         .eq('churchId', churchId);
   }
 
-  // --- Smart Church Search ---
-  // Searches the local initial churches list (always available, no network needed)
-  // PLUS any churches registered via the church signup screen in Supabase.
+  // --- Approved Church Search ---
+  // Only server-approved, public churches are joinable. The local starter list is
+  // deliberately excluded from membership search.
 
-  static int _levenshteinDistance(String s, String t) {
-    if (s == t) return 0;
-    if (s.isEmpty) return t.length;
-    if (t.isEmpty) return s.length;
-
-    List<int> v0 = List<int>.generate(t.length + 1, (i) => i);
-    List<int> v1 = List<int>.filled(t.length + 1, 0);
-
-    for (int i = 0; i < s.length; i++) {
-      v1[0] = i + 1;
-      for (int j = 0; j < t.length; j++) {
-        int cost = (s[i] == t[j]) ? 0 : 1;
-        v1[j + 1] = [
-          v1[j] + 1,
-          v0[j + 1] + 1,
-          v0[j] + cost,
-        ].reduce((a, b) => a < b ? a : b);
-      }
-      for (int j = 0; j < v0.length; j++) {
-        v0[j] = v1[j];
-      }
-    }
-    return v1[t.length];
-  }
-
-  /// Scores a church name against the search query.
-  /// Returns a score (lower = better match) or 1000 if no match.
-  static int _scoreMatch(String name, String address, String searchLower,
-      List<String> searchWords) {
-    final nameLower = name.toLowerCase();
-    final addressLower = address.toLowerCase();
-
-    if (nameLower == searchLower) return 0;
-    if (nameLower.startsWith(searchLower)) return 10;
-    if (nameLower.contains(searchLower)) return 20;
-
-    // Fuzzy word-by-word matching
-    final nameWords = nameLower.split(' ').where((w) => w.isNotEmpty).toList();
-    int totalDistance = 0;
-    int matchedWords = 0;
-
-    for (String searchWord in searchWords) {
-      int bestWordDist = 1000;
-      for (String nameWord in nameWords) {
-        int dist = _levenshteinDistance(searchWord, nameWord);
-        int allowedTypos = (searchWord.length / 4).ceil().clamp(1, 2);
-        if (dist <= allowedTypos) {
-          if (dist < bestWordDist) bestWordDist = dist;
-        } else if (nameWord.startsWith(searchWord)) {
-          bestWordDist = 0;
-        }
-      }
-      if (bestWordDist != 1000) {
-        totalDistance += bestWordDist;
-        matchedWords++;
-      }
-    }
-
-    if (matchedWords > 0 && matchedWords >= (searchWords.length / 2).floor()) {
-      return 30 + totalDistance;
-    }
-
-    // Fallback: check address
-    if (addressLower.contains(searchLower)) return 40;
-
-    return 1000; // No match
-  }
-
-  /// Searches both the local initial churches list AND Supabase-registered churches.
-  /// The local list always works — no Firestore permission issues.
+  /// Searches the approved public church directory.
   static Future<List<Map<String, String>>> searchChurches(String query) async {
     if (query.trim().isEmpty) return [];
 
-    final searchLower = query.trim().toLowerCase();
-    final searchWords =
-        searchLower.split(' ').where((w) => w.isNotEmpty).toList();
-
-    List<Map<String, dynamic>> scoredResults = [];
-    final Set<String> addedNames = {}; // Prevent duplicates
-
-    // 1. Search local initial churches list (always available, instant, no network)
-    for (final churchName in initialChurches) {
-      final score =
-          _scoreMatch(churchName, 'Jamaica', searchLower, searchWords);
-      if (score < 1000) {
-        scoredResults.add({
-          'score': score,
-          'id': 'local_${churchName.replaceAll(' ', '_').toLowerCase()}',
-          'name': churchName,
-          'address': 'Jamaica',
-        });
-        addedNames.add(churchName.toLowerCase());
-      }
-    }
-
-    // 2. Also search Supabase-registered churches (user-created via church signup)
     try {
-      final response = await Supabase.instance.client
-          .from('churches')
-          .select('id, name, address, placeId');
+      final response = await Supabase.instance.client.rpc(
+        'get_public_church_directory',
+        params: {'search_query': query.trim()},
+      );
 
-      for (final row in (response as List)) {
-        final name = (row['name'] as String?) ?? '';
-        final address = (row['address'] as String?) ?? 'Jamaica';
-        final id = (row['placeId'] as String?) ?? (row['id'] as String?) ?? '';
-
-        if (addedNames.contains(name.toLowerCase())) {
-          continue; // Skip duplicates
-        }
-
-        final score = _scoreMatch(name, address, searchLower, searchWords);
-        if (score < 1000) {
-          scoredResults.add({
-            'score': score,
-            'id': id,
-            'name': name,
-            'address': address,
-          });
-          addedNames.add(name.toLowerCase());
-        }
-      }
+      final rows = response is List ? response : const [];
+      return rows.take(10).map<Map<String, String>>((row) {
+        final data = Map<String, dynamic>.from(row as Map);
+        return {
+          'id': (data['placeId'] ?? data['id'] ?? '').toString(),
+          'name': (data['name'] ?? '').toString(),
+          'address': [
+            (data['address'] ?? '').toString(),
+            (data['parish'] ?? '').toString(),
+          ].where((value) => value.trim().isNotEmpty).join(', '),
+        };
+      }).where((row) {
+        return row['id']!.isNotEmpty && row['name']!.isNotEmpty;
+      }).toList();
     } catch (e) {
-      // Supabase query failed — local results still show, so this is non-fatal
-      debugPrint('Supabase church search error: $e');
+      debugPrint('Approved church search error: $e');
+      return const [];
     }
-
-    // Sort by score (best first) and return top 10
-    scoredResults
-        .sort((a, b) => (a['score'] as int).compareTo(b['score'] as int));
-
-    return scoredResults
-        .take(10)
-        .map((item) => {
-              'id': item['id'] as String,
-              'name': item['name'] as String,
-              'address': item['address'] as String,
-            })
-        .toList();
   }
 
   // Check if a church name already exists in Supabase

@@ -5,10 +5,13 @@ import 'package:flutter/foundation.dart';
 class EmailService {
   static const String _fromEmail = String.fromEnvironment(
     'RESEND_FROM_EMAIL',
-    defaultValue: 'Grace Connect <onboarding@resend.dev>',
+    defaultValue: 'Grace Connect <noreply@graceconnect.love>',
   );
   static const String supportInbox = 'shamzbiz1@gmail.com';
-  static const String _resendApiKey = 're_aKtyyYHD_6QCTGajCE5BC1RPmZbYUkodV';
+  static const String _resendApiKey = String.fromEnvironment(
+    'RESEND_API_KEY',
+    defaultValue: '',
+  );
   static const String _apiUrl = 'https://api.resend.com/emails';
 
   /// Core method to send an email via Resend API
@@ -19,6 +22,12 @@ class EmailService {
     String? from,
   }) async {
     try {
+      if (_resendApiKey.isEmpty) {
+        throw Exception(
+          'Missing RESEND_API_KEY. Build or run the app with --dart-define=RESEND_API_KEY.',
+        );
+      }
+
       final response = await http.post(
         Uri.parse(_apiUrl),
         headers: {
