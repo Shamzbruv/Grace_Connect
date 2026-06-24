@@ -137,6 +137,32 @@ class _FindChurchScreenState extends State<FindChurchScreen> {
   String? _selectedChurchName;
   bool _isLoading = false;
 
+  List<Map<String, dynamic>> _requiredPolicies = [];
+  bool _acceptedTerms = false;
+  bool _acceptedLocation = false;
+  bool _acceptedData = false;
+  bool _isAdultConfirmed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPolicies();
+  }
+
+  Future<void> _loadPolicies() async {
+    try {
+      final policies =
+          await MembershipService().getRequiredPolicies('member_signup');
+      if (mounted) {
+        setState(() {
+          _requiredPolicies = policies;
+        });
+      }
+    } catch (e) {
+      debugPrint('Failed to load required policies: $e');
+    }
+  }
+
   @override
   void dispose() {
     _churchSearchController.dispose();
@@ -144,19 +170,39 @@ class _FindChurchScreenState extends State<FindChurchScreen> {
     super.dispose();
   }
 
+  bool get _canSubmit {
+    return _selectedChurchId != null &&
+        _selectedChurchId!.isNotEmpty &&
+        _acceptedTerms &&
+        _acceptedLocation &&
+        _acceptedData &&
+        _isAdultConfirmed;
+  }
+
   Future<void> _submitRequest() async {
-    final churchId = _selectedChurchId;
-    if (churchId == null || churchId.isEmpty) {
+    if (!_canSubmit) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Select an approved church first.')),
+        const SnackBar(
+            content: Text(
+                'Please select a church and accept all required policies.')),
       );
       return;
     }
 
     setState(() => _isLoading = true);
     try {
-      await MembershipService().requestMembership(
-        churchId: churchId,
+      final service = MembershipService();
+      await service.acceptPolicies(
+        _requiredPolicies,
+        source: 'flutter_church_request',
+        metadata: {
+          'isAdultConfirmed': _isAdultConfirmed,
+          'locationNoticeAccepted': _acceptedLocation
+        },
+      );
+
+      await service.requestMembership(
+        churchId: _selectedChurchId!,
         message: _messageController.text.trim(),
       );
       if (!mounted) return;
@@ -172,6 +218,22 @@ class _FindChurchScreenState extends State<FindChurchScreen> {
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  Widget _buildPolicyLink(String text, String url) {
+    return InkWell(
+      onTap: () {
+        // Implement URL launch logic here (e.g., using url_launcher)
+        // For now, simple text
+      },
+      child: Text(
+        text,
+        style: TextStyle(
+          color: Theme.of(context).colorScheme.primary,
+          decoration: TextDecoration.underline,
+        ),
+      ),
+    );
   }
 
   @override
@@ -267,12 +329,81 @@ class _FindChurchScreenState extends State<FindChurchScreen> {
                       ),
                     ),
                   ),
+                  if (_requiredPolicies.isNotEmpty) ...[
+                    const SizedBox(height: 24),
+                    const Divider(),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Required Policies & Consents',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 8),
+                    CheckboxListTile(
+                      value: _acceptedTerms,
+                      onChanged: (val) =>
+                          setState(() => _acceptedTerms = val ?? false),
+                      title: Wrap(
+                        children: [
+                          const Text('I accept the '),
+                          _buildPolicyLink('Terms', 'terms.html'),
+                          const Text(', '),
+                          _buildPolicyLink('Privacy Policy', 'privacy.html'),
+                          const Text(', '),
+                          _buildPolicyLink(
+                              'Community Guidelines', 'community.html'),
+                          const Text(', and '),
+                          _buildPolicyLink('Age Policy', 'age.html'),
+                          const Text('.'),
+                        ],
+                      ),
+                      controlAffinity: ListTileControlAffinity.leading,
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                    CheckboxListTile(
+                      value: _acceptedLocation,
+                      onChanged: (val) =>
+                          setState(() => _acceptedLocation = val ?? false),
+                      title: Wrap(
+                        children: [
+                          const Text('I accept the '),
+                          _buildPolicyLink(
+                              'Location Disclosure', 'location.html'),
+                          const Text('.'),
+                        ],
+                      ),
+                      controlAffinity: ListTileControlAffinity.leading,
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                    CheckboxListTile(
+                      value: _acceptedData,
+                      onChanged: (val) =>
+                          setState(() => _acceptedData = val ?? false),
+                      title: Wrap(
+                        children: [
+                          const Text('I accept the '),
+                          _buildPolicyLink('Data Retention', 'data.html'),
+                          const Text('.'),
+                        ],
+                      ),
+                      controlAffinity: ListTileControlAffinity.leading,
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                    CheckboxListTile(
+                      value: _isAdultConfirmed,
+                      onChanged: (val) =>
+                          setState(() => _isAdultConfirmed = val ?? false),
+                      title: const Text('I confirm I am 18 or older.'),
+                      controlAffinity: ListTileControlAffinity.leading,
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                    const SizedBox(height: 16),
+                  ],
                   const SizedBox(height: 24),
                   AppButton(
                     text: 'Request Membership',
                     icon: Icons.send_outlined,
                     isLoading: _isLoading,
-                    onPressed: _submitRequest,
+                    onPressed: _canSubmit ? _submitRequest : null,
                   ),
                   const SizedBox(height: 12),
                   TextButton(

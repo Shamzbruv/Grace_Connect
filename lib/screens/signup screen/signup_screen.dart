@@ -33,8 +33,6 @@ class _SignupScreenState extends State<SignupScreen> {
   bool _acceptedPolicies = false;
   bool _isAdultConfirmed = false;
 
-  static const String _legalDocumentVersion = '2026-06-24';
-
   @override
   void dispose() {
     _nameController.dispose();

@@ -73,25 +73,28 @@ class MembershipService {
 
   final SupabaseClient _client;
 
-  static const String _legalDocumentVersion = '2026-06-24';
+  Future<List<Map<String, dynamic>>> getRequiredPolicies(String flowType) async {
+    final response = await _client.rpc(
+      'get_active_policy_documents',
+      params: {'p_flow_type': flowType},
+    );
+    if (response is List) {
+      return List<Map<String, dynamic>>.from(response);
+    }
+    return [];
+  }
 
-  /// Accept all required policies for church membership.
-  /// Must be called before requestMembership().
-  Future<void> acceptRequiredMemberPolicies() async {
-    const requiredKeys = [
-      'terms',
-      'privacy',
-      'community_guidelines',
-      'age_policy',
-      'location_disclosure',
-    ];
-
-    for (final key in requiredKeys) {
+  Future<void> acceptPolicies(
+    List<Map<String, dynamic>> policies, {
+    required String source,
+    Map<String, dynamic> metadata = const {},
+  }) async {
+    for (final policy in policies) {
       await _client.rpc('accept_policy_document', params: {
-        'target_document_key': key,
-        'target_document_version': _legalDocumentVersion,
-        'acceptance_source': 'flutter_signup',
-        'metadata': {'isAdultConfirmed': true, 'locationNoticeAccepted': true},
+        'target_document_key': policy['document_key'],
+        'target_document_version': policy['document_version'],
+        'acceptance_source': source,
+        'metadata': metadata,
       });
     }
   }
@@ -138,10 +141,6 @@ class MembershipService {
     required String churchId,
     String? message,
   }) async {
-    // Accept all required policies before submitting the request.
-    // The server will reject if these are missing or outdated.
-    await acceptRequiredMemberPolicies();
-
     await _client.rpc(
       'request_church_membership',
       params: {
