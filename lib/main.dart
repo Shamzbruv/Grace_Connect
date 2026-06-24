@@ -26,6 +26,7 @@ import 'screens/login screen/login_screen.dart';
 import 'screens/login screen/auth_callback_screen.dart';
 import 'screens/login screen/forgot_password_screen.dart';
 import 'screens/login screen/reset_password_screen.dart';
+import 'screens/membership/membership_gate_screen.dart';
 import 'screens/signup screen/signup_screen.dart';
 import 'screens/signup screen/church_signup_screen.dart';
 import 'screens/signup screen/complete_profile_screen.dart';
@@ -406,7 +407,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
           // immediately so relaunching the app does not wait forever for a
           // fresh auth stream event.
           if (AuthFlowService.isConfirmedUser(supabaseUser)) {
-            return const MainTabsScreen();
+            return const MembershipGate(child: MainTabsScreen());
           }
 
           if (snapshot.connectionState == ConnectionState.waiting) {

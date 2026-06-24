@@ -44,12 +44,6 @@ class _SignupScreenState extends State<SignupScreen> {
 
   Future<void> _handleSignup() async {
     if (_formKey.currentState!.validate()) {
-      if (_selectedChurchId == null) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Please select a church from the dropdown')));
-        return;
-      }
-
       if (_passwordController.text != _confirmPasswordController.text) {
         ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Passwords do not match')));
@@ -61,17 +55,6 @@ class _SignupScreenState extends State<SignupScreen> {
       try {
         final supabase = Supabase.instance.client;
 
-        // 1. Check if this church is already registered in Supabase
-        final churchQuery = await supabase
-            .from('churches')
-            .select('id')
-            .eq('placeId', _selectedChurchId!)
-            .maybeSingle();
-
-        final bool churchExists = churchQuery != null;
-        final String accountState =
-            churchExists ? 'active' : 'awaiting_church_signup';
-
         // 2. Create User in Supabase Auth
         final AuthResponse res = await AuthFlowService.signUpWithEmail(
           email: _emailController.text.trim(),
@@ -80,10 +63,10 @@ class _SignupScreenState extends State<SignupScreen> {
             'full_name': _nameController.text.trim(),
             'phone': _phoneController.text.trim(),
             'phoneNumber': _phoneController.text.trim(),
-            'placeId': _selectedChurchId!,
-            'placeName': _selectedChurchName,
+            'requestedChurchId': _selectedChurchId,
+            'requestedChurchName': _selectedChurchName,
             'roles': ['Member'],
-            'accountState': accountState,
+            'accountState': 'active',
             'joinDate': DateTime.now().toIso8601String(),
           },
         );
@@ -97,14 +80,14 @@ class _SignupScreenState extends State<SignupScreen> {
             email: user.email ?? '',
             fullName: _nameController.text.trim(),
             phoneNumber: _phoneController.text.trim(),
-            placeId: _selectedChurchId!,
-            placeName: _selectedChurchName,
+            placeId: '',
+            placeName: '',
             roles: ['Member'],
             joinDate: DateTime.now(),
             photoUrl: '', // Will be added in CompleteProfileScreen
             bio: '', // Will be added in CompleteProfileScreen
             isDeveloper: false,
-            accountState: accountState,
+            accountState: 'active',
           );
 
           try {
@@ -122,7 +105,7 @@ class _SignupScreenState extends State<SignupScreen> {
         await _showVerificationDialog(
           title: 'Account Created!',
           message:
-              'Welcome, ${_nameController.text.trim()}!\n\nA verification link has been sent to ${_emailController.text.trim()}.\n\nPlease check your inbox AND Spam/Junk folder to verify your account before logging in.',
+              'Welcome, ${_nameController.text.trim()}!\n\nA verification link has been sent to ${_emailController.text.trim()}.\n\nAfter verifying your email, you can submit a church membership request for approval.',
         );
       } on AuthException catch (e) {
         if (mounted) {
@@ -261,7 +244,7 @@ class _SignupScreenState extends State<SignupScreen> {
                           keyboardType: TextInputType.emailAddress),
                       const SizedBox(height: 16),
 
-                      // Church search — searches local list + Supabase, no Firestore
+                      // Church search only returns approved public churches.
                       TypeAheadField<Map<String, String>>(
                         controller: _churchSearchController,
                         builder: (context, controller, focusNode) {
@@ -303,7 +286,7 @@ class _SignupScreenState extends State<SignupScreen> {
                         emptyBuilder: (context) => const Padding(
                           padding: EdgeInsets.all(16.0),
                           child: Text(
-                              'Church not found. Try a different spelling or register a new church below.'),
+                              'No approved churches match that search. You can still create an account and request a church later.'),
                         ),
                       ),
 

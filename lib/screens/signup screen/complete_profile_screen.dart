@@ -7,6 +7,7 @@ import 'package:flutter_typeahead/flutter_typeahead.dart';
 import '../../models/user_profile.dart'; // Ensure this model exists
 import '../../providers/user_role_provider.dart';
 import '../../services/church_service.dart';
+import '../../services/membership_service.dart';
 import '../../services/profile_service.dart';
 import '../../utils/profile_photo_picker.dart';
 import '../../widgets/app_scaffold.dart';
@@ -73,17 +74,6 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
               .uploadProfilePhotoBytes(_imageBytes!, _imageName!);
         }
 
-        final placeId = _selectedChurchId ??
-            _stringValue(existingData, metadata, const ['placeId', 'churchId']);
-        final placeName = _selectedChurchName.isNotEmpty
-            ? _selectedChurchName
-            : _stringValue(
-                existingData, metadata, const ['placeName', 'churchName']);
-
-        if (placeId.isEmpty) {
-          throw Exception('Please select your church before completing setup.');
-        }
-
         final profileData = {
           'id': user.id,
           'uid': user.id,
@@ -92,24 +82,31 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
               existingData, metadata, const ['fullName', 'full_name', 'name']),
           'phone': _stringValue(
               existingData, metadata, const ['phone', 'phoneNumber']),
-          'placeId': placeId,
-          'placeName': placeName,
-          'roles': _rolesValue(existingData?['roles'] ?? metadata['roles']),
+          'placeId': '',
+          'placeName': '',
+          'roles': const ['Member'],
           'joinDate': existingData?['joinDate'] ??
               metadata['joinDate'] ??
               DateTime.now().toIso8601String(),
           'photoUrl': finalPhotoUrl,
           'bio': _bioController.text.trim(),
           'isDeveloper': existingData?['isDeveloper'] ?? false,
-          'accountState': existingData?['accountState'] ??
-              metadata['accountState'] ??
-              'active',
+          'accountState': 'active',
         };
 
         // 2. Update Supabase users table with all details
         await Supabase.instance.client
             .from('users')
             .upsert(profileData, onConflict: 'uid');
+
+        if (_selectedChurchId != null) {
+          await MembershipService().requestMembership(
+            churchId: _selectedChurchId!,
+            message: _selectedChurchName.isEmpty
+                ? 'Requested while completing profile.'
+                : 'Requested to join $_selectedChurchName while completing profile.',
+          );
+        }
 
         // Construct full UserProfile to update provider
         final updatedData = await Supabase.instance.client
@@ -125,7 +122,8 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
               Provider.of<UserRoleProvider>(context, listen: false);
           roleProvider.setUserProfile(userProfile);
 
-          // Head to dashboard
+          // Head to the protected route gate. Active members will enter the
+          // dashboard; pending or unaffiliated users see the correct status.
           Navigator.of(context)
               .pushNamedAndRemoveUntil('/dashboard', (route) => false);
         }
@@ -152,22 +150,6 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
     return '';
   }
 
-  List<String> _rolesValue(dynamic value) {
-    if (value is List) {
-      final roles = value
-          .map((role) => role.toString())
-          .where((role) => role.trim().isNotEmpty)
-          .toList();
-      if (roles.isNotEmpty) return roles;
-    }
-
-    if (value is String && value.trim().isNotEmpty) {
-      return [value.trim()];
-    }
-
-    return const ['Member'];
-  }
-
   @override
   Widget build(BuildContext context) {
     return AppScaffold(
@@ -192,7 +174,7 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Add a short bio to tell others about yourself.',
+                  'Add your profile details. Church access starts after a leader approves your membership request.',
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
@@ -253,7 +235,7 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
                             focusNode: focusNode,
                             decoration: const InputDecoration(
                               labelText: 'Church',
-                              hintText: 'Search and select your church',
+                              hintText: 'Optional: request to join a church',
                               prefixIcon: Icon(Icons.church_outlined),
                               border: OutlineInputBorder(
                                 borderRadius:
@@ -286,7 +268,8 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
                         },
                         emptyBuilder: (context) => const Padding(
                           padding: EdgeInsets.all(16),
-                          child: Text('No matching churches found.'),
+                          child:
+                              Text('No approved churches match that search.'),
                         ),
                       ),
                       const SizedBox(height: 16),

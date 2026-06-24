@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../screens/login screen/login_screen.dart';
+import '../screens/membership/membership_gate_screen.dart';
 import '../services/auth_flow_service.dart';
 
 class AuthRequired extends StatelessWidget {
@@ -34,7 +35,7 @@ class AuthRequired extends StatelessWidget {
             return const LoginScreen();
           }
 
-          return child;
+          return MembershipGate(child: child);
         } catch (error) {
           debugPrint(
               'Failed to read Supabase auth state, falling back to login: $error');
