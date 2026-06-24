@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 class AppButton extends StatelessWidget {
   final String text;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
   final bool isLoading;
   final IconData? icon;
   final bool isSecondary;
@@ -24,7 +24,7 @@ class AppButton extends StatelessWidget {
       width: isFullWidth ? double.infinity : null,
       height: 50,
       child: ElevatedButton(
-        onPressed: isLoading ? null : onPressed,
+        onPressed: (isLoading || onPressed == null) ? null : onPressed,
         style: ElevatedButton.styleFrom(
           backgroundColor: isSecondary 
               ? Theme.of(context).colorScheme.surface 

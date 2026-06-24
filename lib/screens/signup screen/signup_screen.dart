@@ -30,8 +30,6 @@ class _SignupScreenState extends State<SignupScreen> {
   bool _isLoading = false;
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
-  bool _acceptedPolicies = false;
-  bool _isAdultConfirmed = false;
 
   @override
   void dispose() {
@@ -49,17 +47,6 @@ class _SignupScreenState extends State<SignupScreen> {
       if (_passwordController.text != _confirmPasswordController.text) {
         ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Passwords do not match')));
-        return;
-      }
-
-      if (!_acceptedPolicies || !_isAdultConfirmed) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Please confirm the required policies and 18+ age requirement.',
-            ),
-          ),
-        );
         return;
       }
 
@@ -327,57 +314,7 @@ class _SignupScreenState extends State<SignupScreen> {
 
                       const SizedBox(height: 16),
 
-                      CheckboxListTile(
-                        value: _acceptedPolicies,
-                        onChanged: (value) => setState(
-                          () => _acceptedPolicies = value ?? false,
-                        ),
-                        contentPadding: EdgeInsets.zero,
-                        controlAffinity: ListTileControlAffinity.leading,
-                        title: Wrap(
-                          spacing: 4,
-                          runSpacing: 4,
-                          children: [
-                            const Text('I accept the'),
-                            _LegalLink(
-                              label: 'Terms',
-                              routeName: '/settings/terms',
-                            ),
-                            const Text(','),
-                            _LegalLink(
-                              label: 'Privacy Policy',
-                              routeName: '/settings/privacy_policy',
-                            ),
-                            const Text(', and'),
-                            _LegalLink(
-                              label: 'Community Guidelines',
-                              routeName: '/settings/community_guidelines',
-                            ),
-                            const Text('.'),
-                          ],
-                        ),
-                      ),
-                      CheckboxListTile(
-                        value: _isAdultConfirmed,
-                        onChanged: (value) => setState(
-                          () => _isAdultConfirmed = value ?? false,
-                        ),
-                        contentPadding: EdgeInsets.zero,
-                        controlAffinity: ListTileControlAffinity.leading,
-                        title: Wrap(
-                          spacing: 4,
-                          runSpacing: 4,
-                          children: [
-                            const Text(
-                                'I confirm I am 18 or older and accept the'),
-                            _LegalLink(
-                              label: '18+ Age Policy',
-                              routeName: '/settings/age_policy',
-                            ),
-                            const Text('.'),
-                          ],
-                        ),
-                      ),
+                      const SizedBox(height: 16),
 
                       const SizedBox(height: 24),
 

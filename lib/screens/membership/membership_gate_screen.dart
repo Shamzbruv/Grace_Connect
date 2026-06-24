@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_typeahead/flutter_typeahead.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../services/church_service.dart';
 import '../../services/membership_service.dart';
@@ -138,10 +139,7 @@ class _FindChurchScreenState extends State<FindChurchScreen> {
   bool _isLoading = false;
 
   List<Map<String, dynamic>> _requiredPolicies = [];
-  bool _acceptedTerms = false;
-  bool _acceptedLocation = false;
-  bool _acceptedData = false;
-  bool _isAdultConfirmed = false;
+  Map<String, bool> _acceptedPolicies = {};
 
   @override
   void initState() {
@@ -156,6 +154,9 @@ class _FindChurchScreenState extends State<FindChurchScreen> {
       if (mounted) {
         setState(() {
           _requiredPolicies = policies;
+          for (var p in policies) {
+            _acceptedPolicies[p['document_key'] as String] = false;
+          }
         });
       }
     } catch (e) {
@@ -171,12 +172,14 @@ class _FindChurchScreenState extends State<FindChurchScreen> {
   }
 
   bool get _canSubmit {
-    return _selectedChurchId != null &&
-        _selectedChurchId!.isNotEmpty &&
-        _acceptedTerms &&
-        _acceptedLocation &&
-        _acceptedData &&
-        _isAdultConfirmed;
+    if (_selectedChurchId == null || _selectedChurchId!.isEmpty) return false;
+    if (_requiredPolicies.isEmpty) return false; // Must have policies to accept
+    for (var p in _requiredPolicies) {
+      if (_acceptedPolicies[p['document_key'] as String] != true) {
+        return false;
+      }
+    }
+    return true;
   }
 
   Future<void> _submitRequest() async {
@@ -196,8 +199,8 @@ class _FindChurchScreenState extends State<FindChurchScreen> {
         _requiredPolicies,
         source: 'flutter_church_request',
         metadata: {
-          'isAdultConfirmed': _isAdultConfirmed,
-          'locationNoticeAccepted': _acceptedLocation
+          'isAdultConfirmed': _acceptedPolicies['age_policy'] == true,
+          'locationNoticeAccepted': _acceptedPolicies['location_disclosure'] == true
         },
       );
 
@@ -220,11 +223,14 @@ class _FindChurchScreenState extends State<FindChurchScreen> {
     }
   }
 
-  Widget _buildPolicyLink(String text, String url) {
+  Widget _buildPolicyLink(String text, String? url) {
     return InkWell(
-      onTap: () {
-        // Implement URL launch logic here (e.g., using url_launcher)
-        // For now, simple text
+      onTap: () async {
+        if (url == null || url.isEmpty) return;
+        final uri = Uri.parse('https://www.graceconnect.love/$url');
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(uri);
+        }
       },
       child: Text(
         text,
@@ -338,64 +344,27 @@ class _FindChurchScreenState extends State<FindChurchScreen> {
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                     const SizedBox(height: 8),
-                    CheckboxListTile(
-                      value: _acceptedTerms,
-                      onChanged: (val) =>
-                          setState(() => _acceptedTerms = val ?? false),
-                      title: Wrap(
-                        children: [
-                          const Text('I accept the '),
-                          _buildPolicyLink('Terms', 'terms.html'),
-                          const Text(', '),
-                          _buildPolicyLink('Privacy Policy', 'privacy.html'),
-                          const Text(', '),
-                          _buildPolicyLink(
-                              'Community Guidelines', 'community.html'),
-                          const Text(', and '),
-                          _buildPolicyLink('Age Policy', 'age.html'),
-                          const Text('.'),
-                        ],
-                      ),
-                      controlAffinity: ListTileControlAffinity.leading,
-                      contentPadding: EdgeInsets.zero,
-                    ),
-                    CheckboxListTile(
-                      value: _acceptedLocation,
-                      onChanged: (val) =>
-                          setState(() => _acceptedLocation = val ?? false),
-                      title: Wrap(
-                        children: [
-                          const Text('I accept the '),
-                          _buildPolicyLink(
-                              'Location Disclosure', 'location.html'),
-                          const Text('.'),
-                        ],
-                      ),
-                      controlAffinity: ListTileControlAffinity.leading,
-                      contentPadding: EdgeInsets.zero,
-                    ),
-                    CheckboxListTile(
-                      value: _acceptedData,
-                      onChanged: (val) =>
-                          setState(() => _acceptedData = val ?? false),
-                      title: Wrap(
-                        children: [
-                          const Text('I accept the '),
-                          _buildPolicyLink('Data Retention', 'data.html'),
-                          const Text('.'),
-                        ],
-                      ),
-                      controlAffinity: ListTileControlAffinity.leading,
-                      contentPadding: EdgeInsets.zero,
-                    ),
-                    CheckboxListTile(
-                      value: _isAdultConfirmed,
-                      onChanged: (val) =>
-                          setState(() => _isAdultConfirmed = val ?? false),
-                      title: const Text('I confirm I am 18 or older.'),
-                      controlAffinity: ListTileControlAffinity.leading,
-                      contentPadding: EdgeInsets.zero,
-                    ),
+                    ..._requiredPolicies.map((policy) {
+                      final key = policy['document_key'] as String;
+                      final title = policy['title'] as String? ?? 'Policy';
+                      final url = policy['content_url'] as String?;
+                      
+                      return CheckboxListTile(
+                        value: _acceptedPolicies[key] ?? false,
+                        onChanged: (val) => setState(() {
+                          _acceptedPolicies[key] = val ?? false;
+                        }),
+                        title: Wrap(
+                          children: [
+                            const Text('I accept the '),
+                            _buildPolicyLink(title, url),
+                            const Text('.'),
+                          ],
+                        ),
+                        controlAffinity: ListTileControlAffinity.leading,
+                        contentPadding: EdgeInsets.zero,
+                      );
+                    }),
                     const SizedBox(height: 16),
                   ],
                   const SizedBox(height: 24),
