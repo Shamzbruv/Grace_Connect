@@ -140,6 +140,7 @@ class _FindChurchScreenState extends State<FindChurchScreen> {
 
   List<Map<String, dynamic>> _requiredPolicies = [];
   Map<String, bool> _acceptedPolicies = {};
+  String? _policyLoadError;
 
   @override
   void initState() {
@@ -154,6 +155,7 @@ class _FindChurchScreenState extends State<FindChurchScreen> {
       if (mounted) {
         setState(() {
           _requiredPolicies = policies;
+          _policyLoadError = null;
           for (var p in policies) {
             _acceptedPolicies[p['document_key'] as String] = false;
           }
@@ -161,6 +163,11 @@ class _FindChurchScreenState extends State<FindChurchScreen> {
       }
     } catch (e) {
       debugPrint('Failed to load required policies: $e');
+      if (mounted) {
+        setState(() {
+          _policyLoadError = 'Failed to load required policies. Please check your connection and try again.';
+        });
+      }
     }
   }
 
@@ -223,13 +230,37 @@ class _FindChurchScreenState extends State<FindChurchScreen> {
     }
   }
 
+  Uri resolvePolicyUrl(String rawUrl) {
+    final uri = Uri.parse(rawUrl);
+
+    if (uri.hasScheme) {
+      if (uri.scheme != 'https') {
+        throw ArgumentError('Only HTTPS policy URLs are allowed.');
+      }
+      return uri;
+    }
+
+    return Uri.https(
+      'www.graceconnect.love',
+      '/${rawUrl.replaceFirst(RegExp(r'^/'), '')}',
+    );
+  }
+
   Widget _buildPolicyLink(String text, String? url) {
     return InkWell(
       onTap: () async {
         if (url == null || url.isEmpty) return;
-        final uri = Uri.parse('https://www.graceconnect.love/$url');
-        if (await canLaunchUrl(uri)) {
-          await launchUrl(uri);
+        try {
+          final uri = resolvePolicyUrl(url);
+          if (await canLaunchUrl(uri)) {
+            await launchUrl(uri);
+          }
+        } catch (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Could not open policy link: $e')),
+            );
+          }
         }
       },
       child: Text(
@@ -335,7 +366,28 @@ class _FindChurchScreenState extends State<FindChurchScreen> {
                       ),
                     ),
                   ),
-                  if (_requiredPolicies.isNotEmpty) ...[
+                  if (_policyLoadError != null) ...[
+                    const SizedBox(height: 24),
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.errorContainer,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.error_outline, color: Theme.of(context).colorScheme.onErrorContainer),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              _policyLoadError!,
+                              style: TextStyle(color: Theme.of(context).colorScheme.onErrorContainer),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ] else if (_requiredPolicies.isNotEmpty) ...[
                     const SizedBox(height: 24),
                     const Divider(),
                     const SizedBox(height: 16),

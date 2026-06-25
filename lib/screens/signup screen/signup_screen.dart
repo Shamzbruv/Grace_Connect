@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:flutter_typeahead/flutter_typeahead.dart';
 import '../../services/auth_flow_service.dart';
-import '../../services/church_service.dart';
 import '../../models/user_profile.dart'; // Needed to save the model
 import '../../widgets/app_scaffold.dart';
 import '../../widgets/app_button.dart';
@@ -23,10 +21,7 @@ class _SignupScreenState extends State<SignupScreen> {
   final _phoneController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
-  final _churchSearchController = TextEditingController();
 
-  String? _selectedChurchId;
-  String _selectedChurchName = '';
   bool _isLoading = false;
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
@@ -38,7 +33,6 @@ class _SignupScreenState extends State<SignupScreen> {
     _phoneController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
-    _churchSearchController.dispose();
     super.dispose();
   }
 
@@ -239,55 +233,6 @@ class _SignupScreenState extends State<SignupScreen> {
                           hint: 'john@example.com',
                           keyboardType: TextInputType.emailAddress),
                       const SizedBox(height: 16),
-
-                      // Church search only returns approved public churches.
-                      TypeAheadField<Map<String, String>>(
-                        controller: _churchSearchController,
-                        builder: (context, controller, focusNode) {
-                          return TextField(
-                            controller: controller,
-                            focusNode: focusNode,
-                            decoration: const InputDecoration(
-                              labelText: 'Find Your Church',
-                              hintText: 'Search by name or address',
-                              prefixIcon: Icon(Icons.search),
-                              border: OutlineInputBorder(
-                                borderRadius:
-                                    BorderRadius.all(Radius.circular(12)),
-                              ),
-                              contentPadding: EdgeInsets.symmetric(
-                                  horizontal: 16, vertical: 16),
-                            ),
-                          );
-                        },
-                        suggestionsCallback: (pattern) async {
-                          return await ChurchService.searchChurches(pattern);
-                        },
-                        itemBuilder: (context, suggestion) {
-                          return ListTile(
-                            leading: Icon(Icons.church,
-                                color: Theme.of(context).colorScheme.primary),
-                            title: Text(suggestion['name']!),
-                            subtitle: Text(suggestion['address']!,
-                                maxLines: 1, overflow: TextOverflow.ellipsis),
-                          );
-                        },
-                        onSelected: (suggestion) {
-                          setState(() {
-                            _selectedChurchId = suggestion['id'];
-                            _selectedChurchName = suggestion['name']!;
-                            _churchSearchController.text = suggestion['name']!;
-                          });
-                        },
-                        emptyBuilder: (context) => const Padding(
-                          padding: EdgeInsets.all(16.0),
-                          child: Text(
-                              'No approved churches match that search. You can still create an account and request a church later.'),
-                        ),
-                      ),
-
-                      const SizedBox(height: 16),
-
                       AppTextField(
                           controller: _passwordController,
                           label: 'Password',
