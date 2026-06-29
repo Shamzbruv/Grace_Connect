@@ -1,4 +1,4 @@
-package com.example.grace_connect
+package love.graceconnect
 
 import io.flutter.embedding.android.FlutterActivity
 

@@ -1,4 +1,13 @@
 require('dotenv').config();
+
+if (process.env.GRACECONNECT_ENABLE_LEGACY_BACKEND !== 'true') {
+  console.error(
+    'The legacy Grace Connect Express/Mongo backend is archived and disabled. ' +
+      'The active app backend is Supabase. Set GRACECONNECT_ENABLE_LEGACY_BACKEND=true only for local archaeology.'
+  );
+  process.exit(1);
+}
+
 const express = require('express');
 const mongoose = require('mongoose');
 const app = express();

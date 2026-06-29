@@ -17,17 +17,5 @@
     },
     "storage": {
         "rules": "storage.rules"
-    },
-    "flutter": {
-        "platforms": {
-            "dart": {
-                "lib/firebase_options.dart": {
-                    "projectId": "graceconnect-9a97c",
-                    "configurations": {
-                        "web": "1:47100126669:web:59899cd353f6bc85a65084"
-                    }
-                }
-            }
-        }
     }
 }

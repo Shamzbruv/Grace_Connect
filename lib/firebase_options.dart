@@ -58,7 +58,7 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions android = FirebaseOptions(
     apiKey: 'AIzaSyDbE9rFDj8htVoaj-XruVHdQNnwqTDvEm0',
-    appId: '1:47100126669:android:a6100cb15fd1a070a65084',
+    appId: '1:47100126669:android:c639ef7425b29bc6a65084',
     messagingSenderId: '47100126669',
     projectId: 'graceconnect-9a97c',
     storageBucket: 'graceconnect-9a97c.firebasestorage.app',

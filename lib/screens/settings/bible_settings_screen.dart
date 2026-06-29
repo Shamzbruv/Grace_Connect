@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../services/bible_service.dart';
+import '../../services/notification_service.dart';
 import '../../widgets/ui/app_scaffold.dart';
 
 class BibleSettingsScreen extends StatefulWidget {
@@ -15,7 +16,7 @@ class _BibleSettingsScreenState extends State<BibleSettingsScreen> {
   String _translation = 'web';
   double _fontSize = 18;
   bool _showVerseNumbers = true;
-  bool _dailyReminder = true;
+  bool _dailyReminder = false;
   bool _isLoading = true;
 
   @override
@@ -31,7 +32,7 @@ class _BibleSettingsScreenState extends State<BibleSettingsScreen> {
       _translation = prefs.getString('bible_translation') ?? 'web';
       _fontSize = prefs.getDouble('bible_font_size') ?? 18;
       _showVerseNumbers = prefs.getBool('bible_show_verse_numbers') ?? true;
-      _dailyReminder = prefs.getBool('notify_devotionals') ?? true;
+      _dailyReminder = prefs.getBool('notify_devotionals') ?? false;
       _isLoading = false;
     });
   }
@@ -117,7 +118,22 @@ class _BibleSettingsScreenState extends State<BibleSettingsScreen> {
                       const Text('Use notification settings for devotionals.'),
                   value: _dailyReminder,
                   contentPadding: EdgeInsets.zero,
-                  onChanged: (value) {
+                  onChanged: (value) async {
+                    if (value) {
+                      final allowed =
+                          await NotificationService().ensurePushPermission();
+                      if (!allowed) {
+                        if (!context.mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Notifications were not enabled on this device.',
+                            ),
+                          ),
+                        );
+                        return;
+                      }
+                    }
                     setState(() => _dailyReminder = value);
                     _saveSetting('notify_devotionals', value);
                   },

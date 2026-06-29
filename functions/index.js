@@ -63,6 +63,19 @@ function normalizePrivilege(privilege) {
     .replace(/[^a-z0-9]+/g, "");
 }
 
+function normalizeNotificationType(type) {
+  return String(type || "general")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, "_");
+}
+
+const PUBLIC_BROADCAST_TYPES = new Set([
+  "announcement",
+  "live_stream",
+  "general",
+]);
+
 function hasAnyPrivilege(profile, allowedPrivileges) {
   const privileges = Array.isArray(profile.appPrivileges) ? profile.appPrivileges : [];
   return privileges.some((privilege) => allowedPrivileges.has(normalizePrivilege(privilege)));
@@ -96,10 +109,7 @@ function canSendChurchWidePush(profile, type) {
 }
 
 function notificationSoundProfile(type) {
-  const normalized = String(type || "general")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9_]+/g, "_");
+  const normalized = normalizeNotificationType(type);
   const profiles = {
     general: { channelId: "grace_default_channel_v1", sound: "grace_default.wav" },
     announcement: { channelId: "grace_default_channel_v1", sound: "grace_default.wav" },
@@ -185,6 +195,7 @@ exports.sendTopicNotification = onRequest({ cors: true }, async (request, respon
 
     const { profile } = await getSupabaseUserProfile(supabaseToken);
     const { title, body, topic, route, type } = request.body || {};
+    const normalizedType = normalizeNotificationType(type);
     const churchTopic = `church_${profile.placeId || ""}`;
 
     if (!title || !body || !topic || topic !== churchTopic) {
@@ -192,12 +203,17 @@ exports.sendTopicNotification = onRequest({ cors: true }, async (request, respon
       return;
     }
 
-    if (!canSendChurchWidePush(profile, type)) {
+    if (!PUBLIC_BROADCAST_TYPES.has(normalizedType)) {
+      response.status(400).json({ error: "Only public church-wide broadcasts can use topic push." });
+      return;
+    }
+
+    if (!canSendChurchWidePush(profile, normalizedType)) {
       response.status(403).json({ error: "User cannot send church-wide push notifications." });
       return;
     }
 
-    const soundProfile = notificationSoundProfile(type);
+    const soundProfile = notificationSoundProfile(normalizedType);
     const messageId = await admin.messaging().send({
       topic,
       notification: {
@@ -218,7 +234,7 @@ exports.sendTopicNotification = onRequest({ cors: true }, async (request, respon
         },
       },
       data: {
-        type: String(type || "announcement"),
+        type: normalizedType,
         route: String(route || "/announcements"),
         click_action: "FLUTTER_NOTIFICATION_CLICK",
       },

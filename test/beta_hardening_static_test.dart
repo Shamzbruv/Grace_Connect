@@ -160,5 +160,61 @@ void main() {
       expect(portalSource, isNot(contains('approve-member')));
       expect(portalSource, isNot(contains('developer_approve_member_request')));
     });
+
+    test('android release identity and permissions are beta-safe', () {
+      final manifest =
+          File('android/app/src/main/AndroidManifest.xml').readAsStringSync();
+      final gradle = File('android/app/build.gradle').readAsStringSync();
+      final activity = File(
+        'android/app/src/main/kotlin/love/graceconnect/MainActivity.kt',
+      ).readAsStringSync();
+
+      expect(gradle, contains('"love.graceconnect"'));
+      expect(gradle, contains('versionCode 14'));
+      expect(gradle, contains('versionName "1.0.13-beta"'));
+      expect(activity, contains('package love.graceconnect'));
+      expect(manifest, contains('love.graceconnect.MainActivity'));
+      expect(manifest, isNot(contains('ACCESS_BACKGROUND_LOCATION')));
+      expect(manifest, isNot(contains('FOREGROUND_SERVICE_LOCATION')));
+    });
+
+    test('push notifications are opt-in and topic broadcasts stay public', () {
+      final serviceSource =
+          File('lib/services/notification_service.dart').readAsStringSync();
+      final settingsSource =
+          File('lib/screens/settings/notification_settings_screen.dart')
+              .readAsStringSync();
+      final functionsSource = File('functions/index.js').readAsStringSync();
+
+      expect(serviceSource,
+          isNot(contains('await _messaging.requestPermission();')));
+      expect(serviceSource, contains('Future<bool> ensurePushPermission()'));
+      expect(
+          serviceSource, contains("churchWidePrefKey = 'notify_church_wide'"));
+      expect(serviceSource, contains("prefs.getBool(prefKey) ?? false"));
+      expect(serviceSource, contains('publicBroadcastTypes'));
+      expect(settingsSource, contains('_churchAnnouncements = false'));
+      expect(settingsSource, contains('ensurePushPermission'));
+      expect(functionsSource, contains('PUBLIC_BROADCAST_TYPES'));
+      expect(functionsSource,
+          contains('Only public church-wide broadcasts can use topic push.'));
+    });
+
+    test('legacy express backend cannot start accidentally', () {
+      final legacySource =
+          File('graceconnect_backend/server.js').readAsStringSync();
+      final legacyReadme =
+          File('graceconnect_backend/README.md').readAsStringSync();
+
+      expect(
+        legacySource,
+        contains("GRACECONNECT_ENABLE_LEGACY_BACKEND !== 'true'"),
+      );
+      expect(legacyReadme, contains('Legacy Backend Archive'));
+      expect(
+        legacyReadme,
+        contains('not part of the active Grace Connect production'),
+      );
+    });
   });
 }

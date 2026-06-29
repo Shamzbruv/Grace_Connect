@@ -49,6 +49,14 @@ class NotificationService {
   static final Uri _topicNotificationEndpoint = Uri.parse(
     'https://us-central1-graceconnect-9a97c.cloudfunctions.net/sendTopicNotification',
   );
+  static const String churchWidePrefKey = 'notify_church_wide';
+
+  @visibleForTesting
+  static const Set<String> publicBroadcastTypes = {
+    'announcement',
+    'live_stream',
+    'general',
+  };
 
   static const _defaultSound = _NotificationSoundProfile(
     channelId: 'grace_default_channel_v1',
@@ -143,8 +151,6 @@ class NotificationService {
     } catch (_) {
       await Firebase.initializeApp();
     }
-
-    await _messaging.requestPermission();
 
     const AndroidInitializationSettings androidInit =
         AndroidInitializationSettings('@mipmap/ic_launcher');
@@ -274,11 +280,40 @@ class NotificationService {
   }
 
   _NotificationSoundProfile _profileForType(String? type) {
-    final normalized = (type ?? 'general')
-        .trim()
-        .toLowerCase()
-        .replaceAll(RegExp(r'[^a-z0-9_]+'), '_');
+    final normalized = normalizeNotificationType(type ?? 'general');
     return _soundProfiles[normalized] ?? _defaultSound;
+  }
+
+  @visibleForTesting
+  static String normalizeNotificationType(String type) {
+    return type.trim().toLowerCase().replaceAll(
+          RegExp(r'[^a-z0-9_]+'),
+          '_',
+        );
+  }
+
+  bool _isAllowedTopicBroadcastType(String type) {
+    return publicBroadcastTypes.contains(normalizeNotificationType(type));
+  }
+
+  Future<bool> hasPushPermission() async {
+    if (kIsWeb) return false;
+    final settings = await _messaging.getNotificationSettings();
+    return settings.authorizationStatus == AuthorizationStatus.authorized ||
+        settings.authorizationStatus == AuthorizationStatus.provisional;
+  }
+
+  Future<bool> ensurePushPermission() async {
+    if (kIsWeb) return false;
+    if (await hasPushPermission()) return true;
+
+    final settings = await _messaging.requestPermission(
+      alert: true,
+      badge: true,
+      sound: true,
+    );
+    return settings.authorizationStatus == AuthorizationStatus.authorized ||
+        settings.authorizationStatus == AuthorizationStatus.provisional;
   }
 
   void _openRouteFromMessage(RemoteMessage message) {
@@ -334,6 +369,12 @@ class NotificationService {
     String? route,
     String type = 'general',
   }) async {
+    final normalizedType = normalizeNotificationType(type);
+    if (!_isAllowedTopicBroadcastType(normalizedType)) {
+      debugPrint('Topic notification skipped: $type is not public broadcast.');
+      return;
+    }
+
     final accessToken = _supabase.auth.currentSession?.accessToken;
     if (accessToken == null || accessToken.isEmpty) {
       debugPrint('Topic notification skipped: missing Supabase session.');
@@ -352,7 +393,7 @@ class NotificationService {
           'body': body,
           'topic': topic,
           'route': route,
-          'type': type,
+          'type': normalizedType,
         }),
       );
 
@@ -484,17 +525,22 @@ class NotificationService {
     if (kIsWeb || churchId.trim().isEmpty) return;
 
     final prefs = await SharedPreferences.getInstance();
+    final canUsePush = await hasPushPermission();
 
-    // Always subscribe to the main church topic
-    await subscribeToTopic('church_$churchId');
+    final shouldReceiveChurchWide =
+        canUsePush && (prefs.getBool(churchWidePrefKey) ?? false);
+    if (shouldReceiveChurchWide) {
+      await subscribeToTopic('church_$churchId');
+    } else {
+      await unsubscribeFromTopic('church_$churchId');
+    }
 
     // Sync optional topics
     for (var entry in topicMap.entries) {
       String topicSuffix = entry.key;
       String prefKey = entry.value;
 
-      // Default to true if not set
-      bool shouldSubscribe = prefs.getBool(prefKey) ?? true;
+      bool shouldSubscribe = canUsePush && (prefs.getBool(prefKey) ?? false);
 
       String fullTopic = 'church_${churchId}_$topicSuffix';
 

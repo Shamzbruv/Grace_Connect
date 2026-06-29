@@ -44,6 +44,11 @@ build/
 .ruby-lsp/
 supabase/.temp/
 android/local.properties
+android/key.properties
+android/app/*.jks
+android/app/*.keystore
+android/*.jks
+android/*.keystore
 ios/Flutter/MapsKeys.xcconfig
 $\\dir\\launcher_icon.png
 

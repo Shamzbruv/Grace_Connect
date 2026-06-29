@@ -32,7 +32,7 @@ def readConfigValue = { name, defaultValue = "" ->
             ?: defaultValue
 }
 
-def graceConnectApplicationId = readConfigValue("GRACE_CONNECT_APPLICATION_ID", "com.example.grace_connect")
+def graceConnectApplicationId = readConfigValue("GRACE_CONNECT_APPLICATION_ID", "love.graceconnect")
 def releaseStoreFile = readConfigValue("GRACE_CONNECT_UPLOAD_STORE_FILE")
 def releaseStorePassword = readConfigValue("GRACE_CONNECT_UPLOAD_STORE_PASSWORD")
 def releaseKeyAlias = readConfigValue("GRACE_CONNECT_UPLOAD_KEY_ALIAS")
@@ -46,8 +46,8 @@ def isReleaseTaskRequested = gradle.startParameter.taskNames.any { taskName ->
 }
 
 if (isReleaseTaskRequested) {
-    if (graceConnectApplicationId == "com.example.grace_connect") {
-        throw new GradleException("Set GRACE_CONNECT_APPLICATION_ID to the final Play package id before building a release.")
+    if (graceConnectApplicationId != "love.graceconnect") {
+        throw new GradleException("Release builds must use the final Play package id love.graceconnect.")
     }
     if (!hasReleaseSigning) {
         throw new GradleException("Set GRACE_CONNECT_UPLOAD_STORE_FILE, GRACE_CONNECT_UPLOAD_STORE_PASSWORD, GRACE_CONNECT_UPLOAD_KEY_ALIAS, and GRACE_CONNECT_UPLOAD_KEY_PASSWORD before building a release.")
@@ -55,7 +55,7 @@ if (isReleaseTaskRequested) {
 }
 
 android {
-    namespace "com.example.grace_connect"
+    namespace "love.graceconnect"
     compileSdkVersion 35
     ndkVersion "27.0.12077973"
 
@@ -77,8 +77,8 @@ android {
         applicationId graceConnectApplicationId
         minSdkVersion 23
         targetSdkVersion 35
-        versionCode 13
-        versionName "1.0.12-beta"
+        versionCode 14
+        versionName "1.0.13-beta"
         multiDexEnabled true
         manifestPlaceholders = [
             googleMapsApiKey: readMapsApiKey("ANDROID"),

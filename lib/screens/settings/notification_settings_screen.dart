@@ -18,11 +18,12 @@ class NotificationSettingsScreen extends StatefulWidget {
 
 class _NotificationSettingsScreenState
     extends State<NotificationSettingsScreen> {
-  bool _serviceReminders = true;
-  bool _communityPosts = true;
-  bool _prayerRequests = true;
-  bool _dailyDevotionals = true;
-  bool _dailyQuiz = true;
+  bool _churchAnnouncements = false;
+  bool _serviceReminders = false;
+  bool _communityPosts = false;
+  bool _prayerRequests = false;
+  bool _dailyDevotionals = false;
+  bool _dailyQuiz = false;
   bool _isLoading = true;
 
   @override
@@ -34,19 +35,37 @@ class _NotificationSettingsScreenState
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
-      _serviceReminders = prefs.getBool('notify_service') ?? true;
-      _communityPosts = prefs.getBool('notify_community') ?? true;
-      _prayerRequests = prefs.getBool('notify_prayer') ?? true;
-      _dailyDevotionals = prefs.getBool('notify_devotionals') ?? true;
-      _dailyQuiz = prefs.getBool('notify_daily_quiz') ?? true;
+      _churchAnnouncements =
+          prefs.getBool(NotificationService.churchWidePrefKey) ?? false;
+      _serviceReminders = prefs.getBool('notify_service') ?? false;
+      _communityPosts = prefs.getBool('notify_community') ?? false;
+      _prayerRequests = prefs.getBool('notify_prayer') ?? false;
+      _dailyDevotionals = prefs.getBool('notify_devotionals') ?? false;
+      _dailyQuiz = prefs.getBool('notify_daily_quiz') ?? false;
       _isLoading = false;
     });
   }
 
   Future<void> _toggleSetting(String key, bool value) async {
+    if (value) {
+      final allowed = await NotificationService().ensurePushPermission();
+      if (!allowed) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Notifications were not enabled on this device.'),
+          ),
+        );
+        return;
+      }
+    }
+
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(key, value);
     setState(() {
+      if (key == NotificationService.churchWidePrefKey) {
+        _churchAnnouncements = value;
+      }
       if (key == 'notify_service') _serviceReminders = value;
       if (key == 'notify_community') _communityPosts = value;
       if (key == 'notify_prayer') _prayerRequests = value;
@@ -100,6 +119,15 @@ class _NotificationSettingsScreenState
                   onTap: () => Navigator.pushNamed(context, '/notifications'),
                 ),
                 const SizedBox(height: 12),
+                _buildSwitchTile(
+                  'Church Announcements',
+                  'Official church-wide updates and live alerts',
+                  _churchAnnouncements,
+                  (val) => _toggleSetting(
+                    NotificationService.churchWidePrefKey,
+                    val,
+                  ),
+                ),
                 _buildSwitchTile(
                   'Service Reminders',
                   'Get notified 30 mins before service starts',

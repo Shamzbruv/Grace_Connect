@@ -48,6 +48,58 @@
           ]
         }
       }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:47100126669:android:c639ef7425b29bc6a65084",
+        "android_client_info": {
+          "package_name": "love.graceconnect"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "47100126669-esbepkvieegd6ec4j08371vatvaf09v7.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "love.graceconnect",
+            "certificate_hash": "ec9e914fcb981291a9e5786ccf7d72b752676dac"
+          }
+        },
+        {
+          "client_id": "47100126669-i04gfg5rtbr0kbm0pjmj4foc1raelvd5.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "love.graceconnect",
+            "certificate_hash": "e9672c0a6e4eb6311869fc88e5081d9b9ab01b19"
+          }
+        },
+        {
+          "client_id": "47100126669-hrbi86pb9nm3oefuochj1dfbqd7ia006.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDbE9rFDj8htVoaj-XruVHdQNnwqTDvEm0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "47100126669-hrbi86pb9nm3oefuochj1dfbqd7ia006.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "47100126669-0k1eobdp3dnmmtpi9uth7ot3d61oe186.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.graceconnect"
+              }
+            }
+          ]
+        }
+      }
     }
   ],
   "configuration_version": "1"
