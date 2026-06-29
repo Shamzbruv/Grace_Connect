@@ -7,6 +7,7 @@ import '../../providers/user_role_provider.dart';
 import '../../services/feed_scroll_service.dart';
 import '../../widgets/app_bottom_menu.dart';
 import '../../widgets/main_tab_scope.dart';
+import '../../widgets/notification_section_icon.dart';
 import '../bible/bible_home_screen.dart';
 import '../community/community_feed_screen.dart';
 import '../dashboard/dashboard_screen.dart';
@@ -154,7 +155,11 @@ class _MoreTabScreen extends StatelessWidget {
         const _MoreAction('Roles', '/role_management', Icons.security_outlined),
       const _MoreAction('Giving', '/donations', Icons.favorite_outline),
       const _MoreAction(
-          'Notifications', '/notifications', Icons.notifications_outlined),
+        'Notifications',
+        '/notifications',
+        Icons.notifications_outlined,
+        assetIconPath: NotificationSectionIcon.assetPath,
+      ),
       const _MoreAction('Settings', '/settings', Icons.settings_outlined),
       const _MoreAction('Profile', '/profile', Icons.person_outline),
       const _MoreAction('Support', '/support', Icons.support_agent_outlined),
@@ -231,11 +236,17 @@ class _MoreTabScreen extends StatelessWidget {
 }
 
 class _MoreAction {
-  const _MoreAction(this.label, this.route, this.icon);
+  const _MoreAction(
+    this.label,
+    this.route,
+    this.icon, {
+    this.assetIconPath,
+  });
 
   final String label;
   final String route;
   final IconData icon;
+  final String? assetIconPath;
 }
 
 class _MoreActionTile extends StatelessWidget {
@@ -248,7 +259,9 @@ class _MoreActionTile extends StatelessWidget {
     final theme = Theme.of(context);
 
     return ListTile(
-      leading: Icon(action.icon, color: theme.colorScheme.primary),
+      leading: action.assetIconPath == null
+          ? Icon(action.icon, color: theme.colorScheme.primary)
+          : const NotificationSectionIcon(),
       title: Text(
         action.label,
         style: theme.textTheme.titleMedium?.copyWith(

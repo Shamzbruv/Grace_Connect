@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/user_profile.dart';
 import '../providers/user_role_provider.dart';
 import '../services/feed_scroll_service.dart';
+import 'notification_section_icon.dart';
 
 class AppBottomMenu extends StatelessWidget {
   const AppBottomMenu({
@@ -114,6 +115,7 @@ class AppBottomMenu extends StatelessWidget {
       route: '/notifications',
       icon: Icons.notifications_outlined,
       selectedIcon: Icons.notifications,
+      assetIconPath: NotificationSectionIcon.assetPath,
     ),
     _MenuItem(
       label: 'Giving',
@@ -365,10 +367,12 @@ class _MoreMenuTile extends StatelessWidget {
     final theme = Theme.of(context);
 
     return ListTile(
-      leading: Icon(
-        isActive ? item.selectedIcon : item.icon,
-        color: isActive ? theme.colorScheme.primary : null,
-      ),
+      leading: item.assetIconPath == null
+          ? Icon(
+              isActive ? item.selectedIcon : item.icon,
+              color: isActive ? theme.colorScheme.primary : null,
+            )
+          : const NotificationSectionIcon(),
       title: Text(
         item.label,
         style: TextStyle(
@@ -392,11 +396,13 @@ class _MenuItem {
   final String? route;
   final IconData icon;
   final IconData selectedIcon;
+  final String? assetIconPath;
 
   const _MenuItem({
     required this.label,
     required this.icon,
     required this.selectedIcon,
+    this.assetIconPath,
     this.route,
   });
 }
