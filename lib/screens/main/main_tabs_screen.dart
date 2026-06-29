@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../models/user_profile.dart';
 import '../../providers/user_role_provider.dart';
+import '../../services/church_subscription_service.dart';
 import '../../services/feed_scroll_service.dart';
 import '../../widgets/app_bottom_menu.dart';
 import '../../widgets/main_tab_scope.dart';
@@ -28,12 +29,14 @@ class MainTabsScreen extends StatefulWidget {
 class _MainTabsScreenState extends State<MainTabsScreen> {
   late final PageController _pageController;
   late int _currentIndex;
+  bool _subscriptionLimited = false;
 
   @override
   void initState() {
     super.initState();
     _currentIndex = widget.initialIndex.clamp(0, 4);
     _pageController = PageController(initialPage: _currentIndex);
+    _loadSubscriptionState();
   }
 
   @override
@@ -47,11 +50,41 @@ class _MainTabsScreenState extends State<MainTabsScreen> {
       if (index == 0) FeedScrollService.requestScrollToTop();
       return;
     }
+    if (_subscriptionLimited && index != 0) {
+      _showSubscriptionNotice();
+      return;
+    }
     setState(() => _currentIndex = index);
     _pageController.animateToPage(
       index,
       duration: const Duration(milliseconds: 260),
       curve: Curves.easeOutCubic,
+    );
+  }
+
+  Future<void> _loadSubscriptionState() async {
+    final contextResult =
+        await ChurchSubscriptionService().getCurrentChurchSubscription();
+    if (!mounted) return;
+
+    final limited = !contextResult.isActive;
+    setState(() {
+      _subscriptionLimited = limited;
+      if (limited) _currentIndex = 0;
+    });
+
+    if (limited && _pageController.hasClients) {
+      _pageController.jumpToPage(0);
+    }
+  }
+
+  void _showSubscriptionNotice() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'This church subscription is not active. Please contact your church admin about subscription options.',
+        ),
+      ),
     );
   }
 
@@ -68,21 +101,30 @@ class _MainTabsScreenState extends State<MainTabsScreen> {
           inTabShell: true,
           child: PageView(
             controller: _pageController,
+            physics: _subscriptionLimited
+                ? const NeverScrollableScrollPhysics()
+                : null,
             onPageChanged: (index) {
+              if (_subscriptionLimited && index != 0) {
+                _pageController.jumpToPage(0);
+                _showSubscriptionNotice();
+                return;
+              }
               setState(() => _currentIndex = index);
             },
-            children: const [
-              CommunityFeedScreen(showBottomMenu: false),
-              EventsScreen(showBottomMenu: false),
-              DashboardScreen(),
-              BibleHomeScreen(showBottomNavigation: false),
-              _MoreTabScreen(),
+            children: [
+              const CommunityFeedScreen(showBottomMenu: false),
+              const EventsScreen(showBottomMenu: false),
+              const DashboardScreen(),
+              const BibleHomeScreen(showBottomNavigation: false),
+              _MoreTabScreen(subscriptionLimited: _subscriptionLimited),
             ],
           ),
         ),
         bottomNavigationBar: AppBottomMenu(
           selectedIndex: _currentIndex,
           onDestinationSelected: _setTab,
+          subscriptionLimited: _subscriptionLimited,
         ),
       ),
     );
@@ -90,7 +132,11 @@ class _MainTabsScreenState extends State<MainTabsScreen> {
 }
 
 class _MoreTabScreen extends StatelessWidget {
-  const _MoreTabScreen();
+  const _MoreTabScreen({
+    required this.subscriptionLimited,
+  });
+
+  final bool subscriptionLimited;
 
   @override
   Widget build(BuildContext context) {
@@ -176,7 +222,10 @@ class _MoreTabScreen extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           for (final action in actions) ...[
-            _MoreActionTile(action: action),
+            _MoreActionTile(
+              action: action,
+              subscriptionLimited: subscriptionLimited,
+            ),
             const SizedBox(height: 8),
           ],
           const SizedBox(height: 20),
@@ -250,26 +299,38 @@ class _MoreAction {
 }
 
 class _MoreActionTile extends StatelessWidget {
-  const _MoreActionTile({required this.action});
+  const _MoreActionTile({
+    required this.action,
+    required this.subscriptionLimited,
+  });
 
   final _MoreAction action;
+  final bool subscriptionLimited;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final disabled = subscriptionLimited;
+    final foreground = disabled
+        ? theme.colorScheme.onSurface.withValues(alpha: 0.38)
+        : theme.colorScheme.primary;
 
     return ListTile(
       leading: action.assetIconPath == null
-          ? Icon(action.icon, color: theme.colorScheme.primary)
-          : const NotificationSectionIcon(),
+          ? Icon(action.icon, color: foreground)
+          : Opacity(
+              opacity: disabled ? 0.35 : 1,
+              child: const NotificationSectionIcon(),
+            ),
       title: Text(
         action.label,
         style: theme.textTheme.titleMedium?.copyWith(
+          color: disabled ? foreground : null,
           fontWeight: FontWeight.w700,
         ),
       ),
       trailing: Icon(
-        Icons.chevron_right,
+        disabled ? Icons.lock_outline : Icons.chevron_right,
         color: theme.colorScheme.onSurfaceVariant,
       ),
       tileColor: theme.cardTheme.color,
@@ -277,7 +338,9 @@ class _MoreActionTile extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         side: BorderSide(color: theme.dividerColor.withValues(alpha: 0.12)),
       ),
-      onTap: () => Navigator.of(context).pushNamed(action.route),
+      enabled: !disabled,
+      onTap:
+          disabled ? null : () => Navigator.of(context).pushNamed(action.route),
     );
   }
 }

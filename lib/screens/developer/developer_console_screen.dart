@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../services/developer_service.dart';
-import '../../models/user_profile.dart';
 import 'developer_email_test_screen.dart';
 
 class DeveloperConsoleScreen extends StatefulWidget {
@@ -27,23 +25,17 @@ class _DeveloperConsoleScreenState extends State<DeveloperConsoleScreen>
   }
 
   Future<void> _verifyAccess() async {
-    final user = Supabase.instance.client.auth.currentUser;
-    if (user != null) {
-      final doc = await Supabase.instance.client
-          .from('users')
-          .select()
-          .eq('uid', user.id)
-          .maybeSingle();
-      if (doc != null) {
-        final profile = UserProfile.fromMap(doc);
-        if (mounted) {
-          setState(() {
-            _isAuthorized = profile.isDeveloper;
-            _isChecking = false;
-          });
-        }
-        return;
+    try {
+      final session = await _devService.getDeveloperSession();
+      if (mounted) {
+        setState(() {
+          _isAuthorized = session != null;
+          _isChecking = false;
+        });
       }
+      return;
+    } catch (_) {
+      // Fall through to the access denied screen.
     }
     if (mounted) {
       setState(() {
@@ -62,8 +54,10 @@ class _DeveloperConsoleScreenState extends State<DeveloperConsoleScreen>
     if (!_isAuthorized) {
       return Scaffold(
         appBar: AppBar(title: const Text('Access Denied')),
-        body:
-            Center(child: Icon(Icons.lock, size: 64, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+        body: Center(
+            child: Icon(Icons.lock,
+                size: 64,
+                color: Theme.of(context).colorScheme.onSurfaceVariant)),
       );
     }
 
@@ -71,13 +65,17 @@ class _DeveloperConsoleScreenState extends State<DeveloperConsoleScreen>
       appBar: AppBar(
         title: Text('Developer Console',
             style: GoogleFonts.poppins(
-            fontWeight: FontWeight.bold, color: Theme.of(context).appBarTheme.foregroundColor)),
+                fontWeight: FontWeight.bold,
+                color: Theme.of(context).appBarTheme.foregroundColor)),
         backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
         bottom: TabBar(
           controller: _tabController,
           indicatorColor: Theme.of(context).colorScheme.secondary,
-          labelColor: Theme.of(context).appBarTheme.foregroundColor ?? Colors.white,
-          unselectedLabelColor: (Theme.of(context).appBarTheme.foregroundColor ?? Colors.white).withValues(alpha: 0.54),
+          labelColor:
+              Theme.of(context).appBarTheme.foregroundColor ?? Colors.white,
+          unselectedLabelColor:
+              (Theme.of(context).appBarTheme.foregroundColor ?? Colors.white)
+                  .withValues(alpha: 0.54),
           tabs: const [
             Tab(icon: Icon(Icons.dashboard), text: 'Overview'),
             Tab(icon: Icon(Icons.church), text: 'Churches'),
@@ -126,6 +124,16 @@ class _DeveloperConsoleScreenState extends State<DeveloperConsoleScreen>
                   color: Colors.indigo),
               const SizedBox(height: 12),
               _StatCard(
+                  title: 'Subscribed Churches',
+                  value: data['subscribedChurches']?.toString() ?? '0',
+                  color: Colors.teal),
+              const SizedBox(height: 12),
+              _StatCard(
+                  title: 'No Active Subscription',
+                  value: data['unsubscribedChurches']?.toString() ?? '0',
+                  color: Colors.orange),
+              const SizedBox(height: 12),
+              _StatCard(
                   title: 'Server Status',
                   value: data['serverHealth'] ?? 'Unknown',
                   color: Colors.green),
@@ -144,20 +152,64 @@ class _DeveloperConsoleScreenState extends State<DeveloperConsoleScreen>
           return const Center(child: CircularProgressIndicator());
         }
         final churches = snapshot.data!;
+        if (churches.isEmpty) {
+          return const Center(child: Text('No churches found.'));
+        }
 
         return ListView.builder(
+          padding: const EdgeInsets.all(12),
           itemCount: churches.length,
           itemBuilder: (context, index) {
             final church = churches[index];
-            return ListTile(
-              leading: const Icon(Icons.location_city),
-              title: Text(church['name'] ?? 'Unknown'),
-              subtitle: Text(church['address'] ?? 'No address'),
-              trailing: IconButton(
-                icon: const Icon(Icons.settings),
-                onPressed: () {
-                  // Stub for managing church
-                },
+            final subscriptionActive = church['subscription_active'] == true;
+            final churchId =
+                (church['placeId'] ?? church['id'] ?? '').toString();
+            final activeUntil =
+                _formatDate(church['subscription_active_until']);
+
+            return Card(
+              child: ListTile(
+                leading: Icon(
+                  subscriptionActive
+                      ? Icons.verified_outlined
+                      : Icons.lock_clock_outlined,
+                  color: subscriptionActive ? Colors.teal : Colors.orange,
+                ),
+                title: Text(church['name']?.toString() ?? 'Unknown'),
+                subtitle: Text(
+                  [
+                    church['address']?.toString() ?? 'No address',
+                    subscriptionActive
+                        ? 'Subscription active until $activeUntil'
+                        : 'No active subscription',
+                  ].join('\n'),
+                ),
+                isThreeLine: true,
+                trailing: PopupMenuButton<String>(
+                  icon: const Icon(Icons.more_vert),
+                  onSelected: churchId.isEmpty
+                      ? null
+                      : (value) async {
+                          if (value == 'free_1') {
+                            await _updateSubscription(churchId, months: 1);
+                          }
+                          if (value == 'free_3') {
+                            await _updateSubscription(churchId, months: 3);
+                          }
+                          if (value == 'disable') {
+                            await _disableSubscription(churchId);
+                          }
+                        },
+                  itemBuilder: (context) => const [
+                    PopupMenuItem(value: 'free_1', child: Text('Free 1 month')),
+                    PopupMenuItem(
+                        value: 'free_3', child: Text('Free 3 months')),
+                    PopupMenuItem(
+                      value: 'disable',
+                      child: Text('Turn subscription off'),
+                    ),
+                  ],
+                ),
               ),
             );
           },
@@ -197,6 +249,50 @@ class _DeveloperConsoleScreenState extends State<DeveloperConsoleScreen>
       ],
     );
   }
+
+  Future<void> _updateSubscription(String churchId,
+      {required int months}) async {
+    try {
+      await _devService.grantFreeSubscription(
+        churchId: churchId,
+        months: months,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content: Text('Free subscription granted for $months month(s).')),
+      );
+      setState(() {});
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not update subscription: $error')),
+      );
+    }
+  }
+
+  Future<void> _disableSubscription(String churchId) async {
+    try {
+      await _devService.clearSubscription(churchId: churchId);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Subscription turned off.')),
+      );
+      setState(() {});
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not disable subscription: $error')),
+      );
+    }
+  }
+
+  String _formatDate(dynamic value) {
+    if (value == null) return 'not set';
+    final date = DateTime.tryParse(value.toString());
+    if (date == null) return 'not set';
+    return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+  }
 }
 
 class _StatCard extends StatelessWidget {
@@ -228,7 +324,9 @@ class _StatCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(title,
-                    style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 14)),
+                    style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        fontSize: 14)),
                 Text(value,
                     style: GoogleFonts.poppins(
                         fontSize: 32,

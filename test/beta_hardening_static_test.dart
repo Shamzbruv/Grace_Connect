@@ -81,5 +81,31 @@ void main() {
       expect(migrationSource, contains("'video/mp4'"));
       expect(migrationSource, contains("'video/webm'"));
     });
+
+    test('church subscription state is church-level and developer managed', () {
+      final migrationSource = File(
+        'supabase/migrations/20260629143000_church_subscription_platform_sync.sql',
+      ).readAsStringSync();
+      final gateSource =
+          File('lib/screens/membership/membership_gate_screen.dart')
+              .readAsStringSync();
+      final tabSource =
+          File('lib/screens/main/main_tabs_screen.dart').readAsStringSync();
+      final developerServiceSource =
+          File('lib/services/developer_service.dart').readAsStringSync();
+
+      expect(migrationSource, contains('public.church_subscriptions'));
+      expect(migrationSource, contains('get_church_subscription_context'));
+      expect(migrationSource, contains('developer_set_church_subscription'));
+      expect(migrationSource, contains('developer_clear_church_subscription'));
+      expect(migrationSource, contains('subscription_active'));
+      expect(gateSource, contains('Subscription Required'));
+      expect(gateSource, contains("route == '/community'"));
+      expect(tabSource, contains('_subscriptionLimited'));
+      expect(tabSource, contains('NeverScrollableScrollPhysics'));
+      expect(developerServiceSource, contains('developer_get_dashboard'));
+      expect(developerServiceSource, contains('developer_list_churches'));
+      expect(developerServiceSource, isNot(contains('church_locations')));
+    });
   });
 }

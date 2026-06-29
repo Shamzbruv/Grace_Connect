@@ -12,10 +12,12 @@ class AppBottomMenu extends StatelessWidget {
     super.key,
     this.selectedIndex,
     this.onDestinationSelected,
+    this.subscriptionLimited = false,
   });
 
   final int? selectedIndex;
   final ValueChanged<int>? onDestinationSelected;
+  final bool subscriptionLimited;
 
   static const List<_MenuItem> _primaryItems = [
     _MenuItem(
@@ -157,6 +159,11 @@ class AppBottomMenu extends StatelessWidget {
       elevation: 6,
       labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
       onDestinationSelected: (index) {
+        if (subscriptionLimited && index != 0) {
+          _showSubscriptionNotice(context);
+          return;
+        }
+
         final controlledSelection = onDestinationSelected;
         if (controlledSelection != null) {
           controlledSelection(index);
@@ -174,13 +181,33 @@ class AppBottomMenu extends StatelessWidget {
         _navigateTo(context, route);
       },
       destinations: [
-        for (final item in _primaryItems)
+        for (var index = 0; index < _primaryItems.length; index++)
           NavigationDestination(
-            icon: Icon(item.icon),
-            selectedIcon: Icon(item.selectedIcon),
-            label: item.label,
+            icon: _menuIcon(
+              context,
+              _primaryItems[index].icon,
+              disabled: subscriptionLimited && index != 0,
+            ),
+            selectedIcon: _menuIcon(
+              context,
+              _primaryItems[index].selectedIcon,
+              disabled: subscriptionLimited && index != 0,
+            ),
+            label: _primaryItems[index].label,
           ),
       ],
+    );
+  }
+
+  Widget _menuIcon(
+    BuildContext context,
+    IconData icon, {
+    required bool disabled,
+  }) {
+    if (!disabled) return Icon(icon);
+    return Opacity(
+      opacity: 0.35,
+      child: Icon(icon),
     );
   }
 
@@ -205,6 +232,11 @@ class AppBottomMenu extends StatelessWidget {
   }
 
   void _navigateTo(BuildContext context, String route) {
+    if (subscriptionLimited && route != '/community') {
+      _showSubscriptionNotice(context);
+      return;
+    }
+
     final currentRoute = ModalRoute.of(context)?.settings.name;
     if (currentRoute == route) {
       if (route == '/community') FeedScrollService.requestScrollToTop();
@@ -227,6 +259,7 @@ class AppBottomMenu extends StatelessWidget {
         return _MoreMenuSheet(
           items: items,
           currentRoute: currentRoute,
+          subscriptionLimited: subscriptionLimited,
           onSelectRoute: (route) {
             Navigator.of(sheetContext).pop();
             _navigateTo(context, route);
@@ -274,17 +307,29 @@ class AppBottomMenu extends StatelessWidget {
     if (profile == null) return false;
     return profile.isDeveloper || profile.capabilities.canManageMediaUploads;
   }
+
+  void _showSubscriptionNotice(BuildContext context) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'This church subscription is not active. Please contact your church admin about subscription options.',
+        ),
+      ),
+    );
+  }
 }
 
 class _MoreMenuSheet extends StatelessWidget {
   final List<_MenuItem> items;
   final String? currentRoute;
+  final bool subscriptionLimited;
   final ValueChanged<String> onSelectRoute;
   final VoidCallback onLogOut;
 
   const _MoreMenuSheet({
     required this.items,
     required this.currentRoute,
+    required this.subscriptionLimited,
     required this.onSelectRoute,
     required this.onLogOut,
   });
@@ -325,6 +370,7 @@ class _MoreMenuSheet extends StatelessWidget {
                 isActive: item.route == currentRoute ||
                     (item.route == '/settings' &&
                         currentRoute?.startsWith('/settings') == true),
+                isDisabled: subscriptionLimited,
                 onTap: () {
                   final route = item.route;
                   if (route != null) onSelectRoute(route);
@@ -354,11 +400,13 @@ class _MoreMenuSheet extends StatelessWidget {
 class _MoreMenuTile extends StatelessWidget {
   final _MenuItem item;
   final bool isActive;
+  final bool isDisabled;
   final VoidCallback onTap;
 
   const _MoreMenuTile({
     required this.item,
     required this.isActive,
+    required this.isDisabled,
     required this.onTap,
   });
 
@@ -370,23 +418,36 @@ class _MoreMenuTile extends StatelessWidget {
       leading: item.assetIconPath == null
           ? Icon(
               isActive ? item.selectedIcon : item.icon,
-              color: isActive ? theme.colorScheme.primary : null,
+              color: isDisabled
+                  ? theme.colorScheme.onSurface.withValues(alpha: 0.38)
+                  : isActive
+                      ? theme.colorScheme.primary
+                      : null,
             )
-          : const NotificationSectionIcon(),
+          : Opacity(
+              opacity: isDisabled ? 0.35 : 1,
+              child: const NotificationSectionIcon(),
+            ),
       title: Text(
         item.label,
         style: TextStyle(
-          color: isActive ? theme.colorScheme.primary : null,
+          color: isDisabled
+              ? theme.colorScheme.onSurface.withValues(alpha: 0.38)
+              : isActive
+                  ? theme.colorScheme.primary
+                  : null,
           fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
         ),
       ),
+      trailing: isDisabled ? const Icon(Icons.lock_outline) : null,
       selected: isActive,
       selectedTileColor:
           theme.colorScheme.primaryContainer.withValues(alpha: 0.35),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
       ),
-      onTap: onTap,
+      enabled: !isDisabled,
+      onTap: isDisabled ? null : onTap,
     );
   }
 }

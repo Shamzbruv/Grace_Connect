@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../services/church_service.dart';
+import '../../services/church_subscription_service.dart';
 import '../../services/membership_service.dart';
 import '../../widgets/app_button.dart';
 import '../../widgets/app_card.dart';
@@ -88,7 +89,11 @@ class _MembershipGateState extends State<MembershipGate> {
         }
 
         if (membership.hasActiveMembership) {
-          return widget.child;
+          return _SubscriptionGate(
+            churchId: membership.churchId!,
+            churchName: membership.churchName,
+            child: widget.child,
+          );
         }
 
         if (membership.hasPendingChurchApplication) {
@@ -129,6 +134,160 @@ class _MembershipGateState extends State<MembershipGate> {
 
         return FindChurchScreen(onSubmitted: _refresh);
       },
+    );
+  }
+}
+
+class _SubscriptionGate extends StatefulWidget {
+  const _SubscriptionGate({
+    required this.churchId,
+    required this.child,
+    this.churchName,
+  });
+
+  final String churchId;
+  final String? churchName;
+  final Widget child;
+
+  @override
+  State<_SubscriptionGate> createState() => _SubscriptionGateState();
+}
+
+class _SubscriptionGateState extends State<_SubscriptionGate> {
+  late Future<ChurchSubscriptionContext> _subscriptionFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _subscriptionFuture = _loadSubscription();
+  }
+
+  @override
+  void didUpdateWidget(covariant _SubscriptionGate oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.churchId != widget.churchId) {
+      _subscriptionFuture = _loadSubscription();
+    }
+  }
+
+  Future<ChurchSubscriptionContext> _loadSubscription() {
+    return ChurchSubscriptionService().getCurrentChurchSubscription(
+      churchId: widget.churchId,
+    );
+  }
+
+  void _refresh() {
+    setState(() {
+      _subscriptionFuture = _loadSubscription();
+    });
+  }
+
+  bool _routeMayBypassSubscription(BuildContext context) {
+    final route = ModalRoute.of(context)?.settings.name;
+    return route == null ||
+        route == '/' ||
+        route == '/community' ||
+        route == '/developer_console';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<ChurchSubscriptionContext>(
+      future: _subscriptionFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        final subscription = snapshot.data;
+        if (subscription?.isActive == true ||
+            _routeMayBypassSubscription(context)) {
+          return widget.child;
+        }
+
+        return _SubscriptionRequiredScreen(
+          churchName: widget.churchName,
+          loadError: subscription?.loadError,
+          onRefresh: _refresh,
+        );
+      },
+    );
+  }
+}
+
+class _SubscriptionRequiredScreen extends StatelessWidget {
+  const _SubscriptionRequiredScreen({
+    this.churchName,
+    this.loadError,
+    required this.onRefresh,
+  });
+
+  final String? churchName;
+  final String? loadError;
+  final VoidCallback onRefresh;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final name = churchName == null || churchName!.trim().isEmpty
+        ? 'your church'
+        : churchName!.trim();
+    final message = loadError == null
+        ? '$name does not currently have an active Grace Connect subscription. The feed is still available, but the rest of the church management tools are paused. Please contact your church administrator to discuss subscription options.'
+        : 'Grace Connect could not verify the subscription for $name. The feed is still available while this is checked. Please try again or contact your church administrator.';
+
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 460),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.lock_clock_outlined,
+                    size: 64,
+                    color: theme.colorScheme.primary,
+                  ),
+                  const SizedBox(height: 20),
+                  Text(
+                    'Subscription Required',
+                    style: theme.textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    message,
+                    style: theme.textTheme.bodyLarge?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 24),
+                  FilledButton.icon(
+                    onPressed: () => Navigator.of(context)
+                        .pushNamedAndRemoveUntil('/community', (_) => false),
+                    icon: const Icon(Icons.dynamic_feed_outlined),
+                    label: const Text('Open Feed'),
+                  ),
+                  const SizedBox(height: 8),
+                  TextButton.icon(
+                    onPressed: onRefresh,
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Check Again'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
