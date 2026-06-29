@@ -25,6 +25,7 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
   Map<String, dynamic>? _attempt;
   Map<String, dynamic>? _question;
   Map<String, dynamic>? _lastFeedback;
+  Map<String, dynamic>? _pendingCompletion;
   Map<String, dynamic>? _completion;
   Map<String, dynamic> _leaderboardData = const {};
   bool _leaderboardLoading = false;
@@ -81,6 +82,7 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
       _attempt = null;
       _question = null;
       _lastFeedback = null;
+      _pendingCompletion = null;
       _completion = null;
       _lastCountdownAutoRefreshAt = null;
       _statusFuture = _service.status(generateIfMissing: true);
@@ -113,6 +115,7 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
         _nextRefreshAt =
             DateTime.tryParse(data['next_refresh_at']?.toString() ?? '');
         _lastFeedback = null;
+        _pendingCompletion = null;
         _completion = null;
         _active = true;
       });
@@ -165,7 +168,8 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
       final completed = data['completed'] == true;
       setState(() {
         _lastFeedback = feedback;
-        _completion = completed ? feedback : null;
+        _pendingCompletion = completed ? feedback : null;
+        _completion = null;
         _question = data['next_question'] == null
             ? null
             : Map<String, dynamic>.from(data['next_question'] as Map);
@@ -192,6 +196,16 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
   }
 
   Future<void> _nextQuestion() async {
+    final pendingCompletion = _pendingCompletion;
+    if (pendingCompletion != null) {
+      setState(() {
+        _lastFeedback = null;
+        _pendingCompletion = null;
+        _completion = pendingCompletion;
+      });
+      return;
+    }
+
     setState(() => _lastFeedback = null);
     _startQuestionTimers();
   }
@@ -226,6 +240,8 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
     setState(() {
       _active = false;
       _question = null;
+      _lastFeedback = null;
+      _pendingCompletion = null;
       _completion = {
         'abandoned': true,
         'total_score': _attempt?['total_score'] ?? 0,
@@ -298,10 +314,13 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
         onAnswer: _submitAnswer,
       );
     }
-    if (_lastFeedback != null && _completion == null) {
+    if (_lastFeedback != null &&
+        (_completion == null || _pendingCompletion != null)) {
       return _FeedbackView(
         feedback: _lastFeedback!,
         onContinue: _nextQuestion,
+        continueLabel:
+            _pendingCompletion != null ? 'See Results' : 'Next Question',
       );
     }
     if (_completion != null) {
@@ -534,10 +553,15 @@ class _ActiveQuestionView extends StatelessWidget {
 }
 
 class _FeedbackView extends StatelessWidget {
-  const _FeedbackView({required this.feedback, required this.onContinue});
+  const _FeedbackView({
+    required this.feedback,
+    required this.onContinue,
+    required this.continueLabel,
+  });
 
   final Map<String, dynamic> feedback;
   final VoidCallback onContinue;
+  final String continueLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -605,7 +629,7 @@ class _FeedbackView extends StatelessWidget {
         const SizedBox(height: 20),
         FilledButton(
           onPressed: onContinue,
-          child: const Text('Next Question'),
+          child: Text(continueLabel),
         ),
       ],
     );

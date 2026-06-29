@@ -15,7 +15,7 @@ class AttendanceSettingsScreen extends StatefulWidget {
 }
 
 class _AttendanceSettingsScreenState extends State<AttendanceSettingsScreen> {
-  bool _autoCheckIn = true;
+  bool _autoCheckIn = false;
   bool _isLoading = true;
 
   @override
@@ -27,7 +27,7 @@ class _AttendanceSettingsScreenState extends State<AttendanceSettingsScreen> {
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
-      _autoCheckIn = prefs.getBool('auto_check_in') ?? true;
+      _autoCheckIn = prefs.getBool('auto_check_in') ?? false;
       _isLoading = false;
     });
   }
@@ -166,7 +166,7 @@ class _AttendanceSettingsScreenState extends State<AttendanceSettingsScreen> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Grace Connect can automatically mark you "Present" when you are at church during a service for more than 10 minutes. This helps the church understand detailed attendance trends.',
+                    'Grace Connect can automatically mark you "Present" when you turn this on and are at church during a service for more than 10 minutes.',
                     style: theme.textTheme.bodyMedium?.copyWith(
                       color: colorScheme.onSurfaceVariant,
                       height: 1.35,

@@ -7,7 +7,7 @@ Firebase/Google Cloud project: `graceconnect-9a97c`
 Updated on 2026-06-19:
 
 - Enabled API Keys API, Maps SDK for Android, Maps SDK for iOS, Maps JavaScript API, and Places API.
-- Created `GraceConnect Android Maps SDK`, restricted to package `com.example.grace_connect`, the local debug SHA-1, and Maps SDK for Android only.
+- Created `GraceConnect Android Maps SDK` for local debug builds. Production release keys must be restricted to the final `GRACE_CONNECT_APPLICATION_ID` package and the release/Play App Signing SHA-1.
 - Created `GraceConnect iOS Maps SDK`, restricted to bundle ID `com.example.graceconnect` and Maps SDK for iOS only.
 - Added the new native key strings to ignored local config files: `android/local.properties` and `ios/Flutter/MapsKeys.xcconfig`.
 
@@ -44,7 +44,8 @@ Use separate Google Maps keys per platform. Do not use an HTTP-referrer-only web
 Android Maps key:
 
 - Application restriction: Android apps
-- Package name: `com.example.grace_connect`
+- Debug package name: `com.example.grace_connect`
+- Release package name: the value of `GRACE_CONNECT_APPLICATION_ID`
 - SHA-1 certificate: add the debug SHA-1 for local builds and the release/Play App Signing SHA-1 for production
 - API restriction: Maps SDK for Android
 - Local config: add `GOOGLE_MAPS_API_KEY_ANDROID=...` to `android/local.properties`, or export it as an environment variable

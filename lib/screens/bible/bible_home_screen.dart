@@ -52,7 +52,8 @@ class _BibleHomeScreenState extends State<BibleHomeScreen> {
                     icon: Icon(Icons.menu_book), label: 'Read'),
                 BottomNavigationBarItem(
                     icon: Icon(Icons.search), label: 'Search'),
-                BottomNavigationBarItem(icon: Icon(Icons.quiz), label: 'Quiz'),
+                BottomNavigationBarItem(
+                    icon: Icon(Icons.psychology_alt_outlined), label: 'Quiz'),
               ],
             )
           : null,

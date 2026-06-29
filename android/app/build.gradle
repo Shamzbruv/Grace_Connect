@@ -25,6 +25,35 @@ def readMapsApiKey = { platform ->
             ?: ""
 }
 
+def readConfigValue = { name, defaultValue = "" ->
+    return project.findProperty(name)
+            ?: localProperties.getProperty(name)
+            ?: System.getenv(name)
+            ?: defaultValue
+}
+
+def graceConnectApplicationId = readConfigValue("GRACE_CONNECT_APPLICATION_ID", "com.example.grace_connect")
+def releaseStoreFile = readConfigValue("GRACE_CONNECT_UPLOAD_STORE_FILE")
+def releaseStorePassword = readConfigValue("GRACE_CONNECT_UPLOAD_STORE_PASSWORD")
+def releaseKeyAlias = readConfigValue("GRACE_CONNECT_UPLOAD_KEY_ALIAS")
+def releaseKeyPassword = readConfigValue("GRACE_CONNECT_UPLOAD_KEY_PASSWORD")
+def hasReleaseSigning = releaseStoreFile &&
+        releaseStorePassword &&
+        releaseKeyAlias &&
+        releaseKeyPassword
+def isReleaseTaskRequested = gradle.startParameter.taskNames.any { taskName ->
+    taskName.toLowerCase().contains("release")
+}
+
+if (isReleaseTaskRequested) {
+    if (graceConnectApplicationId == "com.example.grace_connect") {
+        throw new GradleException("Set GRACE_CONNECT_APPLICATION_ID to the final Play package id before building a release.")
+    }
+    if (!hasReleaseSigning) {
+        throw new GradleException("Set GRACE_CONNECT_UPLOAD_STORE_FILE, GRACE_CONNECT_UPLOAD_STORE_PASSWORD, GRACE_CONNECT_UPLOAD_KEY_ALIAS, and GRACE_CONNECT_UPLOAD_KEY_PASSWORD before building a release.")
+    }
+}
+
 android {
     namespace "com.example.grace_connect"
     compileSdkVersion 35
@@ -45,7 +74,7 @@ android {
     }
 
     defaultConfig {
-        applicationId "com.example.grace_connect"
+        applicationId graceConnectApplicationId
         minSdkVersion 23
         targetSdkVersion 35
         versionCode 13
@@ -63,6 +92,14 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        release {
+            if (hasReleaseSigning) {
+                storeFile file(releaseStoreFile)
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+            }
+        }
     }
 
     buildTypes {
@@ -73,7 +110,9 @@ android {
             shrinkResources false
         }
         release {
-            signingConfig signingConfigs.debug
+            if (hasReleaseSigning) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled false
             shrinkResources false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'

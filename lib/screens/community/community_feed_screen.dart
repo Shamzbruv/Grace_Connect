@@ -279,7 +279,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
       useSafeArea: true,
       builder: (sheetContext) => StatefulBuilder(
         builder: (context, setSheetState) {
-          Future<void> pickStoryMedia(ImageSource source) async {
+          Future<void> pickStoryImage(ImageSource source) async {
             final picker = ImagePicker();
             final image = await picker.pickImage(source: source);
             if (image == null) return;
@@ -292,6 +292,33 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
               selectedStoryType = 'image';
               selectedStoryFormat = MediaDisplayFormat.full;
               selectedStoryAspectRatio = aspectRatio;
+            });
+          }
+
+          Future<void> pickStoryVideo() async {
+            final picker = ImagePicker();
+            final video = await picker.pickVideo(source: ImageSource.gallery);
+            if (video == null) return;
+
+            final size = await video.length();
+            if (size > 52428800) {
+              if (sheetContext.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Video file size must be less than 50MB'),
+                  ),
+                );
+              }
+              return;
+            }
+
+            if (!sheetContext.mounted) return;
+            setSheetState(() {
+              selectedStoryMedia = video;
+              selectedStoryPreviewBytes = null;
+              selectedStoryType = 'video';
+              selectedStoryFormat = MediaDisplayFormat.fill;
+              selectedStoryAspectRatio = null;
             });
           }
 
@@ -330,7 +357,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                     aspectRatio: 9 / 14,
                     child: InkWell(
                       borderRadius: BorderRadius.circular(18),
-                      onTap: () => pickStoryMedia(ImageSource.gallery),
+                      onTap: () => pickStoryImage(ImageSource.gallery),
                       child: DecoratedBox(
                         decoration: BoxDecoration(
                           color: Theme.of(context)
@@ -347,28 +374,61 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                                   ),
                                 ),
                         ),
-                        child: selectedStoryPreviewBytes == null
-                            ? Center(
+                        child: selectedStoryType == 'video'
+                            ? const Center(
                                 child: Column(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Icon(
-                                      Icons.add_photo_alternate_outlined,
-                                      size: 42,
-                                      color:
-                                          Theme.of(context).colorScheme.primary,
-                                    ),
-                                    const SizedBox(height: 10),
-                                    const Text('Add a photo'),
+                                    Icon(Icons.play_circle_fill, size: 54),
+                                    SizedBox(height: 10),
+                                    Text('Video attached'),
                                   ],
                                 ),
                               )
-                            : null,
+                            : selectedStoryPreviewBytes == null
+                                ? Center(
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.add_photo_alternate_outlined,
+                                          size: 42,
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .primary,
+                                        ),
+                                        const SizedBox(height: 10),
+                                        const Text('Add a photo'),
+                                      ],
+                                    ),
+                                  )
+                                : null,
                       ),
                     ),
                   ),
                   const SizedBox(height: 12),
-                  if (selectedStoryPreviewBytes != null) ...[
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () => pickStoryImage(ImageSource.gallery),
+                          icon: const Icon(Icons.image_outlined),
+                          label: const Text('Photo'),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: pickStoryVideo,
+                          icon: const Icon(Icons.videocam_outlined),
+                          label: const Text('Video'),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  if (selectedStoryPreviewBytes != null &&
+                      selectedStoryType == 'image') ...[
                     _MediaFormatSelector(
                       selectedFormat: selectedStoryFormat,
                       onSelected: (format) => setSheetState(
@@ -449,8 +509,10 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
       String? mediaUrl;
       String? mediaPath;
       if (media != null) {
-        final mimeType = media.mimeType ?? 'image/jpeg';
-        final extension = _extensionFor(media, mimeType);
+        final mimeType = media.mimeType ??
+            (mediaType == 'video' ? 'video/mp4' : 'image/jpeg');
+        final extension =
+            _extensionFor(media, mimeType, fallbackMediaType: mediaType);
         final fileName =
             '$churchId/stories/${DateTime.now().millisecondsSinceEpoch}_${authUser.id}.$extension';
         mediaPath = fileName;
@@ -553,7 +615,11 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
       if (_selectedMedia != null) {
         final mimeType = _selectedMedia!.mimeType ??
             (_mediaType == 'image' ? 'image/jpeg' : 'video/mp4');
-        final extension = _extensionFor(_selectedMedia!, mimeType);
+        final extension = _extensionFor(
+          _selectedMedia!,
+          mimeType,
+          fallbackMediaType: _mediaType,
+        );
         final fileName =
             '$churchId/${DateTime.now().millisecondsSinceEpoch}_${user.id}.$extension';
         mediaPath = fileName;
@@ -622,7 +688,11 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
     }
   }
 
-  String _extensionFor(XFile file, String mimeType) {
+  String _extensionFor(
+    XFile file,
+    String mimeType, {
+    String? fallbackMediaType,
+  }) {
     final name = file.name.trim();
     if (name.contains('.')) {
       final extension = name.split('.').last.toLowerCase();
@@ -640,7 +710,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
       'video/x-m4v' => 'm4v',
       'video/webm' => 'webm',
       'video/mp4' => 'mp4',
-      _ => _mediaType == 'video' ? 'mp4' : 'jpg',
+      _ => (fallbackMediaType ?? _mediaType) == 'video' ? 'mp4' : 'jpg',
     };
   }
 
@@ -2998,6 +3068,7 @@ class _StatusViewerDialogState extends State<_StatusViewerDialog> {
 
   Widget _buildStatusContent(BuildContext context, CommunityStory story) {
     final hasImage = story.mediaUrl != null && story.mediaType == 'image';
+    final hasVideo = story.mediaUrl != null && story.mediaType == 'video';
     final caption = story.caption?.trim();
 
     if (hasImage) {
@@ -3014,6 +3085,66 @@ class _StatusViewerDialogState extends State<_StatusViewerDialog> {
               ),
               errorWidget: (context, url, error) =>
                   const Icon(Icons.error, color: Colors.white),
+            ),
+          ),
+          const DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Colors.black54,
+                  Colors.transparent,
+                  Colors.black54,
+                ],
+                stops: [0, 0.35, 1],
+              ),
+            ),
+          ),
+          if (caption?.isNotEmpty == true)
+            Positioned(
+              left: 20,
+              right: 20,
+              bottom: 104,
+              child: Text(
+                caption!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+        ],
+      );
+    }
+
+    if (hasVideo) {
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          const ColoredBox(
+            color: Colors.black,
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.play_circle_fill,
+                    color: Colors.white,
+                    size: 72,
+                  ),
+                  SizedBox(height: 12),
+                  Text(
+                    'Video attached',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
           const DecoratedBox(

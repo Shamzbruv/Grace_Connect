@@ -120,7 +120,7 @@ class AttendanceService {
 
   Future<void> initialize() async {
     final prefs = await SharedPreferences.getInstance();
-    final autoCheckInEnabled = prefs.getBool('auto_check_in') ?? true;
+    final autoCheckInEnabled = prefs.getBool('auto_check_in') ?? false;
     _startPendingAttendanceSync();
     unawaited(flushPendingAttendance());
     if (!autoCheckInEnabled) {
@@ -530,8 +530,6 @@ class AttendanceService {
 
     final activeService = await getActiveService(churchId);
     if (activeService == null) {
-      await finalizePastDueServices(churchId);
-      await _markPastDueAbsencesForUser(user.id, churchId);
       return const AttendanceCheckInPrompt(
         hasActiveService: false,
         canMarkPresent: false,
@@ -1073,63 +1071,6 @@ class AttendanceService {
     return 'attendance_dwell_${userId}_${serviceId}_$dateKey';
   }
 
-  Future<void> _markPastDueAbsencesForUser(
-      String userId, String churchId) async {
-    final now = DateTime.now();
-    final schedules = await _supabase
-        .from('service_schedules')
-        .select()
-        .eq('churchId', churchId)
-        .eq('dayOfWeek', now.weekday)
-        .eq('attendanceEnabled', true);
-
-    for (final row in schedules) {
-      final schedule = ServiceSchedule.fromMap(row);
-      if (!_isSchedulePastDue(now, schedule)) continue;
-      if (await _hasAttendanceForToday(userId, schedule.serviceId)) continue;
-
-      final record = AttendanceRecord(
-        id: '',
-        userId: userId,
-        churchId: churchId,
-        serviceId: schedule.serviceId,
-        timestamp: DateTime.now(),
-        method: 'auto_absent',
-        present: false,
-        status: 'absent',
-        serviceName: schedule.name,
-      );
-      await _insertAttendanceRecord(record);
-    }
-  }
-
-  Future<void> finalizePastDueServices(String churchId) async {
-    try {
-      final response = await _supabase.functions.invoke(
-        'finalize-service-attendance',
-        body: {'church_id': churchId},
-      );
-      final data = response.data;
-      if (data is Map && data['error'] != null) {
-        debugPrint('Attendance finalizer returned an error: ${data['error']}');
-      }
-    } catch (error) {
-      debugPrint('Attendance finalizer unavailable: $error');
-    }
-  }
-
-  bool _isSchedulePastDue(DateTime now, ServiceSchedule schedule) {
-    final endParts = _parseTimeParts(schedule.endTime);
-    if (endParts == null) return false;
-
-    final endTime =
-        DateTime(now.year, now.month, now.day, endParts[0], endParts[1]);
-    final closedAt = endTime.add(
-      Duration(minutes: schedule.checkInClosesMinutesAfter),
-    );
-    return now.isAfter(closedAt);
-  }
-
   Stream<List<AttendanceRecord>> getAttendanceHistory(String userId) async* {
     var lastGoodRecords = const <AttendanceRecord>[];
 
@@ -1179,7 +1120,7 @@ class AttendanceService {
 
   Future<AttendanceSetupStatus> getSetupStatus(String churchId) async {
     final prefs = await SharedPreferences.getInstance();
-    final autoCheckInEnabled = prefs.getBool('auto_check_in') ?? true;
+    final autoCheckInEnabled = prefs.getBool('auto_check_in') ?? false;
     final locationServicesEnabled = await Geolocator.isLocationServiceEnabled();
     final permission = await Geolocator.checkPermission();
 

@@ -57,7 +57,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
 
   Future<void> _loadAutoCheckInPreference() async {
     final prefs = await SharedPreferences.getInstance();
-    final enabled = prefs.getBool('auto_check_in') ?? true;
+    final enabled = prefs.getBool('auto_check_in') ?? false;
     if (!mounted) return;
     setState(() => _autoCheckIn = enabled);
     if (enabled && !kIsWeb) {

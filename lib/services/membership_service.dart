@@ -1,6 +1,14 @@
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+class MembershipLoadStatus {
+  static const ready = 'ready';
+  static const backendUnavailable = 'backend_unavailable';
+  static const permissionDenied = 'permission_denied';
+  static const migrationMismatch = 'migration_mismatch';
+  static const unexpectedResponse = 'unexpected_response';
+}
+
 class MembershipContext {
   final bool authenticated;
   final bool hasProfile;
@@ -13,6 +21,8 @@ class MembershipContext {
   final String? decisionReason;
   final bool hasPendingChurchApplication;
   final String? churchApplicationStatus;
+  final String loadStatus;
+  final String? loadError;
 
   const MembershipContext({
     required this.authenticated,
@@ -26,7 +36,32 @@ class MembershipContext {
     this.decisionReason,
     required this.hasPendingChurchApplication,
     this.churchApplicationStatus,
+    this.loadStatus = MembershipLoadStatus.ready,
+    this.loadError,
   });
+
+  bool get hasLoadError => loadStatus != MembershipLoadStatus.ready;
+
+  String get loadErrorTitle {
+    return switch (loadStatus) {
+      MembershipLoadStatus.permissionDenied => 'Membership Access Blocked',
+      MembershipLoadStatus.migrationMismatch => 'Membership Setup Mismatch',
+      MembershipLoadStatus.unexpectedResponse => 'Membership Setup Mismatch',
+      _ => 'Membership Unavailable',
+    };
+  }
+
+  String get loadErrorMessage {
+    return switch (loadStatus) {
+      MembershipLoadStatus.permissionDenied =>
+        'We could not confirm your church access because the server denied the membership lookup. Please try again or contact support.',
+      MembershipLoadStatus.migrationMismatch ||
+      MembershipLoadStatus.unexpectedResponse =>
+        'Grace Connect could not read the membership setup from the server. Please try again after the latest backend update is applied.',
+      _ =>
+        'Grace Connect could not load your membership right now. Check your connection and try again.',
+    };
+  }
 
   bool get isAccountRestricted =>
       accountStatus == 'suspended' ||
@@ -55,6 +90,8 @@ class MembershipContext {
       decisionReason: data['decisionReason']?.toString(),
       hasPendingChurchApplication: data['hasPendingChurchApplication'] == true,
       churchApplicationStatus: data['churchApplicationStatus']?.toString(),
+      loadStatus: (data['loadStatus'] ?? MembershipLoadStatus.ready).toString(),
+      loadError: data['loadError']?.toString(),
     );
   }
 
@@ -65,6 +102,21 @@ class MembershipContext {
     membershipStatus: 'none',
     hasPendingChurchApplication: false,
   );
+
+  factory MembershipContext.loadFailed({
+    required String status,
+    Object? error,
+  }) {
+    return MembershipContext(
+      authenticated: true,
+      hasProfile: true,
+      accountStatus: 'active',
+      membershipStatus: 'unknown',
+      hasPendingChurchApplication: false,
+      loadStatus: status,
+      loadError: error?.toString(),
+    );
+  }
 }
 
 class MembershipService {
@@ -73,7 +125,8 @@ class MembershipService {
 
   final SupabaseClient _client;
 
-  Future<List<Map<String, dynamic>>> getRequiredPolicies(String flowType) async {
+  Future<List<Map<String, dynamic>>> getRequiredPolicies(
+      String flowType) async {
     final response = await _client.rpc(
       'get_active_policy_documents',
       params: {'p_flow_type': flowType},
@@ -111,30 +164,77 @@ class MembershipService {
       if (data is Map) {
         return MembershipContext.fromMap(Map<String, dynamic>.from(data));
       }
+      debugPrint('Membership context returned unexpected data: $data');
+      return MembershipContext.loadFailed(
+        status: MembershipLoadStatus.unexpectedResponse,
+        error: 'Unexpected membership context response.',
+      );
     } catch (error) {
       debugPrint('Membership context unavailable: $error');
+      return MembershipContext.loadFailed(
+        status: classifyContextError(error),
+        error: error,
+      );
     }
-
-    return const MembershipContext(
-      authenticated: true,
-      hasProfile: false,
-      accountStatus: 'active',
-      membershipStatus: 'none',
-      hasPendingChurchApplication: false,
-    );
   }
 
   Stream<MembershipContext> watchCurrentContext() async* {
-    yield await getCurrentContext();
+    final initial = await getCurrentContext();
+    yield initial;
 
     final user = _client.auth.currentUser;
-    if (user == null) return;
+    if (user == null || initial.hasLoadError) return;
 
-    yield* _client
-        .from('church_memberships')
-        .stream(primaryKey: ['id'])
-        .eq('user_id', user.id)
-        .asyncMap((_) => getCurrentContext());
+    try {
+      await for (final _ in _client
+          .from('church_memberships')
+          .stream(primaryKey: ['id']).eq('user_id', user.id)) {
+        yield await getCurrentContext();
+      }
+    } catch (error) {
+      debugPrint('Membership context stream unavailable: $error');
+      yield MembershipContext.loadFailed(
+        status: classifyContextError(error),
+        error: error,
+      );
+    }
+  }
+
+  static String classifyContextError(Object error) {
+    final text = error.toString().toLowerCase();
+    if (text.contains('permission denied') ||
+        text.contains('row-level security') ||
+        text.contains('rls') ||
+        text.contains('42501') ||
+        text.contains('403')) {
+      return MembershipLoadStatus.permissionDenied;
+    }
+    if (text.contains('get_current_membership_context') ||
+        text.contains('could not find the function') ||
+        text.contains('function') && text.contains('not found') ||
+        text.contains('schema cache') ||
+        text.contains('ambiguous') ||
+        text.contains('column') && text.contains('does not exist') ||
+        text.contains('42703') ||
+        text.contains('42883') ||
+        text.contains('42725')) {
+      return MembershipLoadStatus.migrationMismatch;
+    }
+    if (text.contains('timeout') ||
+        text.contains('timed out') ||
+        text.contains('connection') ||
+        text.contains('network') ||
+        text.contains('socket') ||
+        text.contains('failed host lookup') ||
+        text.contains('service unavailable') ||
+        text.contains('bad gateway') ||
+        text.contains('gateway timeout') ||
+        text.contains('502') ||
+        text.contains('503') ||
+        text.contains('504')) {
+      return MembershipLoadStatus.backendUnavailable;
+    }
+    return MembershipLoadStatus.backendUnavailable;
   }
 
   Future<void> requestMembership({

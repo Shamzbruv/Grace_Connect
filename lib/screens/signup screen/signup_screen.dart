@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../services/auth_flow_service.dart';
+import '../../services/membership_service.dart';
 import '../../models/user_profile.dart'; // Needed to save the model
 import '../../widgets/app_scaffold.dart';
 import '../../widgets/app_button.dart';
@@ -21,10 +23,21 @@ class _SignupScreenState extends State<SignupScreen> {
   final _phoneController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
+  final _membershipService = MembershipService();
 
   bool _isLoading = false;
+  bool _isLoadingPolicies = true;
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
+  String? _policyLoadError;
+  List<Map<String, dynamic>> _requiredPolicies = const [];
+  Map<String, bool> _acceptedPolicies = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPolicies();
+  }
 
   @override
   void dispose() {
@@ -38,6 +51,15 @@ class _SignupScreenState extends State<SignupScreen> {
 
   Future<void> _handleSignup() async {
     if (_formKey.currentState!.validate()) {
+      if (!_allPoliciesAccepted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please accept all required terms and policies.'),
+          ),
+        );
+        return;
+      }
+
       if (_passwordController.text != _confirmPasswordController.text) {
         ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Passwords do not match')));
@@ -58,6 +80,7 @@ class _SignupScreenState extends State<SignupScreen> {
             'phone': _phoneController.text.trim(),
             'phoneNumber': _phoneController.text.trim(),
             'signupSource': 'flutter_signup',
+            'acceptedPolicySnapshot': _policySnapshot(),
           },
         );
 
@@ -88,6 +111,8 @@ class _SignupScreenState extends State<SignupScreen> {
             debugPrint('Failed to sync initial profile to database: $e');
           }
         }
+
+        await _recordPolicyAcceptanceIfPossible(res);
 
         // 3. Sign them out so they don't bypass email verification
         await supabase.auth.signOut();
@@ -123,6 +148,215 @@ class _SignupScreenState extends State<SignupScreen> {
         if (mounted) setState(() => _isLoading = false);
       }
     }
+  }
+
+  Future<void> _loadPolicies() async {
+    setState(() {
+      _isLoadingPolicies = true;
+      _policyLoadError = null;
+    });
+
+    try {
+      final policies =
+          await _membershipService.getRequiredPolicies('member_signup');
+      if (!mounted) return;
+      setState(() {
+        _requiredPolicies = policies;
+        _acceptedPolicies = {
+          for (final policy in policies)
+            policy['document_key'] as String:
+                _acceptedPolicies[policy['document_key'] as String] ?? false,
+        };
+        _isLoadingPolicies = false;
+      });
+    } catch (error) {
+      debugPrint('Failed to load signup policies: $error');
+      if (!mounted) return;
+      setState(() {
+        _policyLoadError =
+            'Required policies could not be loaded. Please check your connection and try again.';
+        _isLoadingPolicies = false;
+      });
+    }
+  }
+
+  bool get _allPoliciesAccepted {
+    if (_isLoadingPolicies || _policyLoadError != null) return false;
+    if (_requiredPolicies.isEmpty) return false;
+    for (final policy in _requiredPolicies) {
+      if (_acceptedPolicies[policy['document_key'] as String] != true) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  bool get _canSubmit => !_isLoading && _allPoliciesAccepted;
+
+  List<Map<String, String>> _policySnapshot() {
+    return _requiredPolicies
+        .map(
+          (policy) => {
+            'key': policy['document_key']?.toString() ?? '',
+            'version': policy['document_version']?.toString() ?? '',
+          },
+        )
+        .where((policy) => policy['key']!.isNotEmpty)
+        .toList();
+  }
+
+  Future<void> _recordPolicyAcceptanceIfPossible(AuthResponse response) async {
+    final currentUser = Supabase.instance.client.auth.currentUser;
+    if (response.user == null || currentUser == null) return;
+
+    try {
+      await _membershipService.acceptPolicies(
+        _requiredPolicies,
+        source: 'flutter_signup',
+        metadata: {
+          'isAdultConfirmed': _acceptedPolicies['age_policy'] == true,
+          'signupSource': 'flutter_signup',
+        },
+      );
+    } catch (error) {
+      debugPrint(
+          'Policy acceptance will be confirmed during membership: $error');
+    }
+  }
+
+  Uri _resolvePolicyUrl(String rawUrl) {
+    final uri = Uri.parse(rawUrl);
+    if (uri.hasScheme) {
+      if (uri.scheme != 'https') {
+        throw ArgumentError('Only HTTPS policy URLs are allowed.');
+      }
+      return uri;
+    }
+
+    return Uri.https(
+      'www.graceconnect.love',
+      '/${rawUrl.replaceFirst(RegExp(r'^/'), '')}',
+    );
+  }
+
+  Future<void> _openPolicyLink(String? url) async {
+    if (url == null || url.isEmpty) return;
+    try {
+      final uri = _resolvePolicyUrl(url);
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri);
+      }
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not open policy link: $error')),
+      );
+    }
+  }
+
+  Widget _buildPolicyLink(String title, String? url) {
+    return InkWell(
+      onTap: () => _openPolicyLink(url),
+      child: Text(
+        title,
+        style: TextStyle(
+          color: Theme.of(context).colorScheme.primary,
+          decoration: TextDecoration.underline,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPolicySection() {
+    final theme = Theme.of(context);
+
+    if (_policyLoadError != null) {
+      return Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.errorContainer,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              _policyLoadError!,
+              style: TextStyle(color: theme.colorScheme.onErrorContainer),
+            ),
+            const SizedBox(height: 8),
+            TextButton.icon(
+              onPressed: _isLoadingPolicies ? null : _loadPolicies,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Reload Policies'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_isLoadingPolicies) {
+      return const LinearProgressIndicator();
+    }
+
+    if (_requiredPolicies.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.errorContainer,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Required policies are not available yet.',
+              style: TextStyle(color: theme.colorScheme.onErrorContainer),
+            ),
+            const SizedBox(height: 8),
+            TextButton.icon(
+              onPressed: _loadPolicies,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Reload Policies'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Terms & Policies',
+          style: theme.textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 8),
+        ..._requiredPolicies.map((policy) {
+          final key = policy['document_key'] as String;
+          final title = policy['title'] as String? ?? 'Policy';
+          final url = policy['content_url'] as String?;
+
+          return CheckboxListTile(
+            value: _acceptedPolicies[key] ?? false,
+            onChanged: (value) {
+              setState(() => _acceptedPolicies[key] = value ?? false);
+            },
+            title: Wrap(
+              children: [
+                const Text('I accept the '),
+                _buildPolicyLink(title, url),
+                const Text('.'),
+              ],
+            ),
+            controlAffinity: ListTileControlAffinity.leading,
+            contentPadding: EdgeInsets.zero,
+          );
+        }),
+      ],
+    );
   }
 
   Future<void> _resendAndShowVerificationDialog() async {
@@ -244,7 +478,6 @@ class _SignupScreenState extends State<SignupScreen> {
                               onPressed: () => setState(
                                   () => _obscurePassword = !_obscurePassword))),
                       const SizedBox(height: 16),
-
                       AppTextField(
                           controller: _confirmPasswordController,
                           label: 'Confirm Pwd',
@@ -256,16 +489,12 @@ class _SignupScreenState extends State<SignupScreen> {
                               onPressed: () => setState(() =>
                                   _obscureConfirmPassword =
                                       !_obscureConfirmPassword))),
-
                       const SizedBox(height: 16),
-
-                      const SizedBox(height: 16),
-
+                      _buildPolicySection(),
                       const SizedBox(height: 24),
-
                       AppButton(
                         text: 'Sign Up',
-                        onPressed: _handleSignup,
+                        onPressed: _canSubmit ? _handleSignup : null,
                         isLoading: _isLoading,
                       )
                     ],
@@ -286,31 +515,6 @@ class _SignupScreenState extends State<SignupScreen> {
               ],
             ),
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _LegalLink extends StatelessWidget {
-  const _LegalLink({
-    required this.label,
-    required this.routeName,
-  });
-
-  final String label;
-  final String routeName;
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: () => Navigator.pushNamed(context, routeName),
-      child: Text(
-        label,
-        style: TextStyle(
-          color: Theme.of(context).colorScheme.primary,
-          decoration: TextDecoration.underline,
-          fontWeight: FontWeight.w600,
         ),
       ),
     );

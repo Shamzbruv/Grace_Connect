@@ -1,11 +1,8 @@
 import {
-  authenticatedUser,
   handleOptions,
-  hasCronSecret,
   jsonResponse,
-  profileChurchId,
+  requireCronSecret,
   serviceClient,
-  userProfile,
 } from "../_shared/grace.ts";
 
 type ServiceScheduleRow = {
@@ -156,40 +153,24 @@ Deno.serve(async (request) => {
   if (options) return options;
   if (request.method !== "POST") return jsonResponse({ error: "POST required." }, 405);
 
+  const forbidden = requireCronSecret(request, "ATTENDANCE_CRON_SECRET");
+  if (forbidden) return forbidden;
+
   const client = serviceClient();
-  const cronAuthorized =
-    hasCronSecret(request, "ATTENDANCE_CRON_SECRET") ||
-    hasCronSecret(request, "DAILY_QUIZ_CRON_SECRET");
   const body = await request.json().catch(() => ({})) as Record<string, unknown>;
   const requestedChurchId = String(body.church_id ?? "").trim();
 
   let churchIds: string[] = [];
-  if (cronAuthorized) {
-    if (requestedChurchId) {
-      churchIds = [requestedChurchId];
-    } else {
-      const { data: churchRows } = await client
-        .from("users")
-        .select("placeId")
-        .not("placeId", "is", null);
-      churchIds = Array.from(
-        new Set((churchRows ?? []).map((row) => String(row.placeId ?? "").trim()).filter(Boolean)),
-      );
-    }
+  if (requestedChurchId) {
+    churchIds = [requestedChurchId];
   } else {
-    let actorId = "";
-    try {
-      actorId = (await authenticatedUser(request)).id;
-    } catch (_) {
-      return jsonResponse({ error: "Forbidden." }, 403);
-    }
-    const profile = await userProfile(client, actorId);
-    const actorChurchId = profileChurchId(profile);
-    if (!actorChurchId) return jsonResponse({ error: "Church membership required." }, 403);
-    if (requestedChurchId && requestedChurchId !== actorChurchId) {
-      return jsonResponse({ error: "You can only finalize your own church." }, 403);
-    }
-    churchIds = [actorChurchId];
+    const { data: churchRows } = await client
+      .from("church_memberships")
+      .select("church_id")
+      .eq("membership_status", "active");
+    churchIds = Array.from(
+      new Set((churchRows ?? []).map((row) => String(row.church_id ?? "").trim()).filter(Boolean)),
+    );
   }
 
   const targetDates = [jamaicaDateInfo(0), jamaicaDateInfo(1)];
@@ -199,11 +180,24 @@ Deno.serve(async (request) => {
   let reportsCreated = 0;
 
   for (const churchId of churchIds) {
+    const { data: membershipRows, error: membershipError } = await client
+      .from("church_memberships")
+      .select("user_id")
+      .eq("church_id", churchId)
+      .eq("membership_status", "active");
+    if (membershipError) continue;
+
+    const memberIds = Array.from(
+      new Set((membershipRows ?? []).map((row) => String(row.user_id ?? "").trim()).filter(Boolean)),
+    );
+    if (memberIds.length === 0) continue;
+
     const { data: members, error: memberError } = await client
       .from("users")
       .select("id, uid, roles, appPrivileges")
-      .eq("placeId", churchId);
+      .in("id", memberIds);
     if (memberError) continue;
+
     const churchMembers = (members ?? []) as MemberRow[];
     if (churchMembers.length === 0) continue;
 

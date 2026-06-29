@@ -49,9 +49,28 @@ class _MembershipGateState extends State<MembershipGate> {
           );
         }
 
+        if (snapshot.hasError) {
+          return _StatusScreen(
+            icon: Icons.cloud_off_outlined,
+            title: 'Membership Unavailable',
+            message:
+                'Grace Connect could not load your membership right now. Check your connection and try again.',
+            onRefresh: _refresh,
+          );
+        }
+
         final membership = snapshot.data;
         if (membership == null || !membership.authenticated) {
           return const LoginScreen();
+        }
+
+        if (membership.hasLoadError) {
+          return _StatusScreen(
+            icon: Icons.cloud_off_outlined,
+            title: membership.loadErrorTitle,
+            message: membership.loadErrorMessage,
+            onRefresh: _refresh,
+          );
         }
 
         if (membership.isAccountRestricted) {
@@ -137,6 +156,7 @@ class _FindChurchScreenState extends State<FindChurchScreen> {
   String? _selectedChurchId;
   String? _selectedChurchName;
   bool _isLoading = false;
+  bool _isLoadingPolicies = false;
 
   List<Map<String, dynamic>> _requiredPolicies = [];
   Map<String, bool> _acceptedPolicies = {};
@@ -149,6 +169,13 @@ class _FindChurchScreenState extends State<FindChurchScreen> {
   }
 
   Future<void> _loadPolicies() async {
+    if (mounted) {
+      setState(() {
+        _isLoadingPolicies = true;
+        _policyLoadError = null;
+      });
+    }
+
     try {
       final policies =
           await MembershipService().getRequiredPolicies('member_signup');
@@ -156,16 +183,21 @@ class _FindChurchScreenState extends State<FindChurchScreen> {
         setState(() {
           _requiredPolicies = policies;
           _policyLoadError = null;
-          for (var p in policies) {
-            _acceptedPolicies[p['document_key'] as String] = false;
-          }
+          _acceptedPolicies = {
+            for (final policy in policies)
+              policy['document_key'] as String:
+                  _acceptedPolicies[policy['document_key'] as String] ?? false,
+          };
+          _isLoadingPolicies = false;
         });
       }
     } catch (e) {
       debugPrint('Failed to load required policies: $e');
       if (mounted) {
         setState(() {
-          _policyLoadError = 'Failed to load required policies. Please check your connection and try again.';
+          _policyLoadError =
+              'Failed to load required policies. Please check your connection and try again.';
+          _isLoadingPolicies = false;
         });
       }
     }
@@ -180,7 +212,8 @@ class _FindChurchScreenState extends State<FindChurchScreen> {
 
   bool get _canSubmit {
     if (_selectedChurchId == null || _selectedChurchId!.isEmpty) return false;
-    if (_requiredPolicies.isEmpty) return false; // Must have policies to accept
+    if (_isLoadingPolicies || _policyLoadError != null) return false;
+    if (_requiredPolicies.isEmpty) return false;
     for (var p in _requiredPolicies) {
       if (_acceptedPolicies[p['document_key'] as String] != true) {
         return false;
@@ -207,7 +240,8 @@ class _FindChurchScreenState extends State<FindChurchScreen> {
         source: 'flutter_church_request',
         metadata: {
           'isAdultConfirmed': _acceptedPolicies['age_policy'] == true,
-          'locationNoticeAccepted': _acceptedPolicies['location_disclosure'] == true
+          'locationNoticeAccepted':
+              _acceptedPolicies['location_disclosure'] == true
         },
       );
 
@@ -374,15 +408,67 @@ class _FindChurchScreenState extends State<FindChurchScreen> {
                         color: Theme.of(context).colorScheme.errorContainer,
                         borderRadius: BorderRadius.circular(12),
                       ),
-                      child: Row(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Icon(Icons.error_outline, color: Theme.of(context).colorScheme.onErrorContainer),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Text(
-                              _policyLoadError!,
-                              style: TextStyle(color: Theme.of(context).colorScheme.onErrorContainer),
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.error_outline,
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onErrorContainer,
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  _policyLoadError!,
+                                  style: TextStyle(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onErrorContainer,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          TextButton.icon(
+                            onPressed:
+                                _isLoadingPolicies ? null : _loadPolicies,
+                            icon: const Icon(Icons.refresh),
+                            label: const Text('Reload Policies'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ] else if (_isLoadingPolicies) ...[
+                    const SizedBox(height: 24),
+                    const LinearProgressIndicator(),
+                  ] else if (_requiredPolicies.isEmpty) ...[
+                    const SizedBox(height: 24),
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.errorContainer,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Membership policies are not available yet.',
+                            style: TextStyle(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onErrorContainer,
                             ),
+                          ),
+                          const SizedBox(height: 12),
+                          TextButton.icon(
+                            onPressed: _loadPolicies,
+                            icon: const Icon(Icons.refresh),
+                            label: const Text('Reload Policies'),
                           ),
                         ],
                       ),
@@ -400,7 +486,7 @@ class _FindChurchScreenState extends State<FindChurchScreen> {
                       final key = policy['document_key'] as String;
                       final title = policy['title'] as String? ?? 'Policy';
                       final url = policy['content_url'] as String?;
-                      
+
                       return CheckboxListTile(
                         value: _acceptedPolicies[key] ?? false,
                         onChanged: (val) => setState(() {

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../models/bible_data.dart';
+import '../../services/daily_bible_quiz_service.dart';
+import '../../services/daily_motivation_service.dart';
 import '../../services/bible_streak_service.dart';
 import 'bible_chapters_screen.dart';
 
@@ -13,16 +15,65 @@ class BibleBooksScreen extends StatefulWidget {
 
 class _BibleBooksScreenState extends State<BibleBooksScreen> {
   late Future<BibleStreakStatus> _streakFuture;
+  late Future<_BibleActionAvailability> _actionAvailabilityFuture;
 
   @override
   void initState() {
     super.initState();
     _streakFuture = BibleStreakService().currentStatus();
+    _actionAvailabilityFuture = _loadActionAvailability();
   }
 
   void _refreshStreak() {
     setState(() {
       _streakFuture = BibleStreakService().currentStatus();
+      _actionAvailabilityFuture = _loadActionAvailability();
+    });
+  }
+
+  Future<_BibleActionAvailability> _loadActionAvailability() async {
+    final results = await Future.wait<bool>([
+      _hasDailyWord(),
+      _hasAvailableQuiz(),
+    ]);
+
+    return _BibleActionAvailability(
+      dailyWordAvailable: results[0],
+      quizAvailable: results[1],
+    );
+  }
+
+  Future<bool> _hasDailyWord() async {
+    try {
+      final word = await DailyMotivationService().fetchToday();
+      return word != null;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> _hasAvailableQuiz() async {
+    try {
+      final status = await DailyBibleQuizService().status();
+      return status['can_start'] == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _openDailyQuiz() async {
+    await Navigator.pushNamed(context, '/daily_bible_quiz');
+    if (!mounted) return;
+    setState(() {
+      _actionAvailabilityFuture = _loadActionAvailability();
+    });
+  }
+
+  Future<void> _openDailyWord() async {
+    await Navigator.pushNamed(context, '/daily_word');
+    if (!mounted) return;
+    setState(() {
+      _actionAvailabilityFuture = _loadActionAvailability();
     });
   }
 
@@ -186,10 +237,18 @@ class _BibleBooksScreenState extends State<BibleBooksScreen> {
       child: Scaffold(
         appBar: AppBar(
           leadingWidth: 52,
-          leading: IconButton(
-            tooltip: 'Daily Bible Quiz',
-            onPressed: () => Navigator.pushNamed(context, '/daily_bible_quiz'),
-            icon: const Icon(Icons.quiz_outlined),
+          leading: FutureBuilder<_BibleActionAvailability>(
+            future: _actionAvailabilityFuture,
+            builder: (context, snapshot) {
+              return IconButton(
+                tooltip: 'Daily Bible Quiz',
+                onPressed: _openDailyQuiz,
+                icon: _ActionBadgeIcon(
+                  icon: Icons.psychology_alt_outlined,
+                  showBadge: snapshot.data?.quizAvailable == true,
+                ),
+              );
+            },
           ),
           titleSpacing: 4,
           centerTitle: false,
@@ -201,10 +260,18 @@ class _BibleBooksScreenState extends State<BibleBooksScreen> {
           ),
           backgroundColor: Colors.indigo,
           actions: [
-            IconButton(
-              tooltip: 'Daily Word',
-              onPressed: () => Navigator.pushNamed(context, '/daily_word'),
-              icon: const Icon(Icons.wb_sunny_outlined),
+            FutureBuilder<_BibleActionAvailability>(
+              future: _actionAvailabilityFuture,
+              builder: (context, snapshot) {
+                return IconButton(
+                  tooltip: 'Daily Word',
+                  onPressed: _openDailyWord,
+                  icon: _ActionBadgeIcon(
+                    icon: Icons.wb_sunny_outlined,
+                    showBadge: snapshot.data?.dailyWordAvailable == true,
+                  ),
+                );
+              },
             ),
             IconButton(
               tooltip: 'Bible streak leaderboard',
@@ -315,6 +382,53 @@ class _StreakRequirementRow extends StatelessWidget {
             ],
           ),
         ),
+      ],
+    );
+  }
+}
+
+class _BibleActionAvailability {
+  const _BibleActionAvailability({
+    required this.dailyWordAvailable,
+    required this.quizAvailable,
+  });
+
+  final bool dailyWordAvailable;
+  final bool quizAvailable;
+}
+
+class _ActionBadgeIcon extends StatelessWidget {
+  const _ActionBadgeIcon({
+    required this.icon,
+    required this.showBadge,
+  });
+
+  final IconData icon;
+  final bool showBadge;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Icon(icon),
+        if (showBadge)
+          Positioned(
+            right: -1,
+            top: -1,
+            child: Container(
+              width: 10,
+              height: 10,
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.error,
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: Theme.of(context).colorScheme.surface,
+                  width: 1.5,
+                ),
+              ),
+            ),
+          ),
       ],
     );
   }
