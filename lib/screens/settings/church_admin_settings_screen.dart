@@ -23,6 +23,12 @@ class _ChurchAdminSettingsScreenState extends State<ChurchAdminSettingsScreen> {
   final _addressController = TextEditingController();
   final _denominationController = TextEditingController();
   final _timezoneController = TextEditingController();
+  final _aboutController = TextEditingController();
+  final _foundedYearController = TextEditingController();
+  final _contactEmailController = TextEditingController();
+  final _contactPhoneController = TextEditingController();
+  final _websiteController = TextEditingController();
+  final _serviceTimesController = TextEditingController();
   Church? _church;
   bool _isLoading = true;
   bool _isSaving = false;
@@ -45,6 +51,12 @@ class _ChurchAdminSettingsScreenState extends State<ChurchAdminSettingsScreen> {
           _addressController.text = church?.address ?? '';
           _denominationController.text = church?.denomination ?? '';
           _timezoneController.text = church?.timezone ?? 'America/Jamaica';
+          _aboutController.text = church?.about ?? '';
+          _foundedYearController.text = church?.foundedYear?.toString() ?? '';
+          _contactEmailController.text = church?.contactEmail ?? '';
+          _contactPhoneController.text = church?.contactPhone ?? '';
+          _websiteController.text = church?.websiteUrl ?? '';
+          _serviceTimesController.text = church?.serviceTimesNote ?? '';
         });
       }
     }
@@ -61,12 +73,35 @@ class _ChurchAdminSettingsScreenState extends State<ChurchAdminSettingsScreen> {
     _addressController.dispose();
     _denominationController.dispose();
     _timezoneController.dispose();
+    _aboutController.dispose();
+    _foundedYearController.dispose();
+    _contactEmailController.dispose();
+    _contactPhoneController.dispose();
+    _websiteController.dispose();
+    _serviceTimesController.dispose();
     super.dispose();
   }
 
   Future<void> _saveChurchProfile() async {
     final church = _church;
     if (church == null) return;
+
+    final foundedYearText = _foundedYearController.text.trim();
+    final foundedYear = foundedYearText.isEmpty
+        ? null
+        : int.tryParse(foundedYearText.replaceAll(RegExp(r'[^0-9]'), ''));
+    final currentYear = DateTime.now().year;
+    if (foundedYearText.isNotEmpty &&
+        (foundedYear == null ||
+            foundedYear < 1500 ||
+            foundedYear > currentYear)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Enter a founded year between 1500 and $currentYear.'),
+        ),
+      );
+      return;
+    }
 
     setState(() => _isSaving = true);
     final updatedChurch = Church(
@@ -87,6 +122,12 @@ class _ChurchAdminSettingsScreenState extends State<ChurchAdminSettingsScreen> {
       policies: church.policies,
       liveStreamUrl: church.liveStreamUrl,
       isLive: church.isLive,
+      about: _aboutController.text.trim(),
+      foundedYear: foundedYear,
+      contactEmail: _contactEmailController.text.trim(),
+      contactPhone: _contactPhoneController.text.trim(),
+      websiteUrl: _websiteController.text.trim(),
+      serviceTimesNote: _serviceTimesController.text.trim(),
     );
 
     try {
@@ -128,6 +169,44 @@ class _ChurchAdminSettingsScreenState extends State<ChurchAdminSettingsScreen> {
               ),
               const SizedBox(height: 12),
               AppTextField(controller: _timezoneController, label: 'Timezone'),
+              const SizedBox(height: 12),
+              AppTextField(
+                controller: _aboutController,
+                label: 'About the Church',
+                hint: 'Share the church story, mission, or community focus',
+                maxLines: 4,
+              ),
+              const SizedBox(height: 12),
+              AppTextField(
+                controller: _foundedYearController,
+                label: 'Founded Year',
+                keyboardType: TextInputType.number,
+              ),
+              const SizedBox(height: 12),
+              AppTextField(
+                controller: _contactEmailController,
+                label: 'Church Contact Email',
+                keyboardType: TextInputType.emailAddress,
+              ),
+              const SizedBox(height: 12),
+              AppTextField(
+                controller: _contactPhoneController,
+                label: 'Church Contact Phone',
+                keyboardType: TextInputType.phone,
+              ),
+              const SizedBox(height: 12),
+              AppTextField(
+                controller: _websiteController,
+                label: 'Website',
+                keyboardType: TextInputType.url,
+              ),
+              const SizedBox(height: 12),
+              AppTextField(
+                controller: _serviceTimesController,
+                label: 'Service Times',
+                hint: 'Sunday 10:00 AM, Wednesday Bible Study 7:00 PM',
+                maxLines: 3,
+              ),
             ],
           ),
         ),

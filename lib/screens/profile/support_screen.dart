@@ -2,21 +2,17 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 // Optional or use ImagePicker
 import 'package:image_picker/image_picker.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
-import '../../providers/user_role_provider.dart';
 import '../../widgets/ui/app_scaffold.dart';
 import '../../widgets/ui/app_card.dart';
 import '../../widgets/ui/app_button.dart';
 import '../../widgets/ui/app_feedback.dart';
 import '../../widgets/ui/app_text_field.dart';
-import '../../models/support_ticket_model.dart';
-import '../../services/email_service.dart';
 
 class SupportScreen extends StatefulWidget {
   const SupportScreen({super.key});
@@ -137,17 +133,13 @@ class _SupportScreenState extends State<SupportScreen> {
       final user = Supabase.instance.client.auth.currentUser;
       if (user == null) throw Exception('User not logged in');
 
-      final roleProvider =
-          Provider.of<UserRoleProvider>(context, listen: false);
-      final profile = roleProvider.userProfile; // Assumes populated
-
       // 1. Upload Attachments
       List<String> attachmentUrls = [];
-      final ticketId = const Uuid().v4();
+      final draftTicketId = const Uuid().v4();
 
       for (var file in _attachments) {
         final path =
-            'support_tickets/${user.id}/$ticketId/attachments/${file.name}';
+            'support_tickets/${user.id}/$draftTicketId/attachments/${file.name}';
         if (kIsWeb) {
           await Supabase.instance.client.storage
               .from('support_attachments')
@@ -166,43 +158,24 @@ class _SupportScreenState extends State<SupportScreen> {
       // 2. Gather Info
       final deviceInfo = await _getDeviceInfo();
 
-      // 3. Create Model
-      final ticket = SupportTicket(
-        ticketId: ticketId,
-        uid: user.id,
-        reporterEmail: user.email ?? 'unknown',
-        churchId: profile?.placeId,
-        roles: profile?.roles ?? [],
-        issueType: _issueType,
-        appSection: _appSection,
-        summary: _summaryController.text.trim(),
-        description: _descriptionController.text.trim(),
-        impact: _impact,
-        deviceInfo: deviceInfo,
-        attachmentUrls: attachmentUrls,
-        status: 'open',
-        createdAt: DateTime.now(),
+      // 3. Save issue and queue notification emails in Supabase.
+      final response = await Supabase.instance.client.rpc(
+        'submit_support_ticket',
+        params: {
+          'p_issue_type': _issueType,
+          'p_app_section': _appSection,
+          'p_summary': _summaryController.text.trim(),
+          'p_description': _descriptionController.text.trim(),
+          'p_impact': _impact,
+          'p_device_info': deviceInfo,
+          'p_attachment_urls': attachmentUrls,
+        },
       );
+      final ticketId =
+          (response is Map ? response['ticketId'] : null)?.toString() ??
+              draftTicketId;
 
-      // 4. Save to Firestore
-      await Supabase.instance.client
-          .from('support_tickets')
-          .insert(ticket.toMap());
-
-      // Send email to support using Resend
-      try {
-        await EmailService().sendSupportReportEmail(
-          reporterEmail: user.email ?? 'unknown',
-          issueType: _issueType,
-          summary: _summaryController.text.trim(),
-          description: _descriptionController.text.trim(),
-          ticketId: ticketId,
-        );
-      } catch (e) {
-        debugPrint('Failed to send support email: $e');
-      }
-
-      // 5. Success
+      // 4. Success
       if (mounted) {
         _summaryController.clear();
         _descriptionController.clear();
@@ -212,7 +185,8 @@ class _SupportScreenState extends State<SupportScreen> {
           builder: (_) => AlertDialog(
             title: const Text('Report Sent'),
             content: Text(
-                'Your ticket ID is:\n$ticketId\n\nOur support team has been notified via email.'),
+              'Your ticket ID is:\n$ticketId\n\nWe received your issue and it is now being reviewed. We will work with your church admin and, where needed, with you directly to resolve it.',
+            ),
             actions: [
               TextButton(
                 onPressed: () {

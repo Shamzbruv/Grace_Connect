@@ -1,5 +1,3 @@
-
-
 class Church {
   final String id;
   final String name;
@@ -16,6 +14,12 @@ class Church {
   final Map<String, dynamic> policies; // Added policies for RBAC
   final String? liveStreamUrl;
   final bool isLive;
+  final String about;
+  final int? foundedYear;
+  final String contactEmail;
+  final String contactPhone;
+  final String websiteUrl;
+  final String serviceTimesNote;
 
   Church({
     required this.id,
@@ -33,6 +37,12 @@ class Church {
     this.policies = const {},
     this.liveStreamUrl,
     this.isLive = false,
+    this.about = '',
+    this.foundedYear,
+    this.contactEmail = '',
+    this.contactPhone = '',
+    this.websiteUrl = '',
+    this.serviceTimesNote = '',
   });
 
   factory Church.fromMap(Map<String, dynamic> data) {
@@ -45,13 +55,29 @@ class Church {
       ownerUserId: data['ownerUserId'] ?? '',
       timezone: data['timezone'] ?? 'UTC',
       status: data['status'] ?? 'pending',
-      createdAt: data['createdAt'] != null ? DateTime.parse(data['createdAt']) : DateTime.now(),
+      createdAt: data['createdAt'] != null
+          ? DateTime.parse(data['createdAt'])
+          : DateTime.now(),
       parish: data['parish'],
       latitude: data['latitude']?.toDouble(),
       longitude: data['longitude']?.toDouble(),
       policies: Map<String, dynamic>.from(data['policies'] ?? {}),
       liveStreamUrl: data['liveStreamUrl'],
       isLive: data['isLive'] ?? false,
+      about: data['about'] ?? '',
+      foundedYear: data['founded_year'] is int
+          ? data['founded_year'] as int
+          : data['foundedYear'] is int
+              ? data['foundedYear'] as int
+              : int.tryParse(
+                  (data['founded_year'] ?? data['foundedYear'] ?? '')
+                      .toString(),
+                ),
+      contactEmail: data['contact_email'] ?? data['contactEmail'] ?? '',
+      contactPhone: data['contact_phone'] ?? data['contactPhone'] ?? '',
+      websiteUrl: data['website_url'] ?? data['websiteUrl'] ?? '',
+      serviceTimesNote:
+          data['service_times_note'] ?? data['serviceTimesNote'] ?? '',
     );
   }
 
@@ -72,6 +98,12 @@ class Church {
       'policies': policies,
       'liveStreamUrl': liveStreamUrl,
       'isLive': isLive,
+      'about': about,
+      'founded_year': foundedYear,
+      'contact_email': contactEmail,
+      'contact_phone': contactPhone,
+      'website_url': websiteUrl,
+      'service_times_note': serviceTimesNote,
     };
   }
 }

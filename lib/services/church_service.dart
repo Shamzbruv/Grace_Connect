@@ -90,7 +90,19 @@ class ChurchService {
   }
 
   Future<void> updateChurch(Church church) async {
-    await _supabase.from('churches').update(church.toMap()).eq('id', church.id);
+    await _supabase.rpc('update_church_profile', params: {
+      'p_church_id': church.placeId.isNotEmpty ? church.placeId : church.id,
+      'p_name': church.name,
+      'p_address': church.address,
+      'p_denomination': church.denomination,
+      'p_timezone': church.timezone,
+      'p_about': church.about,
+      'p_founded_year': church.foundedYear,
+      'p_contact_email': church.contactEmail,
+      'p_contact_phone': church.contactPhone,
+      'p_website_url': church.websiteUrl,
+      'p_service_times_note': church.serviceTimesNote,
+    });
   }
 
   Stream<List<ServiceSchedule>> getSchedules(String churchId) {

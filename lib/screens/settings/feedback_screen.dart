@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:provider/provider.dart';
 import '../../providers/user_role_provider.dart';
-import '../../services/email_service.dart';
 import '../../widgets/ui/app_button.dart';
 import '../../widgets/ui/app_card.dart';
 import '../../widgets/ui/app_feedback.dart';
@@ -46,30 +45,29 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
     final authUser = Supabase.instance.client.auth.currentUser;
 
     try {
-      await Supabase.instance.client.from('feedback').insert({
-        'userId': user?.uid,
-        'churchId': user?.placeId,
-        'type': _type,
-        'message': message,
-        'contactEmail': _emailController.text.trim(),
-        'timestamp': DateTime.now().toIso8601String(),
-        'platform': Theme.of(context).platform.toString(),
-        'status': 'new',
-      });
-
-      await EmailService().sendBetaFeedbackEmail(
-        reporterEmail: authUser?.email ?? user?.email ?? 'unknown',
-        type: _type,
-        message: message,
-        contactEmail: _emailController.text.trim(),
-        churchId: user?.placeId ?? '',
-        userId: user?.uid ?? '',
+      await Supabase.instance.client.rpc(
+        'submit_support_ticket',
+        params: {
+          'p_issue_type': _type,
+          'p_app_section': 'Beta Feedback',
+          'p_summary': _type,
+          'p_description': message,
+          'p_impact': _type == 'Bug Report' ? 'Medium' : 'Low',
+          'p_device_info': {
+            'contactEmail': _emailController.text.trim(),
+            'platform': Theme.of(context).platform.toString(),
+            'churchId': user?.placeId,
+            'userId': user?.uid,
+            'authEmail': authUser?.email,
+          },
+          'p_attachment_urls': <String>[],
+        },
       );
 
       if (mounted) {
         AppFeedback.show(
           context,
-          'Thank you. Feedback sent.',
+          'Thank you. Your report was submitted and is now being reviewed.',
           type: AppFeedbackType.success,
         );
         Navigator.pop(context);

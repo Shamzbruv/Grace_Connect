@@ -107,5 +107,58 @@ void main() {
       expect(developerServiceSource, contains('developer_list_churches'));
       expect(developerServiceSource, isNot(contains('church_locations')));
     });
+
+    test('developer portal support issues and church drill-down are wired', () {
+      final migrationSource = File(
+        'supabase/migrations/20260629153000_developer_portal_issues_church_profiles.sql',
+      ).readAsStringSync();
+      final supportSource =
+          File('lib/screens/profile/support_screen.dart').readAsStringSync();
+      final feedbackSource =
+          File('lib/screens/settings/feedback_screen.dart').readAsStringSync();
+      final churchSettingsSource =
+          File('lib/screens/settings/church_admin_settings_screen.dart')
+              .readAsStringSync();
+      final portalSource =
+          File('../Grace_Connect_Landing/js/developer-portal.js')
+              .readAsStringSync();
+      final portalHtml = File('../Grace_Connect_Landing/developer/index.html')
+          .readAsStringSync();
+      final legacyChurchSource = File(
+        'supabase/migrations/20260629155000_publish_legacy_active_churches.sql',
+      ).readAsStringSync();
+
+      expect(migrationSource, contains('public.support_tickets'));
+      expect(migrationSource, contains('public.email_notification_queue'));
+      expect(migrationSource, contains('submit_support_ticket'));
+      expect(migrationSource, contains('developer_list_support_tickets'));
+      expect(migrationSource, contains('developer_update_support_ticket'));
+      expect(migrationSource, contains('developer_get_church_detail'));
+      expect(migrationSource,
+          contains('developer_list_church_registration_requests'));
+      expect(migrationSource, contains('developer_send_church_setup_prompt'));
+      expect(migrationSource, contains('update_church_profile'));
+      expect(migrationSource, contains("status in ('active', 'verified')"));
+      expect(legacyChurchSource, contains('public_visibility = true'));
+      expect(legacyChurchSource, contains('get_public_church_directory'));
+      expect(legacyChurchSource, contains('c."placeId"'));
+
+      expect(supportSource, contains('submit_support_ticket'));
+      expect(supportSource,
+          isNot(contains('EmailService().sendSupportReportEmail')));
+      expect(feedbackSource, contains('submit_support_ticket'));
+      expect(churchSettingsSource, contains('_aboutController'));
+      expect(churchSettingsSource, contains('_serviceTimesController'));
+
+      expect(portalHtml, contains('data-view="requests"'));
+      expect(portalHtml, contains('data-view="issues"'));
+      expect(portalHtml, isNot(contains('data-view="members"')));
+      expect(portalSource, contains('developer_list_support_tickets'));
+      expect(portalSource, contains('developer_get_church_detail'));
+      expect(portalSource,
+          contains('developer_list_church_registration_requests'));
+      expect(portalSource, isNot(contains('approve-member')));
+      expect(portalSource, isNot(contains('developer_approve_member_request')));
+    });
   });
 }
