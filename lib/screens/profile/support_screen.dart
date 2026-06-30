@@ -8,6 +8,7 @@ import 'package:device_info_plus/device_info_plus.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
+import '../../services/email_delivery_service.dart';
 import '../../widgets/ui/app_scaffold.dart';
 import '../../widgets/ui/app_card.dart';
 import '../../widgets/ui/app_button.dart';
@@ -174,6 +175,10 @@ class _SupportScreenState extends State<SupportScreen> {
       final ticketId =
           (response is Map ? response['ticketId'] : null)?.toString() ??
               draftTicketId;
+      final supportTicketId =
+          (response is Map ? response['id'] : null)?.toString() ?? ticketId;
+      final emailSent = await EmailDeliveryService()
+          .flushSupportTicketEmails(supportTicketId);
 
       // 4. Success
       if (mounted) {
@@ -185,7 +190,7 @@ class _SupportScreenState extends State<SupportScreen> {
           builder: (_) => AlertDialog(
             title: const Text('Report Sent'),
             content: Text(
-              'Your ticket ID is:\n$ticketId\n\nWe received your issue and it is now being reviewed. We will work with your church admin and, where needed, with you directly to resolve it.',
+              'Your ticket ID is:\n$ticketId\n\nWe received your issue and it is now being reviewed. We will work with your church admin and, where needed, with you directly to resolve it.${emailSent ? '\n\nA confirmation email was sent to you.' : '\n\nYour confirmation email is queued and will be sent when email delivery is available.'}',
             ),
             actions: [
               TextButton(

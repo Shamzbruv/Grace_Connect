@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:provider/provider.dart';
 import '../../providers/user_role_provider.dart';
+import '../../services/email_delivery_service.dart';
 import '../../widgets/ui/app_button.dart';
 import '../../widgets/ui/app_card.dart';
 import '../../widgets/ui/app_feedback.dart';
@@ -45,7 +46,7 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
     final authUser = Supabase.instance.client.auth.currentUser;
 
     try {
-      await Supabase.instance.client.rpc(
+      final response = await Supabase.instance.client.rpc(
         'submit_support_ticket',
         params: {
           'p_issue_type': _type,
@@ -63,11 +64,19 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
           'p_attachment_urls': <String>[],
         },
       );
+      final ticketId = response is Map
+          ? (response['id'] ?? response['ticketId'])?.toString()
+          : null;
+      final emailSent = ticketId == null
+          ? false
+          : await EmailDeliveryService().flushSupportTicketEmails(ticketId);
 
       if (mounted) {
         AppFeedback.show(
           context,
-          'Thank you. Your report was submitted and is now being reviewed.',
+          emailSent
+              ? 'Thank you. Your report was submitted and a confirmation email was sent.'
+              : 'Thank you. Your report was submitted. The confirmation email is queued.',
           type: AppFeedbackType.success,
         );
         Navigator.pop(context);

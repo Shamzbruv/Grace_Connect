@@ -152,11 +152,17 @@ void main() {
           File('lib/screens/profile/support_screen.dart').readAsStringSync();
       final feedbackSource =
           File('lib/screens/settings/feedback_screen.dart').readAsStringSync();
+      final emailDeliverySource =
+          File('lib/services/email_delivery_service.dart').readAsStringSync();
+      final mailerSource =
+          File('supabase/functions/grace-mailer/index.ts').readAsStringSync();
+      final supabaseConfig = File('supabase/config.toml').readAsStringSync();
       final churchSettingsSource =
           File('lib/screens/settings/church_admin_settings_screen.dart')
               .readAsStringSync();
       final portalFile =
           File('../Grace_Connect_Landing/js/developer-portal.js');
+      final publicMainFile = File('../Grace_Connect_Landing/js/main.js');
       final portalHtmlFile =
           File('../Grace_Connect_Landing/developer/index.html');
       final publicHomeFile = File('../Grace_Connect_Landing/index.html');
@@ -185,14 +191,26 @@ void main() {
       expect(supportSource, contains('submit_support_ticket'));
       expect(supportSource,
           isNot(contains('EmailService().sendSupportReportEmail')));
+      expect(supportSource, contains('EmailDeliveryService'));
       expect(feedbackSource, contains('submit_support_ticket'));
+      expect(feedbackSource, contains('EmailDeliveryService'));
+      expect(emailDeliverySource, contains('grace-mailer'));
+      expect(emailDeliverySource, contains('flush-support-ticket'));
+      expect(mailerSource, contains('RESEND_API_KEY'));
+      expect(mailerSource, contains('auth-signup'));
+      expect(mailerSource, contains('flush-queue'));
+      expect(mailerSource, contains('flush-support-ticket'));
+      expect(mailerSource, contains('email_notification_queue'));
+      expect(supabaseConfig, contains('[functions.grace-mailer]'));
       expect(churchSettingsSource, contains('_aboutController'));
       expect(churchSettingsSource, contains('_serviceTimesController'));
 
       if (portalFile.existsSync() &&
+          publicMainFile.existsSync() &&
           portalHtmlFile.existsSync() &&
           publicHomeFile.existsSync()) {
         final portalSource = portalFile.readAsStringSync();
+        final publicMainSource = publicMainFile.readAsStringSync();
         final portalHtml = portalHtmlFile.readAsStringSync();
         final publicHomeHtml = publicHomeFile.readAsStringSync();
 
@@ -209,6 +227,11 @@ void main() {
         expect(portalSource, contains('developer_approve_member_request'));
         expect(portalSource, contains('developer_update_user_access'));
         expect(portalSource, contains('developer_delete_user_account'));
+        expect(portalSource, contains('flushQueuedEmails'));
+        expect(portalSource, contains('grace-mailer'));
+        expect(publicMainSource, contains('auth-signup'));
+        expect(publicMainSource, contains('web_church_registration'));
+        expect(publicMainSource, contains('web_member_signup'));
       }
 
       expect(userManagementSource, contains('developer_update_user_access'));

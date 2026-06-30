@@ -14,3 +14,6 @@ verify_jwt = false
 
 [functions.finalize-service-attendance]
 verify_jwt = false
+
+[functions.grace-mailer]
+verify_jwt = false
