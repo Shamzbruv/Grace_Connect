@@ -7,9 +7,11 @@ class BibleHomeScreen extends StatefulWidget {
   const BibleHomeScreen({
     super.key,
     this.showBottomNavigation = true,
+    this.allowDailyQuiz = true,
   });
 
   final bool showBottomNavigation;
+  final bool allowDailyQuiz;
 
   @override
   State<BibleHomeScreen> createState() => _BibleHomeScreenState();
@@ -18,16 +20,18 @@ class BibleHomeScreen extends StatefulWidget {
 class _BibleHomeScreenState extends State<BibleHomeScreen> {
   int _currentIndex = 0;
 
-  final List<Widget> _screens = [
-    const BibleBooksScreen(),
-    const Center(child: Text("Search")), // Managed by onTap
-    const BibleQuizScreen(),
-  ];
-
   void _onTabTapped(int index) {
     if (index == 1) {
       // Search Tab tapped, show search delegate instead of switching tab
       showSearch(context: context, delegate: BibleSearchDelegate());
+    } else if (index == 2 && !widget.allowDailyQuiz) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Daily Bible Quiz is paused until your church subscription is active.',
+          ),
+        ),
+      );
     } else {
       setState(() {
         _currentIndex = index;
@@ -37,10 +41,13 @@ class _BibleHomeScreenState extends State<BibleHomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final body = switch (_currentIndex) {
+      2 => const BibleQuizScreen(),
+      _ => BibleBooksScreen(allowDailyQuiz: widget.allowDailyQuiz),
+    };
+
     return Scaffold(
-      body: _currentIndex == 1
-          ? const BibleBooksScreen()
-          : _screens[_currentIndex], // Fallback if index stuck
+      body: body,
       bottomNavigationBar: widget.showBottomNavigation
           ? BottomNavigationBar(
               currentIndex: _currentIndex,

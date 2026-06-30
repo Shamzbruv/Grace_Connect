@@ -196,8 +196,8 @@ class _SubscriptionGateState extends State<_SubscriptionGate> {
     final route = ModalRoute.of(context)?.settings.name;
     return route == null ||
         route == '/' ||
-        route == '/community' ||
-        route == '/developer_console';
+        route == '/bible' ||
+        route == '/daily_word';
   }
 
   @override
@@ -245,8 +245,8 @@ class _SubscriptionRequiredScreen extends StatelessWidget {
         ? 'your church'
         : churchName!.trim();
     final message = loadError == null
-        ? '$name does not currently have an active Grace Connect subscription. The feed is still available, but the rest of the church management tools are paused. Please contact your church administrator to discuss subscription options.'
-        : 'Grace Connect could not verify the subscription for $name. The feed is still available while this is checked. Please try again or contact your church administrator.';
+        ? '$name does not currently have an active Grace Connect subscription. Bible reading and Daily Word are still available, but church management tools are paused. Please contact your church administrator to discuss subscription options.'
+        : 'Grace Connect could not verify the subscription for $name. Bible reading and Daily Word remain available while this is checked. Please try again or contact your church administrator.';
 
     return Scaffold(
       body: SafeArea(
@@ -282,9 +282,16 @@ class _SubscriptionRequiredScreen extends StatelessWidget {
                   const SizedBox(height: 24),
                   FilledButton.icon(
                     onPressed: () => Navigator.of(context)
-                        .pushNamedAndRemoveUntil('/community', (_) => false),
-                    icon: const Icon(Icons.dynamic_feed_outlined),
-                    label: const Text('Open Feed'),
+                        .pushNamedAndRemoveUntil('/bible', (_) => false),
+                    icon: const Icon(Icons.menu_book_outlined),
+                    label: const Text('Open Bible'),
+                  ),
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    onPressed: () => Navigator.of(context)
+                        .pushNamedAndRemoveUntil('/daily_word', (_) => false),
+                    icon: const Icon(Icons.wb_sunny_outlined),
+                    label: const Text('Open Daily Word'),
                   ),
                   const SizedBox(height: 8),
                   TextButton.icon(

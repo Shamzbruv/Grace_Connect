@@ -153,7 +153,7 @@ class NotificationService {
     }
 
     const AndroidInitializationSettings androidInit =
-        AndroidInitializationSettings('@mipmap/ic_launcher');
+        AndroidInitializationSettings('ic_stat_grace_connect');
     const DarwinInitializationSettings iosInit = DarwinInitializationSettings(
       defaultPresentAlert: true,
       defaultPresentBadge: true,
@@ -208,6 +208,8 @@ class NotificationService {
       channelDescription: profile.description,
       importance: Importance.max,
       priority: Priority.high,
+      icon: 'ic_stat_grace_connect',
+      color: const Color(0xFF0B5C7D),
       playSound: true,
       sound: profile.androidSound,
     );

@@ -5,7 +5,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/user_profile.dart';
 import '../providers/user_role_provider.dart';
 import '../services/feed_scroll_service.dart';
-import 'notification_section_icon.dart';
 
 class AppBottomMenu extends StatelessWidget {
   const AppBottomMenu({
@@ -13,12 +12,16 @@ class AppBottomMenu extends StatelessWidget {
     this.selectedIndex,
     this.onDestinationSelected,
     this.subscriptionLimited = false,
+    this.limitedAllowedIndexes = const {0},
+    this.limitedAllowedRoutes = const {'/community'},
     this.limitedNotice,
   });
 
   final int? selectedIndex;
   final ValueChanged<int>? onDestinationSelected;
   final bool subscriptionLimited;
+  final Set<int> limitedAllowedIndexes;
+  final Set<String> limitedAllowedRoutes;
   final String? limitedNotice;
 
   static const List<_MenuItem> _primaryItems = [
@@ -119,7 +122,6 @@ class AppBottomMenu extends StatelessWidget {
       route: '/notifications',
       icon: Icons.notifications_outlined,
       selectedIcon: Icons.notifications,
-      assetIconPath: NotificationSectionIcon.assetPath,
     ),
     _MenuItem(
       label: 'Giving',
@@ -161,7 +163,7 @@ class AppBottomMenu extends StatelessWidget {
       elevation: 6,
       labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
       onDestinationSelected: (index) {
-        if (subscriptionLimited && index != 0) {
+        if (subscriptionLimited && !limitedAllowedIndexes.contains(index)) {
           _showLimitedNotice(context);
           return;
         }
@@ -188,12 +190,14 @@ class AppBottomMenu extends StatelessWidget {
             icon: _menuIcon(
               context,
               _primaryItems[index].icon,
-              disabled: subscriptionLimited && index != 0,
+              disabled:
+                  subscriptionLimited && !limitedAllowedIndexes.contains(index),
             ),
             selectedIcon: _menuIcon(
               context,
               _primaryItems[index].selectedIcon,
-              disabled: subscriptionLimited && index != 0,
+              disabled:
+                  subscriptionLimited && !limitedAllowedIndexes.contains(index),
             ),
             label: _primaryItems[index].label,
           ),
@@ -234,7 +238,7 @@ class AppBottomMenu extends StatelessWidget {
   }
 
   void _navigateTo(BuildContext context, String route) {
-    if (subscriptionLimited && route != '/community') {
+    if (subscriptionLimited && !limitedAllowedRoutes.contains(route)) {
       _showLimitedNotice(context);
       return;
     }
@@ -262,6 +266,7 @@ class AppBottomMenu extends StatelessWidget {
           items: items,
           currentRoute: currentRoute,
           subscriptionLimited: subscriptionLimited,
+          limitedAllowedRoutes: limitedAllowedRoutes,
           limitedNotice: limitedNotice,
           onSelectRoute: (route) {
             Navigator.of(sheetContext).pop();
@@ -327,6 +332,7 @@ class _MoreMenuSheet extends StatelessWidget {
   final List<_MenuItem> items;
   final String? currentRoute;
   final bool subscriptionLimited;
+  final Set<String> limitedAllowedRoutes;
   final String? limitedNotice;
   final ValueChanged<String> onSelectRoute;
   final VoidCallback onLogOut;
@@ -335,6 +341,7 @@ class _MoreMenuSheet extends StatelessWidget {
     required this.items,
     required this.currentRoute,
     required this.subscriptionLimited,
+    required this.limitedAllowedRoutes,
     this.limitedNotice,
     required this.onSelectRoute,
     required this.onLogOut,
@@ -376,7 +383,9 @@ class _MoreMenuSheet extends StatelessWidget {
                 isActive: item.route == currentRoute ||
                     (item.route == '/settings' &&
                         currentRoute?.startsWith('/settings') == true),
-                isDisabled: subscriptionLimited,
+                isDisabled: subscriptionLimited &&
+                    !(item.route != null &&
+                        limitedAllowedRoutes.contains(item.route)),
                 limitedNotice: limitedNotice,
                 onTap: () {
                   final route = item.route;
@@ -424,19 +433,14 @@ class _MoreMenuTile extends StatelessWidget {
     final theme = Theme.of(context);
 
     return ListTile(
-      leading: item.assetIconPath == null
-          ? Icon(
-              isActive ? item.selectedIcon : item.icon,
-              color: isDisabled
-                  ? theme.colorScheme.onSurface.withValues(alpha: 0.38)
-                  : isActive
-                      ? theme.colorScheme.primary
-                      : null,
-            )
-          : Opacity(
-              opacity: isDisabled ? 0.35 : 1,
-              child: const NotificationSectionIcon(),
-            ),
+      leading: Icon(
+        isActive ? item.selectedIcon : item.icon,
+        color: isDisabled
+            ? theme.colorScheme.onSurface.withValues(alpha: 0.38)
+            : isActive
+                ? theme.colorScheme.primary
+                : null,
+      ),
       title: Text(
         item.label,
         style: TextStyle(
@@ -477,13 +481,11 @@ class _MenuItem {
   final String? route;
   final IconData icon;
   final IconData selectedIcon;
-  final String? assetIconPath;
 
   const _MenuItem({
     required this.label,
     required this.icon,
     required this.selectedIcon,
-    this.assetIconPath,
     this.route,
   });
 }

@@ -52,7 +52,9 @@ class Church {
       placeId: data['placeId'] ?? '',
       address: data['address'] ?? '',
       denomination: data['denomination'] ?? '',
-      ownerUserId: data['ownerUserId'] ?? '',
+      ownerUserId: data['ownerUserId']?.toString() ??
+          data['owner_user_id']?.toString() ??
+          '',
       timezone: data['timezone'] ?? 'UTC',
       status: data['status'] ?? 'pending',
       createdAt: data['createdAt'] != null

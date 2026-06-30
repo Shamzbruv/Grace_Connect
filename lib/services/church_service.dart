@@ -238,16 +238,21 @@ class ChurchService {
         throw Exception('Missing church or new owner.');
       }
 
+      final ownerUpdate = {
+        'ownerUserId': newOwnerUid,
+        'owner_user_id': newOwnerUid,
+      };
+
       final updated = await _supabase
           .from('churches')
-          .update({'ownerUserId': newOwnerUid})
+          .update(ownerUpdate)
           .eq('id', cleanChurchId)
           .select('id');
 
       if (updated.isEmpty) {
         await _supabase
             .from('churches')
-            .update({'ownerUserId': newOwnerUid})
+            .update(ownerUpdate)
             .eq('placeId', cleanChurchId)
             .select('id')
             .single();

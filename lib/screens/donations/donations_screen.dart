@@ -159,7 +159,7 @@ class _DonationsScreenState extends State<DonationsScreen> {
                     const SizedBox(height: 8),
                     Text(
                       givingUrl == null
-                          ? 'Your church has not configured its SpurrOpen giving link yet.'
+                          ? 'Your church has not configured its SpurrOpen giving link yet. SpurrOpen is free to sign up for, and your church admin can add the giving link from settings.'
                           : 'You will be redirected to your church SpurrOpen giving page.',
                       style: theme.textTheme.bodyMedium?.copyWith(
                         color: theme.colorScheme.onSurfaceVariant,
@@ -187,7 +187,7 @@ class _DonationsScreenState extends State<DonationsScreen> {
                     if (mounted) _loadGivingUrl();
                   },
                   icon: const Icon(Icons.settings_outlined),
-                  label: const Text('Configure Giving Link'),
+                  label: const Text('Configure SpurrOpen Link'),
                 ),
               ],
             ],

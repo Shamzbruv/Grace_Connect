@@ -57,14 +57,27 @@ class _TransferOwnershipScreenState extends State<TransferOwnershipScreen> {
 
       if (query.isNotEmpty) {
         final data = query.first;
-        final docId = data['uid'];
+        final authUserId = (data['id'] ?? data['uid'] ?? '').toString();
+        final roleTargetUid = (data['uid'] ?? data['id'] ?? '').toString();
         final userChurchId = data['placeId']?.toString() ?? '';
+        final memberships = authUserId.isEmpty
+            ? const []
+            : await Supabase.instance.client
+                .from('church_memberships')
+                .select('id, church_id, membership_status')
+                .eq('user_id', authUserId)
+                .eq('membership_status', 'active');
+        final hasActiveMembership = memberships.any((membership) {
+          final churchId = membership['church_id']?.toString() ?? '';
+          return validChurchIds.contains(churchId);
+        });
 
-        // Ensure the user belongs to the same church
-        if (validChurchIds.contains(userChurchId)) {
+        // Prefer the canonical membership table. The legacy users.placeId check
+        // remains as a fallback for older rows that are still being repaired.
+        if (hasActiveMembership || validChurchIds.contains(userChurchId)) {
           setState(() {
             _foundUser = data;
-            _foundUserUid = docId as String?;
+            _foundUserUid = roleTargetUid.isEmpty ? null : roleTargetUid;
           });
         } else {
           if (mounted) {
@@ -166,7 +179,7 @@ class _TransferOwnershipScreenState extends State<TransferOwnershipScreen> {
   Widget build(BuildContext context) {
     return AppScaffold(
       title: 'Transfer Ownership',
-      body: Padding(
+      body: SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -186,27 +199,47 @@ class _TransferOwnershipScreenState extends State<TransferOwnershipScreen> {
               ),
             ],
             const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _emailController,
-                    decoration: const InputDecoration(
-                      labelText: 'Member Email',
-                      hintText: 'user@example.com',
-                      border: OutlineInputBorder(),
-                    ),
-                    keyboardType: TextInputType.emailAddress,
-                    onSubmitted: (_) => _searchUser(),
+            TextField(
+              controller: _emailController,
+              decoration: const InputDecoration(
+                labelText: 'Member Email',
+                hintText: 'user@example.com',
+                border: OutlineInputBorder(),
+              ),
+              keyboardType: TextInputType.emailAddress,
+              onSubmitted: (_) => _searchUser(),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: AppButton(
+                text: 'Search Member',
+                onPressed: _isLoading ? null : _searchUser,
+              ),
+            ),
+            if (_foundUser == null && !_isLoading) ...[
+              const SizedBox(height: 16),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        Icons.info_outline,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                      const SizedBox(width: 10),
+                      const Expanded(
+                        child: Text(
+                          'Search for an active member of this church. The member must already be approved before ownership can be transferred.',
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                const SizedBox(width: 8),
-                AppButton(
-                  text: 'Search',
-                  onPressed: _isLoading ? null : _searchUser,
-                ),
-              ],
-            ),
+              ),
+            ],
             const SizedBox(height: 32),
             if (_isLoading)
               const Center(child: AppLoader())

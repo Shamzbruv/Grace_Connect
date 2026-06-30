@@ -100,8 +100,12 @@ void main() {
       expect(migrationSource, contains('developer_clear_church_subscription'));
       expect(migrationSource, contains('subscription_active'));
       expect(gateSource, contains('Subscription Required'));
-      expect(gateSource, contains("route == '/community'"));
+      expect(gateSource, contains("route == '/bible'"));
+      expect(gateSource, contains("route == '/daily_word'"));
+      expect(gateSource, contains('Open Bible'));
+      expect(gateSource, contains('Open Daily Word'));
       expect(tabSource, contains('_subscriptionLimited'));
+      expect(tabSource, contains('allowDailyQuiz: !_subscriptionLimited'));
       expect(tabSource, contains('NeverScrollableScrollPhysics'));
       expect(developerServiceSource, contains('developer_get_dashboard'));
       expect(developerServiceSource, contains('developer_list_churches'));
@@ -129,7 +133,7 @@ void main() {
       expect(gateSource, contains('membershipLimited: true'));
       expect(gateSource, contains("route == '/community'"));
       expect(gateSource, contains('Browse Feed For Now'));
-      expect(tabSource, contains('_feedOnlyLimited'));
+      expect(tabSource, contains('_hasLimitedAccess'));
       expect(feedSource,
           contains('Showing public posts shared across Grace Connect'));
       expect(feedSource, contains('readOnly: _isBrowseOnly(churchId)'));
@@ -193,6 +197,8 @@ void main() {
           isNot(contains('EmailService().sendSupportReportEmail')));
       expect(supportSource, contains('EmailDeliveryService'));
       expect(feedbackSource, contains('submit_support_ticket'));
+      expect(feedbackSource, contains('support_attachments'));
+      expect(feedbackSource, contains('_uploadAttachments'));
       expect(feedbackSource, contains('EmailDeliveryService'));
       expect(emailDeliverySource, contains('grace-mailer'));
       expect(emailDeliverySource, contains('flush-support-ticket'));
@@ -252,10 +258,12 @@ void main() {
       ).readAsStringSync();
 
       expect(gradle, contains('"love.graceconnect"'));
-      expect(gradle, contains('versionCode 15'));
-      expect(gradle, contains('versionName "1.0.14-beta"'));
+      expect(gradle, contains('versionCode 16'));
+      expect(gradle, contains('versionName "1.0.15-beta"'));
       expect(activity, contains('package love.graceconnect'));
       expect(manifest, contains('love.graceconnect.MainActivity'));
+      expect(manifest, contains('default_notification_icon'));
+      expect(manifest, contains('@drawable/ic_stat_grace_connect'));
       expect(googleServices, contains('"package_name": "love.graceconnect"'));
       expect(googleServices, isNot(contains('com.example.grace_connect')));
       expect(manifest, isNot(contains('ACCESS_BACKGROUND_LOCATION')));
@@ -311,6 +319,39 @@ void main() {
       expect(functionsSource, contains('PUBLIC_BROADCAST_TYPES'));
       expect(functionsSource,
           contains('Only public church-wide broadcasts can use topic push.'));
+    });
+
+    test('Google Play reviewer demo access stays non-developer', () {
+      final migrationSource = File(
+        'supabase/migrations/20260630193000_play_review_demo_access.sql',
+      ).readAsStringSync();
+      final scriptSource = File('scripts/setup_google_play_review_accounts.py')
+          .readAsStringSync();
+      final docsSource =
+          File('docs/google_play_review_access.md').readAsStringSync();
+      final settingsSource =
+          File('lib/screens/settings/settings_home_screen.dart')
+              .readAsStringSync();
+      final appSettingsSource =
+          File('lib/screens/settings/app_settings_screen.dart')
+              .readAsStringSync();
+
+      expect(migrationSource, contains('Grace Connect Review Demo Church'));
+      expect(migrationSource, contains('play_review_demo'));
+      expect(migrationSource, contains('public_visibility'));
+      expect(migrationSource, contains('false'));
+      expect(migrationSource, contains('"isDeveloper"'));
+      expect(scriptSource, contains('PLAY_REVIEW_MEMBER_EMAIL'));
+      expect(scriptSource, contains('PLAY_REVIEW_ADMIN_PASSWORD'));
+      expect(scriptSource, contains('"isDeveloper": False'));
+      expect(scriptSource, isNot(contains('developer_accounts')));
+      expect(
+          docsSource,
+          contains(
+              'Developer Portal / Developer Console access is intentionally not provided'));
+      expect(settingsSource, contains('hasDeveloperAccess'));
+      expect(appSettingsSource, contains('terms.html'));
+      expect(appSettingsSource, contains('privacy.html'));
     });
 
     test('legacy express backend cannot start accidentally', () {

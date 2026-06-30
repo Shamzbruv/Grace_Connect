@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../providers/theme_provider.dart';
 import '../../theme/app_colors.dart';
@@ -17,6 +19,7 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
   bool _dataSaver = false;
   bool _haptics = true;
   bool _isLoading = true;
+  String _versionLabel = 'Version loading...';
 
   @override
   void initState() {
@@ -26,10 +29,13 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
 
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
+    final packageInfo = await PackageInfo.fromPlatform();
     if (!mounted) return;
     setState(() {
       _dataSaver = prefs.getBool('data_saver') ?? false;
       _haptics = prefs.getBool('haptics_enabled') ?? true;
+      _versionLabel =
+          'Version ${packageInfo.version} (Build ${packageInfo.buildNumber})';
       _isLoading = false;
     });
   }
@@ -37,6 +43,17 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
   Future<void> _saveBool(String key, bool value) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(key, value);
+  }
+
+  Future<void> _openPublicLegalPage(String path) async {
+    final cleanPath = path.startsWith('/') ? path.substring(1) : path;
+    final uri = Uri.https('www.graceconnect.love', cleanPath);
+    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!opened && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not open ${uri.toString()}')),
+      );
+    }
   }
 
   @override
@@ -50,19 +67,19 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                const Center(
+                Center(
                   child: Padding(
-                    padding: EdgeInsets.symmetric(vertical: 24),
+                    padding: const EdgeInsets.symmetric(vertical: 24),
                     child: Column(
                       children: [
-                        Icon(Icons.perm_device_information,
+                        const Icon(Icons.perm_device_information,
                             size: 60, color: Colors.grey),
-                        SizedBox(height: 16),
-                        Text('Grace Connect App',
+                        const SizedBox(height: 16),
+                        const Text('Grace Connect App',
                             style: TextStyle(
                                 fontSize: 20, fontWeight: FontWeight.bold)),
-                        Text('Version 1.0.0 (Build 1)',
-                            style: TextStyle(color: Colors.grey)),
+                        Text(_versionLabel,
+                            style: const TextStyle(color: Colors.grey)),
                       ],
                     ),
                   ),
@@ -123,11 +140,11 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
                 _buildActionTile(
                     context, 'Terms of Service', Icons.description_outlined,
                     () {
-                  Navigator.pushNamed(context, '/settings/terms');
+                  _openPublicLegalPage('/terms.html');
                 }),
                 _buildActionTile(
                     context, 'Privacy Policy', Icons.privacy_tip_outlined, () {
-                  Navigator.pushNamed(context, '/settings/privacy_policy');
+                  _openPublicLegalPage('/privacy.html');
                 }),
                 _buildActionTile(context, 'Open Source Licenses', Icons.code,
                     () {

@@ -5,6 +5,14 @@ import 'church_subscription_service.dart';
 class DeveloperService {
   final SupabaseClient _supabase = Supabase.instance.client;
 
+  Future<bool> hasDeveloperAccess() async {
+    try {
+      return await getDeveloperSession() != null;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<Map<String, dynamic>?> getDeveloperSession() async {
     final data = await _supabase.rpc('developer_get_session');
     if (data is Map<String, dynamic>) return data;

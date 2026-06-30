@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../providers/user_role_provider.dart';
 import '../../widgets/ui/app_scaffold.dart';
@@ -13,12 +14,8 @@ class FinanceSettingsScreen extends StatefulWidget {
 }
 
 class _FinanceSettingsScreenState extends State<FinanceSettingsScreen> {
-  final _approvalThresholdController = TextEditingController();
   final _givingUrlController = TextEditingController();
 
-  String _currency = 'JMD';
-  int _fiscalYearStartMonth = 1;
-  bool _requireReceipts = true;
   bool _isLoading = true;
   bool _isSaving = false;
   Map<String, dynamic> _policies = {};
@@ -31,7 +28,6 @@ class _FinanceSettingsScreenState extends State<FinanceSettingsScreen> {
 
   @override
   void dispose() {
-    _approvalThresholdController.dispose();
     _givingUrlController.dispose();
     super.dispose();
   }
@@ -59,12 +55,7 @@ class _FinanceSettingsScreenState extends State<FinanceSettingsScreen> {
       if (!mounted) return;
       setState(() {
         _policies = policies;
-        _currency = finance['currency'] ?? 'JMD';
-        _fiscalYearStartMonth = finance['fiscalYearStartMonth'] ?? 1;
-        _requireReceipts = finance['requireReceipts'] ?? true;
         _givingUrlController.text = finance['givingUrl'] ?? '';
-        _approvalThresholdController.text =
-            (finance['approvalThreshold'] ?? 50000).toString();
         _isLoading = false;
       });
     } catch (e) {
@@ -82,15 +73,12 @@ class _FinanceSettingsScreenState extends State<FinanceSettingsScreen> {
     if (churchId == null || churchId.isEmpty) return;
 
     setState(() => _isSaving = true);
-    final threshold =
-        double.tryParse(_approvalThresholdController.text.trim()) ?? 0;
+    final currentFinance =
+        Map<String, dynamic>.from(_policies['financeSettings'] ?? {});
 
     final updatedPolicies = Map<String, dynamic>.from(_policies)
       ..['financeSettings'] = {
-        'currency': _currency,
-        'fiscalYearStartMonth': _fiscalYearStartMonth,
-        'requireReceipts': _requireReceipts,
-        'approvalThreshold': threshold,
+        ...currentFinance,
         'givingProvider': 'SpurrOpen',
         'givingUrl': _normalizeUrl(_givingUrlController.text),
         'updatedAt': DateTime.now().toIso8601String(),
@@ -106,7 +94,7 @@ class _FinanceSettingsScreenState extends State<FinanceSettingsScreen> {
         _isSaving = false;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Finance settings saved')),
+        const SnackBar(content: Text('Giving settings saved')),
       );
     } catch (e) {
       if (!mounted) return;
@@ -125,68 +113,55 @@ class _FinanceSettingsScreenState extends State<FinanceSettingsScreen> {
 
     if (!canManageFinance) {
       return const AppScaffold(
-        title: 'Finance Settings',
-        body:
-            Center(child: Text('You do not have access to finance settings.')),
+        title: 'Giving Settings',
+        body: Center(child: Text('You do not have access to giving settings.')),
       );
     }
 
     return AppScaffold(
-      title: 'Finance Settings',
+      title: 'Giving Settings',
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                DropdownButtonFormField<String>(
-                  // ignore: deprecated_member_use
-                  value: _currency,
-                  decoration: const InputDecoration(
-                    labelText: 'Default Currency',
-                    border: OutlineInputBorder(),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.volunteer_activism_outlined,
+                              color: Theme.of(context).colorScheme.primary,
+                            ),
+                            const SizedBox(width: 10),
+                            Text(
+                              'SpurrOpen Giving',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleMedium
+                                  ?.copyWith(fontWeight: FontWeight.w800),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        const Text(
+                          'Grace Connect does not process offerings directly. Add your church SpurrOpen giving page so members can continue in a secure external browser.',
+                        ),
+                        const SizedBox(height: 12),
+                        OutlinedButton.icon(
+                          onPressed: _openSpurrOpen,
+                          icon: const Icon(Icons.open_in_new_outlined),
+                          label: const Text('Set up SpurrOpen'),
+                        ),
+                      ],
+                    ),
                   ),
-                  items: const [
-                    DropdownMenuItem(value: 'JMD', child: Text('JMD')),
-                    DropdownMenuItem(value: 'USD', child: Text('USD')),
-                    DropdownMenuItem(value: 'GBP', child: Text('GBP')),
-                    DropdownMenuItem(value: 'CAD', child: Text('CAD')),
-                  ],
-                  onChanged: (value) {
-                    if (value != null) setState(() => _currency = value);
-                  },
                 ),
                 const SizedBox(height: 16),
-                DropdownButtonFormField<int>(
-                  // ignore: deprecated_member_use
-                  value: _fiscalYearStartMonth,
-                  decoration: const InputDecoration(
-                    labelText: 'Fiscal Year Starts',
-                    border: OutlineInputBorder(),
-                  ),
-                  items: const [
-                    DropdownMenuItem(value: 1, child: Text('January')),
-                    DropdownMenuItem(value: 4, child: Text('April')),
-                    DropdownMenuItem(value: 7, child: Text('July')),
-                    DropdownMenuItem(value: 10, child: Text('October')),
-                  ],
-                  onChanged: (value) {
-                    if (value != null) {
-                      setState(() => _fiscalYearStartMonth = value);
-                    }
-                  },
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: _approvalThresholdController,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: 'Approval Threshold',
-                    helperText:
-                        'Expenses above this amount should be reviewed first.',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 12),
                 TextField(
                   controller: _givingUrlController,
                   keyboardType: TextInputType.url,
@@ -198,16 +173,6 @@ class _FinanceSettingsScreenState extends State<FinanceSettingsScreen> {
                     prefixIcon: Icon(Icons.link_outlined),
                   ),
                 ),
-                const SizedBox(height: 12),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Require Receipts'),
-                  subtitle:
-                      const Text('Flag expense records that have no receipt.'),
-                  value: _requireReceipts,
-                  onChanged: (value) =>
-                      setState(() => _requireReceipts = value),
-                ),
                 const SizedBox(height: 24),
                 FilledButton.icon(
                   onPressed: _isSaving ? null : _saveSettings,
@@ -218,7 +183,7 @@ class _FinanceSettingsScreenState extends State<FinanceSettingsScreen> {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Icon(Icons.save_outlined),
-                  label: const Text('Save Finance Settings'),
+                  label: const Text('Save SpurrOpen Link'),
                 ),
               ],
             ),
@@ -247,5 +212,10 @@ class _FinanceSettingsScreenState extends State<FinanceSettingsScreen> {
       return trimmed;
     }
     return 'https://$trimmed';
+  }
+
+  Future<void> _openSpurrOpen() async {
+    final uri = Uri.parse('https://www.spurropen.com/giving/');
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../models/bible_data.dart';
 import '../../services/daily_bible_quiz_service.dart';
 import '../../services/daily_motivation_service.dart';
@@ -7,7 +8,12 @@ import '../../services/bible_streak_service.dart';
 import 'bible_chapters_screen.dart';
 
 class BibleBooksScreen extends StatefulWidget {
-  const BibleBooksScreen({super.key});
+  const BibleBooksScreen({
+    super.key,
+    this.allowDailyQuiz = true,
+  });
+
+  final bool allowDailyQuiz;
 
   @override
   State<BibleBooksScreen> createState() => _BibleBooksScreenState();
@@ -32,36 +38,71 @@ class _BibleBooksScreenState extends State<BibleBooksScreen> {
   }
 
   Future<_BibleActionAvailability> _loadActionAvailability() async {
-    final results = await Future.wait<bool>([
-      _hasDailyWord(),
-      _hasAvailableQuiz(),
+    final results = await Future.wait<_ActionAvailabilityItem>([
+      _dailyWordAvailability(),
+      _quizAvailability(),
     ]);
+    final acknowledged = await Future.wait<_ActionAvailabilityItem>(
+      results.map((item) => item.withAcknowledgement()),
+    );
 
     return _BibleActionAvailability(
-      dailyWordAvailable: results[0],
-      quizAvailable: results[1],
+      dailyWord: acknowledged[0],
+      quiz: acknowledged[1],
     );
   }
 
-  Future<bool> _hasDailyWord() async {
+  Future<_ActionAvailabilityItem> _dailyWordAvailability() async {
     try {
       final word = await DailyMotivationService().fetchToday();
-      return word != null;
+      if (word == null) return const _ActionAvailabilityItem.available(false);
+      final token = word.id.isNotEmpty
+          ? word.id
+          : word.publishDate.toIso8601String().substring(0, 10);
+      return _ActionAvailabilityItem(
+        available: true,
+        ackKey: 'daily_word_ack_$token',
+      );
     } catch (_) {
-      return false;
+      return const _ActionAvailabilityItem.available(false);
     }
   }
 
-  Future<bool> _hasAvailableQuiz() async {
+  Future<_ActionAvailabilityItem> _quizAvailability() async {
+    if (!widget.allowDailyQuiz) {
+      return const _ActionAvailabilityItem.available(false);
+    }
     try {
       final status = await DailyBibleQuizService().status();
-      return status['can_start'] == true;
+      if (status['can_start'] != true) {
+        return const _ActionAvailabilityItem.available(false);
+      }
+      final quiz = status['quiz'];
+      final token =
+          quiz is Map ? (quiz['id'] ?? quiz['quiz_date'] ?? '').toString() : '';
+      return _ActionAvailabilityItem(
+        available: true,
+        ackKey: token.isEmpty ? null : 'daily_quiz_ack_$token',
+      );
     } catch (_) {
-      return false;
+      return const _ActionAvailabilityItem.available(false);
     }
   }
 
   Future<void> _openDailyQuiz() async {
+    if (!widget.allowDailyQuiz) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Daily Bible Quiz is paused until your church subscription is active.',
+          ),
+        ),
+      );
+      return;
+    }
+    final availability = await _actionAvailabilityFuture;
+    await availability.quiz.acknowledge();
+    if (!mounted) return;
     await Navigator.pushNamed(context, '/daily_bible_quiz');
     if (!mounted) return;
     setState(() {
@@ -70,6 +111,9 @@ class _BibleBooksScreenState extends State<BibleBooksScreen> {
   }
 
   Future<void> _openDailyWord() async {
+    final availability = await _actionAvailabilityFuture;
+    await availability.dailyWord.acknowledge();
+    if (!mounted) return;
     await Navigator.pushNamed(context, '/daily_word');
     if (!mounted) return;
     setState(() {
@@ -245,7 +289,7 @@ class _BibleBooksScreenState extends State<BibleBooksScreen> {
                 onPressed: _openDailyQuiz,
                 icon: _ActionBadgeIcon(
                   icon: Icons.psychology_alt_outlined,
-                  showBadge: snapshot.data?.quizAvailable == true,
+                  showBadge: snapshot.data?.quiz.showBadge == true,
                 ),
               );
             },
@@ -268,7 +312,7 @@ class _BibleBooksScreenState extends State<BibleBooksScreen> {
                   onPressed: _openDailyWord,
                   icon: _ActionBadgeIcon(
                     icon: Icons.wb_sunny_outlined,
-                    showBadge: snapshot.data?.dailyWordAvailable == true,
+                    showBadge: snapshot.data?.dailyWord.showBadge == true,
                   ),
                 );
               },
@@ -389,12 +433,47 @@ class _StreakRequirementRow extends StatelessWidget {
 
 class _BibleActionAvailability {
   const _BibleActionAvailability({
-    required this.dailyWordAvailable,
-    required this.quizAvailable,
+    required this.dailyWord,
+    required this.quiz,
   });
 
-  final bool dailyWordAvailable;
-  final bool quizAvailable;
+  final _ActionAvailabilityItem dailyWord;
+  final _ActionAvailabilityItem quiz;
+}
+
+class _ActionAvailabilityItem {
+  const _ActionAvailabilityItem({
+    required this.available,
+    this.ackKey,
+    this.acknowledged = false,
+  });
+
+  const _ActionAvailabilityItem.available(bool available)
+      : this(available: available);
+
+  final bool available;
+  final String? ackKey;
+  final bool acknowledged;
+
+  bool get showBadge => available && !acknowledged;
+
+  Future<_ActionAvailabilityItem> withAcknowledgement() async {
+    final key = ackKey;
+    if (key == null || key.isEmpty) return this;
+    final prefs = await SharedPreferences.getInstance();
+    return _ActionAvailabilityItem(
+      available: available,
+      ackKey: key,
+      acknowledged: prefs.getBool(key) ?? false,
+    );
+  }
+
+  Future<void> acknowledge() async {
+    final key = ackKey;
+    if (key == null || key.isEmpty) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(key, true);
+  }
 }
 
 class _ActionBadgeIcon extends StatelessWidget {

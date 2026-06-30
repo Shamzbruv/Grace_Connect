@@ -8,7 +8,6 @@ import '../../services/church_subscription_service.dart';
 import '../../services/feed_scroll_service.dart';
 import '../../widgets/app_bottom_menu.dart';
 import '../../widgets/main_tab_scope.dart';
-import '../../widgets/notification_section_icon.dart';
 import '../bible/bible_home_screen.dart';
 import '../community/community_feed_screen.dart';
 import '../dashboard/dashboard_screen.dart';
@@ -39,14 +38,27 @@ class _MainTabsScreenState extends State<MainTabsScreen> {
   late int _currentIndex;
   bool _subscriptionLimited = false;
 
-  bool get _feedOnlyLimited => widget.membershipLimited || _subscriptionLimited;
+  bool get _hasLimitedAccess =>
+      widget.membershipLimited || _subscriptionLimited;
+
+  Set<int> get _allowedPrimaryIndexes {
+    if (widget.membershipLimited) return const {0};
+    if (_subscriptionLimited) return const {3};
+    return const {0, 1, 2, 3, 4};
+  }
+
+  Set<String> get _allowedRoutes {
+    if (widget.membershipLimited) return const {'/community'};
+    if (_subscriptionLimited) return const {'/bible', '/daily_word'};
+    return const {};
+  }
 
   String get _limitedNotice {
     if (widget.membershipLimited) {
       return widget.limitedMessage ??
           'Your church access is not active yet. You can browse the public feed, but member tools unlock after church approval.';
     }
-    return 'This church subscription is not active. Please contact your church admin about subscription options.';
+    return 'This church subscription is not active. Bible reading and Daily Word are available, but church tools are paused. Please contact your church admin about subscription options.';
   }
 
   @override
@@ -68,7 +80,7 @@ class _MainTabsScreenState extends State<MainTabsScreen> {
       if (index == 0) FeedScrollService.requestScrollToTop();
       return;
     }
-    if (_feedOnlyLimited && index != 0) {
+    if (_hasLimitedAccess && !_allowedPrimaryIndexes.contains(index)) {
       _showLimitedNotice();
       return;
     }
@@ -100,11 +112,11 @@ class _MainTabsScreenState extends State<MainTabsScreen> {
     final limited = !contextResult.isActive;
     setState(() {
       _subscriptionLimited = limited;
-      if (limited) _currentIndex = 0;
+      if (limited) _currentIndex = 3;
     });
 
     if (limited && _pageController.hasClients) {
-      _pageController.jumpToPage(0);
+      _pageController.jumpToPage(3);
     }
   }
 
@@ -121,8 +133,9 @@ class _MainTabsScreenState extends State<MainTabsScreen> {
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
-        if (didPop || _currentIndex == 0) return;
-        _setTab(0);
+        final fallbackIndex = _allowedPrimaryIndexes.first;
+        if (didPop || _currentIndex == fallbackIndex) return;
+        _setTab(fallbackIndex);
       },
       child: Scaffold(
         body: MainTabScope(
@@ -130,10 +143,11 @@ class _MainTabsScreenState extends State<MainTabsScreen> {
           child: PageView(
             controller: _pageController,
             physics:
-                _feedOnlyLimited ? const NeverScrollableScrollPhysics() : null,
+                _hasLimitedAccess ? const NeverScrollableScrollPhysics() : null,
             onPageChanged: (index) {
-              if (_feedOnlyLimited && index != 0) {
-                _pageController.jumpToPage(0);
+              if (_hasLimitedAccess &&
+                  !_allowedPrimaryIndexes.contains(index)) {
+                _pageController.jumpToPage(_allowedPrimaryIndexes.first);
                 _showLimitedNotice();
                 return;
               }
@@ -148,9 +162,13 @@ class _MainTabsScreenState extends State<MainTabsScreen> {
               ),
               const EventsScreen(showBottomMenu: false),
               const DashboardScreen(),
-              const BibleHomeScreen(showBottomNavigation: false),
+              BibleHomeScreen(
+                showBottomNavigation: false,
+                allowDailyQuiz: !_subscriptionLimited,
+              ),
               _MoreTabScreen(
-                subscriptionLimited: _feedOnlyLimited,
+                subscriptionLimited: _hasLimitedAccess,
+                limitedAllowedRoutes: _allowedRoutes,
                 limitedNotice: _limitedNotice,
               ),
             ],
@@ -159,7 +177,9 @@ class _MainTabsScreenState extends State<MainTabsScreen> {
         bottomNavigationBar: AppBottomMenu(
           selectedIndex: _currentIndex,
           onDestinationSelected: _setTab,
-          subscriptionLimited: _feedOnlyLimited,
+          subscriptionLimited: _hasLimitedAccess,
+          limitedAllowedIndexes: _allowedPrimaryIndexes,
+          limitedAllowedRoutes: _allowedRoutes,
           limitedNotice: _limitedNotice,
         ),
       ),
@@ -170,10 +190,12 @@ class _MainTabsScreenState extends State<MainTabsScreen> {
 class _MoreTabScreen extends StatelessWidget {
   const _MoreTabScreen({
     required this.subscriptionLimited,
+    required this.limitedAllowedRoutes,
     required this.limitedNotice,
   });
 
   final bool subscriptionLimited;
+  final Set<String> limitedAllowedRoutes;
   final String limitedNotice;
 
   @override
@@ -242,7 +264,6 @@ class _MoreTabScreen extends StatelessWidget {
         'Notifications',
         '/notifications',
         Icons.notifications_outlined,
-        assetIconPath: NotificationSectionIcon.assetPath,
       ),
       const _MoreAction('Settings', '/settings', Icons.settings_outlined),
       const _MoreAction('Profile', '/profile', Icons.person_outline),
@@ -262,7 +283,8 @@ class _MoreTabScreen extends StatelessWidget {
           for (final action in actions) ...[
             _MoreActionTile(
               action: action,
-              subscriptionLimited: subscriptionLimited,
+              subscriptionLimited: subscriptionLimited &&
+                  !limitedAllowedRoutes.contains(action.route),
               limitedNotice: limitedNotice,
             ),
             const SizedBox(height: 8),
@@ -324,17 +346,11 @@ class _MoreTabScreen extends StatelessWidget {
 }
 
 class _MoreAction {
-  const _MoreAction(
-    this.label,
-    this.route,
-    this.icon, {
-    this.assetIconPath,
-  });
+  const _MoreAction(this.label, this.route, this.icon);
 
   final String label;
   final String route;
   final IconData icon;
-  final String? assetIconPath;
 }
 
 class _MoreActionTile extends StatelessWidget {
@@ -357,12 +373,7 @@ class _MoreActionTile extends StatelessWidget {
         : theme.colorScheme.primary;
 
     return ListTile(
-      leading: action.assetIconPath == null
-          ? Icon(action.icon, color: foreground)
-          : Opacity(
-              opacity: disabled ? 0.35 : 1,
-              child: const NotificationSectionIcon(),
-            ),
+      leading: Icon(action.icon, color: foreground),
       title: Text(
         action.label,
         style: theme.textTheme.titleMedium?.copyWith(

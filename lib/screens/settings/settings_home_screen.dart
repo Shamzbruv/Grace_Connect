@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/user_role_provider.dart';
+import '../../services/developer_service.dart';
 import '../../services/ministry_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/ui/app_scaffold.dart';
@@ -19,7 +20,7 @@ class SettingsHomeScreen extends StatelessWidget {
     final roles = roleProvider.userProfile?.roles ?? const <String>[];
     final bool isFinance = capabilities?.canManageFinance == true ||
         roles.map(_normalizeRole).any({'pastor', 'senior_pastor'}.contains);
-    final bool isDeveloper = roleProvider.isDeveloper;
+    final developerAccessFuture = DeveloperService().hasDeveloperAccess();
     final ministryAccessFuture = MinistryService().managesAnyMinistry();
 
     return AppScaffold(
@@ -118,9 +119,9 @@ class SettingsHomeScreen extends StatelessWidget {
                             const Divider(height: 1),
                             _buildSettingsTile(
                                 context,
-                                Icons.attach_money,
-                                'Finance',
-                                'Reports, Categories',
+                                Icons.volunteer_activism_outlined,
+                                'Giving',
+                                'SpurrOpen giving link',
                                 '/settings/finance'),
                           ],
                         ],
@@ -143,24 +144,36 @@ class SettingsHomeScreen extends StatelessWidget {
                 ],
               ),
             ),
-            if (isDeveloper) ...[
-              const SizedBox(height: 24),
-              _buildSectionHeader(context, 'Developer'),
-              AppCard(
-                child: Column(
+            FutureBuilder<bool>(
+              future: developerAccessFuture,
+              builder: (context, snapshot) {
+                final isDeveloper = snapshot.data == true;
+                if (!isDeveloper) return const SizedBox.shrink();
+
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    _buildSettingsTile(
-                        context,
-                        Icons.code,
-                        'Developer Console',
-                        'Feature flags, Logs',
-                        '/developer_console'), // Existing route
+                    const SizedBox(height: 24),
+                    _buildSectionHeader(context, 'Developer'),
+                    AppCard(
+                      child: Column(
+                        children: [
+                          _buildSettingsTile(
+                            context,
+                            Icons.code,
+                            'Developer Console',
+                            'Platform tools, logs',
+                            '/developer_console',
+                          ),
+                        ],
+                      ),
+                    ),
                   ],
-                ),
-              ),
-            ],
+                );
+              },
+            ),
             const SizedBox(height: 32),
-            Text('Version 1.0.0',
+            Text('Version 1.0.15-beta',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: Theme.of(context).colorScheme.onSurfaceVariant)),
             const SizedBox(height: 32),
