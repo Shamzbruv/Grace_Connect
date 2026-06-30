@@ -435,6 +435,7 @@ class _ScheduleEditorSheetState extends State<_ScheduleEditorSheet> {
             ),
             const SizedBox(height: 14),
             DropdownButtonFormField<int>(
+              // ignore: deprecated_member_use
               value: _selectedDay,
               decoration: const InputDecoration(
                 labelText: 'Day of Week',
@@ -674,6 +675,7 @@ class _NumberMenu extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DropdownButtonFormField<int>(
+      // ignore: deprecated_member_use
       value: value,
       decoration: InputDecoration(
         labelText: label,

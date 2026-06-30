@@ -110,6 +110,7 @@ class _CounselingFormScreenState extends State<CounselingFormScreen> {
 
                     // Category
                     DropdownButtonFormField<String>(
+                      // ignore: deprecated_member_use
                       value: _category,
                       decoration: const InputDecoration(
                         labelText: 'Category',
@@ -126,6 +127,7 @@ class _CounselingFormScreenState extends State<CounselingFormScreen> {
 
                     // Urgency
                     DropdownButtonFormField<String>(
+                      // ignore: deprecated_member_use
                       value: _urgency,
                       decoration: const InputDecoration(
                         labelText: 'Urgency',
@@ -142,6 +144,7 @@ class _CounselingFormScreenState extends State<CounselingFormScreen> {
 
                     // Contact Method
                     DropdownButtonFormField<String>(
+                      // ignore: deprecated_member_use
                       value: _contactMethod,
                       decoration: const InputDecoration(
                         labelText: 'Preferred Contact Method',

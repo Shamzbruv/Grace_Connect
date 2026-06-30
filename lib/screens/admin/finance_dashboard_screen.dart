@@ -267,6 +267,7 @@ class _FinanceDashboardScreenState extends State<FinanceDashboardScreen> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       DropdownButtonFormField<TransactionType>(
+                        // ignore: deprecated_member_use
                         value: selectedType,
                         decoration: const InputDecoration(labelText: 'Type'),
                         items: TransactionType.values.map((type) {

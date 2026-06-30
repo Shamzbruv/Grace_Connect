@@ -275,6 +275,7 @@ class _PrivacySettingsScreenState extends State<PrivacySettingsScreen> {
                           ),
                 ),
                 DropdownButtonFormField<String>(
+                  // ignore: deprecated_member_use
                   value: _contactInfoVisibility,
                   items: const [
                     DropdownMenuItem(
@@ -347,6 +348,7 @@ class _PrivacySettingsScreenState extends State<PrivacySettingsScreen> {
                 ),
                 const SizedBox(height: 8),
                 DropdownButtonFormField<String>(
+                  // ignore: deprecated_member_use
                   value: _familyTreeVisibility,
                   items: const [
                     DropdownMenuItem(

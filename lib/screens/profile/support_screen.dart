@@ -230,6 +230,7 @@ class _SupportScreenState extends State<SupportScreen> {
                         style: Theme.of(context).textTheme.titleMedium),
                     const SizedBox(height: 16),
                     DropdownButtonFormField<String>(
+                      // ignore: deprecated_member_use
                       value: _issueType,
                       decoration: const InputDecoration(
                           labelText: 'Issue Type',
@@ -246,6 +247,7 @@ class _SupportScreenState extends State<SupportScreen> {
                     ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
+                      // ignore: deprecated_member_use
                       value: _appSection,
                       decoration: const InputDecoration(
                           labelText: 'Where did it happen?',
@@ -261,6 +263,7 @@ class _SupportScreenState extends State<SupportScreen> {
                     ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
+                      // ignore: deprecated_member_use
                       value: _impact,
                       decoration: const InputDecoration(
                           labelText: 'Impact Level',

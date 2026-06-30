@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/daily_motivation.dart';
+import 'supabase_resilience.dart';
 
 class DailyMotivationService {
   DailyMotivationService({SupabaseClient? client})
@@ -120,15 +123,26 @@ class DailyMotivationService {
   }
 
   Future<Map<String, dynamic>> _invoke(String functionName) async {
-    final response = await _client.functions.invoke(
-      functionName,
-      body: const {},
-    );
-    final data = response.data;
-    if (data is Map) {
-      final map = Map<String, dynamic>.from(data);
-      if (map['error'] != null) throw Exception(map['error']);
-      return map;
+    try {
+      final response = await _client.functions.invoke(
+        functionName,
+        body: const {},
+      ).timeout(const Duration(seconds: 18));
+      final data = response.data;
+      if (data is Map) {
+        final map = Map<String, dynamic>.from(data);
+        if (map['error'] != null) throw Exception(map['error']);
+        return map;
+      }
+    } catch (error, stackTrace) {
+      if (SupabaseResilience.isTransientNetworkError(error)) {
+        SupabaseResilience.logTransientNetworkError(
+          'Daily Motivation $functionName',
+          error,
+          stackTrace,
+        );
+      }
+      rethrow;
     }
     throw Exception('Unexpected response from Daily Word service.');
   }

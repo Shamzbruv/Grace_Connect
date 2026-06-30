@@ -216,6 +216,8 @@ void main() {
       final manifest =
           File('android/app/src/main/AndroidManifest.xml').readAsStringSync();
       final gradle = File('android/app/build.gradle').readAsStringSync();
+      final googleServices =
+          File('android/app/google-services.json').readAsStringSync();
       final activity = File(
         'android/app/src/main/kotlin/love/graceconnect/MainActivity.kt',
       ).readAsStringSync();
@@ -225,8 +227,39 @@ void main() {
       expect(gradle, contains('versionName "1.0.13-beta"'));
       expect(activity, contains('package love.graceconnect'));
       expect(manifest, contains('love.graceconnect.MainActivity'));
+      expect(googleServices, contains('"package_name": "love.graceconnect"'));
+      expect(googleServices, isNot(contains('com.example.grace_connect')));
       expect(manifest, isNot(contains('ACCESS_BACKGROUND_LOCATION')));
       expect(manifest, isNot(contains('FOREGROUND_SERVICE_LOCATION')));
+    });
+
+    test('registration RPC and beta network crashes are hardened', () {
+      final registrationRpc = File(
+        'supabase/migrations/20260630112500_fix_church_registration_conflict_rpc_ordering.sql',
+      ).readAsStringSync();
+      final resilienceSource =
+          File('lib/services/supabase_resilience.dart').readAsStringSync();
+      final mainSource = File('lib/main.dart').readAsStringSync();
+      final quizSource =
+          File('lib/services/daily_bible_quiz_service.dart').readAsStringSync();
+      final motivationSource =
+          File('lib/services/daily_motivation_service.dart').readAsStringSync();
+
+      expect(registrationRpc, contains('p_parish text := parish'));
+      expect(registrationRpc, contains('candidate.parish'));
+      expect(registrationRpc, contains('ranked as'));
+      expect(registrationRpc, contains('grant execute on function'));
+      expect(resilienceSource, contains('isTransientNetworkError'));
+      expect(
+          resilienceSource, contains('connection closed while receiving data'));
+      expect(resilienceSource, contains('software caused connection abort'));
+      expect(mainSource, contains('recordFlutterError('));
+      expect(mainSource, contains('fatal: false'));
+      expect(quizSource, contains('_invokeQuietly'));
+      expect(quizSource, contains('timeout(const Duration(seconds: 18))'));
+      expect(motivationSource, contains('generate-daily-motivation'));
+      expect(
+          motivationSource, contains('timeout(const Duration(seconds: 18))'));
     });
 
     test('push notifications are opt-in and topic broadcasts stay public', () {

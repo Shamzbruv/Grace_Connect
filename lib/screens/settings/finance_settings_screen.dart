@@ -139,6 +139,7 @@ class _FinanceSettingsScreenState extends State<FinanceSettingsScreen> {
               padding: const EdgeInsets.all(16),
               children: [
                 DropdownButtonFormField<String>(
+                  // ignore: deprecated_member_use
                   value: _currency,
                   decoration: const InputDecoration(
                     labelText: 'Default Currency',
@@ -156,6 +157,7 @@ class _FinanceSettingsScreenState extends State<FinanceSettingsScreen> {
                 ),
                 const SizedBox(height: 16),
                 DropdownButtonFormField<int>(
+                  // ignore: deprecated_member_use
                   value: _fiscalYearStartMonth,
                   decoration: const InputDecoration(
                     labelText: 'Fiscal Year Starts',

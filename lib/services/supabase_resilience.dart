@@ -12,6 +12,37 @@ class SupabaseResilience {
         message.contains('session_not_found');
   }
 
+  static bool isTransientNetworkError(Object error) {
+    final message = error.toString().toLowerCase();
+    return message.contains('socketexception') ||
+        message.contains('httpexception') ||
+        message.contains('clientexception') ||
+        message.contains('xmlhttprequest error') ||
+        message.contains('failed host lookup') ||
+        message.contains('software caused connection abort') ||
+        message.contains('connection closed while receiving data') ||
+        message.contains('connection reset') ||
+        message.contains('connection refused') ||
+        message.contains('network is unreachable') ||
+        message.contains('timeoutexception') ||
+        message.contains('connection timed out') ||
+        message.contains('timed out') ||
+        message.contains('functionexception') ||
+        (message.contains('functionsclient.invoke') &&
+            message.contains('status: 404'));
+  }
+
+  static void logTransientNetworkError(
+    String context,
+    Object error, [
+    StackTrace? stackTrace,
+  ]) {
+    debugPrint('$context transient network failure: $error');
+    if (stackTrace != null) {
+      debugPrintStack(stackTrace: stackTrace, label: context);
+    }
+  }
+
   static Future<bool> refreshSession({String context = 'Supabase'}) async {
     try {
       await Supabase.instance.client.auth.refreshSession();

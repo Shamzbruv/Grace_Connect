@@ -336,6 +336,7 @@ class _EventsScreenState extends State<EventsScreen> {
                 if (showSourcePicker) ...[
                   const SizedBox(height: 16),
                   DropdownButtonFormField<String>(
+                    // ignore: deprecated_member_use
                     value: _selectedMinistryId ?? 'church',
                     decoration: const InputDecoration(
                       labelText: 'Hosted by',

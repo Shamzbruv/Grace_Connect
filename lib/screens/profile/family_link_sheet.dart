@@ -130,6 +130,7 @@ class _FamilyLinkSheetState extends State<FamilyLinkSheet> {
               ),
               const SizedBox(height: 20),
               DropdownButtonFormField<String>(
+                // ignore: deprecated_member_use
                 value: _relationshipType,
                 isExpanded: true,
                 items: FamilyRelationship.relationshipOptions

@@ -174,6 +174,7 @@ class _AnnouncementsScreenState extends State<AnnouncementsScreen> {
                     const SizedBox(height: 18),
                     if (canPublishChurchWide || managedMinistries.isNotEmpty)
                       DropdownButtonFormField<String>(
+                        // ignore: deprecated_member_use
                         value: selectedSource,
                         decoration: const InputDecoration(
                           labelText: 'Post From',

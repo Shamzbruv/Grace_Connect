@@ -981,6 +981,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                     ],
                     const SizedBox(height: 14),
                     DropdownButtonFormField<String>(
+                      // ignore: deprecated_member_use
                       value: selectedReason,
                       decoration: const InputDecoration(labelText: 'Reason'),
                       items: [
@@ -1163,6 +1164,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                       parent: AlwaysScrollableScrollPhysics(),
                     ),
                     padding: EdgeInsets.zero,
+                    // ignore: deprecated_member_use
                     cacheExtent: 1200,
                     clipBehavior: Clip.hardEdge,
                     keyboardDismissBehavior:
@@ -1547,6 +1549,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                     ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
+                      // ignore: deprecated_member_use
                       value: selectedDenomination.isEmpty
                           ? null
                           : selectedDenomination,

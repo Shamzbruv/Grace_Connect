@@ -394,6 +394,7 @@ class _PrayerAssignmentControl extends StatelessWidget {
                 : '';
 
         return DropdownButtonFormField<String>(
+          // ignore: deprecated_member_use
           value: selectedValue,
           isExpanded: true,
           decoration: InputDecoration(

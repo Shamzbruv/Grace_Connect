@@ -64,6 +64,7 @@ class _BibleSettingsScreenState extends State<BibleSettingsScreen> {
               padding: const EdgeInsets.all(16),
               children: [
                 DropdownButtonFormField<String>(
+                  // ignore: deprecated_member_use
                   value: _translation,
                   decoration: const InputDecoration(
                     labelText: 'Preferred Translation',

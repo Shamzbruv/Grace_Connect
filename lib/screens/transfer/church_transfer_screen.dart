@@ -289,6 +289,7 @@ class _ChurchTransferScreenState extends State<ChurchTransferScreen> {
                         '${request.currentChurchName} -> ${request.targetChurchName}'),
                     const SizedBox(height: 16),
                     DropdownButtonFormField<String>(
+                      // ignore: deprecated_member_use
                       value: status,
                       decoration: const InputDecoration(
                         labelText: 'Status',

@@ -113,6 +113,7 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
               child: Column(
                 children: [
                   DropdownButtonFormField<String>(
+                    // ignore: deprecated_member_use
                     value: _type,
                     items: ['Bug Report', 'Suggestion', 'Other']
                         .map((t) => DropdownMenuItem(value: t, child: Text(t)))

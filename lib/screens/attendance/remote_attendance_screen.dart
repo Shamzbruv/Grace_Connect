@@ -143,6 +143,7 @@ class _RemoteAttendanceScreenState extends State<RemoteAttendanceScreen> {
                     const SizedBox(height: 16),
 
                     DropdownButtonFormField<String>(
+                      // ignore: deprecated_member_use
                       value: _selectedReason,
                       decoration: const InputDecoration(
                         labelText: 'Remote Attendance Reason',

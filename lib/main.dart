@@ -7,6 +7,7 @@ import 'providers/user_role_provider.dart';
 import 'services/attendance_service.dart';
 import 'services/auth_flow_service.dart';
 import 'services/notification_service.dart';
+import 'services/supabase_resilience.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:provider/provider.dart';
@@ -106,10 +107,31 @@ Future<void> main() async {
 Future<void> _configureCrashReporting() async {
   if (kIsWeb) return;
   FlutterError.onError = (details) {
-    FirebaseCrashlytics.instance.recordFlutterFatalError(details);
+    if (SupabaseResilience.isTransientNetworkError(details.exception)) {
+      unawaited(
+        FirebaseCrashlytics.instance.recordFlutterError(
+          details,
+          fatal: false,
+        ),
+      );
+      return;
+    }
+    unawaited(FirebaseCrashlytics.instance.recordFlutterFatalError(details));
   };
   PlatformDispatcher.instance.onError = (error, stack) {
-    FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
+    if (SupabaseResilience.isTransientNetworkError(error)) {
+      unawaited(
+        FirebaseCrashlytics.instance.recordError(
+          error,
+          stack,
+          fatal: false,
+          reason: 'Transient network or backend availability failure',
+        ),
+      );
+      return true;
+    }
+    unawaited(
+        FirebaseCrashlytics.instance.recordError(error, stack, fatal: true));
     return true;
   };
   await FirebaseCrashlytics.instance.setCrashlyticsCollectionEnabled(true);

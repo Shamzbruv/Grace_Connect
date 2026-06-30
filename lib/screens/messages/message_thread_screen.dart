@@ -441,6 +441,7 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
                   ),
                   const SizedBox(height: 14),
                   DropdownButtonFormField<String>(
+                    // ignore: deprecated_member_use
                     value: selectedReason,
                     decoration: const InputDecoration(labelText: 'Reason'),
                     items: [
