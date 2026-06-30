@@ -160,8 +160,13 @@ void main() {
               .readAsStringSync();
       final portalHtml = File('../Grace_Connect_Landing/developer/index.html')
           .readAsStringSync();
+      final publicHomeHtml =
+          File('../Grace_Connect_Landing/index.html').readAsStringSync();
       final legacyChurchSource = File(
         'supabase/migrations/20260629155000_publish_legacy_active_churches.sql',
+      ).readAsStringSync();
+      final userManagementSource = File(
+        'supabase/migrations/20260630103000_developer_user_management.sql',
       ).readAsStringSync();
 
       expect(migrationSource, contains('public.support_tickets'));
@@ -188,13 +193,23 @@ void main() {
 
       expect(portalHtml, contains('data-view="requests"'));
       expect(portalHtml, contains('data-view="issues"'));
+      expect(portalHtml, contains('../assets/favicon.png'));
+      expect(publicHomeHtml, contains('assets/favicon.png'));
       expect(portalHtml, isNot(contains('data-view="members"')));
       expect(portalSource, contains('developer_list_support_tickets'));
       expect(portalSource, contains('developer_get_church_detail'));
       expect(portalSource,
           contains('developer_list_church_registration_requests'));
-      expect(portalSource, isNot(contains('approve-member')));
-      expect(portalSource, isNot(contains('developer_approve_member_request')));
+      expect(portalSource, contains('approve-member'));
+      expect(portalSource, contains('developer_approve_member_request'));
+      expect(portalSource, contains('developer_update_user_access'));
+      expect(portalSource, contains('developer_delete_user_account'));
+
+      expect(userManagementSource, contains('developer_update_user_access'));
+      expect(userManagementSource, contains('developer_delete_user_account'));
+      expect(
+          userManagementSource, contains('developer_approve_member_request'));
+      expect(userManagementSource, contains('"appPrivileges"'));
     });
 
     test('android release identity and permissions are beta-safe', () {
