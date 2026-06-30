@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -44,12 +45,16 @@ class NotificationService {
   final FirebaseMessaging _messaging = FirebaseMessaging.instance;
   final SupabaseClient _supabase = Supabase.instance.client;
   StreamSubscription<List<AppNotification>>? _foregroundSubscription;
+  Timer? _unansweredReminderTimer;
   DateTime _foregroundStartedAt = DateTime.now();
   final Set<String> _shownForegroundNotificationIds = {};
+  final Set<String> _startupPermissionUsers = {};
   static final Uri _topicNotificationEndpoint = Uri.parse(
     'https://us-central1-graceconnect-9a97c.cloudfunctions.net/sendTopicNotification',
   );
   static const String churchWidePrefKey = 'notify_church_wide';
+  static const Duration unansweredReminderInterval = Duration(hours: 3);
+  static const Duration _unansweredReminderPollInterval = Duration(minutes: 15);
 
   @visibleForTesting
   static const Set<String> publicBroadcastTypes = {
@@ -318,6 +323,62 @@ class NotificationService {
         settings.authorizationStatus == AuthorizationStatus.provisional;
   }
 
+  Future<void> ensureStartupPermissionsAndSubscriptions({
+    required String userId,
+    required String churchId,
+    Iterable<String> roles = const [],
+    Iterable<String> privileges = const [],
+  }) async {
+    if (kIsWeb) return;
+
+    final firstPromptThisSession = _startupPermissionUsers.add(userId);
+    if (firstPromptThisSession) {
+      final canUsePush = await ensurePushPermission();
+      if (canUsePush) {
+        await _requestLocalNotificationPermission();
+      }
+      await _ensureLocationPermissionPrompt();
+    }
+
+    await syncSubscriptions(
+      churchId,
+      roles: roles,
+      privileges: privileges,
+    );
+  }
+
+  Future<void> _requestLocalNotificationPermission() async {
+    final androidPlugin =
+        _localNotifications.resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>();
+    await androidPlugin?.requestNotificationsPermission();
+
+    final iosPlugin = _localNotifications.resolvePlatformSpecificImplementation<
+        IOSFlutterLocalNotificationsPlugin>();
+    await iosPlugin?.requestPermissions(
+      alert: true,
+      badge: true,
+      sound: true,
+    );
+  }
+
+  Future<void> _ensureLocationPermissionPrompt() async {
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) return;
+
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.deniedForever) {
+        debugPrint('Location permission permanently denied.');
+      }
+    } catch (error) {
+      debugPrint('Location permission prompt skipped: $error');
+    }
+  }
+
   void _openRouteFromMessage(RemoteMessage message) {
     _navigateToRoute(message.data['route']);
   }
@@ -409,6 +470,24 @@ class NotificationService {
     }
   }
 
+  Future<void> sendMembershipRequestPush(String membershipId) async {
+    final cleanMembershipId = membershipId.trim();
+    if (kIsWeb || cleanMembershipId.isEmpty) return;
+
+    try {
+      final response = await _supabase.functions.invoke(
+        'send-membership-request-push',
+        body: {'membershipId': cleanMembershipId},
+      ).timeout(const Duration(seconds: 12));
+      final data = response.data;
+      if (data is Map && data['ok'] == false) {
+        debugPrint('Membership request push queued with warning: $data');
+      }
+    } catch (error) {
+      debugPrint('Membership request push skipped: $error');
+    }
+  }
+
   Stream<List<AppNotification>> watchNotifications(String userId) {
     return SupabaseResilience.guardedStream<List<AppNotification>>(
       debugLabel: 'Notifications',
@@ -464,12 +543,27 @@ class NotificationService {
         .eq('is_read', false);
   }
 
+  Future<void> markEntityAsRead({
+    required String userId,
+    required String entityTable,
+    required String entityId,
+  }) async {
+    await _supabase
+        .from('notifications')
+        .update({'is_read': true})
+        .eq('user_id', userId)
+        .eq('entity_table', entityTable)
+        .eq('entity_id', entityId)
+        .eq('is_read', false);
+  }
+
   void watchForegroundNotifications(String userId) {
     if (kIsWeb) return;
 
     _foregroundSubscription?.cancel();
     _foregroundStartedAt = DateTime.now();
     _shownForegroundNotificationIds.clear();
+    _startUnansweredReminderLoop(userId);
     _foregroundSubscription = watchNotifications(userId).listen(
       (notifications) {
         for (final notification in notifications) {
@@ -479,12 +573,7 @@ class NotificationService {
           }
           if (notification.createdAt.isBefore(_foregroundStartedAt)) continue;
           _shownForegroundNotificationIds.add(notification.id);
-          _showLocalNotification(
-            notification.title,
-            notification.body,
-            route: notification.route,
-            type: notification.type,
-          );
+          unawaited(_showAndTrackNotification(notification));
         }
       },
       onError: (error) {
@@ -496,6 +585,87 @@ class NotificationService {
   void stopForegroundNotifications() {
     _foregroundSubscription?.cancel();
     _foregroundSubscription = null;
+    _unansweredReminderTimer?.cancel();
+    _unansweredReminderTimer = null;
+  }
+
+  void _startUnansweredReminderLoop(String userId) {
+    _unansweredReminderTimer?.cancel();
+    unawaited(_showDueUnansweredReminders(userId));
+    _unansweredReminderTimer = Timer.periodic(
+      _unansweredReminderPollInterval,
+      (_) => unawaited(_showDueUnansweredReminders(userId)),
+    );
+  }
+
+  Future<void> _showDueUnansweredReminders(String userId) async {
+    if (kIsWeb) return;
+
+    try {
+      final rows = await _supabase
+          .from('notifications')
+          .select()
+          .eq('user_id', userId)
+          .eq('is_read', false)
+          .order('created_at', ascending: false)
+          .limit(30);
+
+      final notifications =
+          rows.map((row) => AppNotification.fromMap(row)).where(
+        (notification) {
+          return notification.id.isNotEmpty &&
+              _isReminderEligible(notification);
+        },
+      );
+      final prefs = await SharedPreferences.getInstance();
+      final now = DateTime.now();
+      for (final notification in notifications) {
+        if (!_isReminderDue(notification, prefs, now)) continue;
+        await _showAndTrackNotification(notification);
+      }
+    } catch (error) {
+      debugPrint('Unread notification reminder check failed: $error');
+    }
+  }
+
+  bool _isReminderEligible(AppNotification notification) {
+    return !notification.isRead &&
+        notification.id.isNotEmpty &&
+        notification.type.trim().isNotEmpty;
+  }
+
+  bool _isReminderDue(
+    AppNotification notification,
+    SharedPreferences prefs,
+    DateTime now,
+  ) {
+    final key = _reminderPrefKey(notification.id);
+    final previous = DateTime.tryParse(prefs.getString(key) ?? '');
+    final lastShown = previous ?? notification.createdAt;
+    return now.difference(lastShown) >= unansweredReminderInterval;
+  }
+
+  Future<void> _showAndTrackNotification(AppNotification notification) async {
+    await _showLocalNotification(
+      notification.title,
+      notification.body,
+      route: notification.route,
+      type: notification.type,
+    );
+    await _recordNotificationReminderShown(notification.id);
+  }
+
+  Future<void> _recordNotificationReminderShown(String notificationId) async {
+    if (notificationId.trim().isEmpty) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _reminderPrefKey(notificationId),
+      DateTime.now().toIso8601String(),
+    );
+  }
+
+  String _reminderPrefKey(String notificationId) {
+    return 'notification_reminder_$notificationId';
   }
 
   Future<String?> getFCMToken() async {
@@ -517,13 +687,18 @@ class NotificationService {
   Future<void> unsubscribeFromChurchTopics(String churchId) async {
     if (kIsWeb || churchId.trim().isEmpty) return;
     await unsubscribeFromTopic('church_$churchId');
+    await unsubscribeFromTopic('church_${churchId}_leaders');
     for (final suffix in topicMap.keys) {
       await unsubscribeFromTopic('church_${churchId}_$suffix');
     }
   }
 
   /// Syncs user subscriptions based on SharedPreferences and Church ID
-  Future<void> syncSubscriptions(String churchId) async {
+  Future<void> syncSubscriptions(
+    String churchId, {
+    Iterable<String> roles = const [],
+    Iterable<String> privileges = const [],
+  }) async {
     if (kIsWeb || churchId.trim().isEmpty) return;
 
     final prefs = await SharedPreferences.getInstance();
@@ -535,6 +710,17 @@ class NotificationService {
       await subscribeToTopic('church_$churchId');
     } else {
       await unsubscribeFromTopic('church_$churchId');
+    }
+
+    final leaderTopic = 'church_${churchId}_leaders';
+    if (canUsePush &&
+        canReceiveLeaderMembershipPush(
+          roles: roles,
+          privileges: privileges,
+        )) {
+      await subscribeToTopic(leaderTopic);
+    } else {
+      await unsubscribeFromTopic(leaderTopic);
     }
 
     // Sync optional topics
@@ -552,5 +738,40 @@ class NotificationService {
         await unsubscribeFromTopic(fullTopic);
       }
     }
+  }
+
+  @visibleForTesting
+  static bool canReceiveLeaderMembershipPush({
+    required Iterable<String> roles,
+    required Iterable<String> privileges,
+  }) {
+    final normalizedRoles = roles.map(_normalizeAccessValue).toSet();
+    final normalizedPrivileges = privileges.map(_normalizeAccessValue).toSet();
+    const leaderRoles = {
+      'pastor',
+      'seniorpastor',
+      'assistantpastor',
+      'actingpastor',
+      'churchadmin',
+      'admin',
+      'administrator',
+      'secretary',
+      'churchsecretary',
+    };
+    const leaderPrivileges = {
+      'approvemembers',
+      'managechurchsettings',
+      'manageroles',
+    };
+    return normalizedRoles.any(leaderRoles.contains) ||
+        normalizedPrivileges.any(leaderPrivileges.contains);
+  }
+
+  static String _normalizeAccessValue(String value) {
+    return value
+        .trim()
+        .toLowerCase()
+        .replaceAll('&', 'and')
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '');
   }
 }

@@ -14,12 +14,19 @@ This pass covered the mobile app settings/support flows, subscription gating, no
 - Churches without active subscriptions are now limited to Bible and Daily Word access; church management/feed tools are paused.
 - Daily Word and Daily Bible Quiz alert dots now clear after acknowledgement using local per-day/per-content keys.
 - Giving Settings now centers on the SpurrOpen giving link and tells churches SpurrOpen is free to sign up for.
-- Settings no longer labels the giving setup as Finance, and the visible app version was updated to `1.0.15-beta`.
-- Release version bumped to `1.0.15-beta+16`, with Android `versionCode 16`.
+- Settings no longer labels the giving setup as Finance, and the visible app version was updated through `1.0.16-beta`.
+- Previous internal testing release was `1.0.15-beta+16`; this pass advances the next upload to `1.0.16-beta+17`.
+- Developer-portal member approval now locks only the membership row, fixing the Postgres outer-join `FOR UPDATE` error.
+- New membership request notifications now route to Membership Requests instead of the member list, and are marked read only after approval/decline.
+- Startup permissions now explicitly prompt for notifications and location after sign-in, and pastors/admins subscribe to leader-only membership request push alerts.
+- Unread actionable notifications are checked on a 15-minute loop and re-shown every 3 hours until resolved.
+- Release version bumped to `1.0.16-beta+17`, with Android `versionCode 17`.
 
 ## Supabase
 
 - Applied remote migration: `20260630193000_play_review_demo_access.sql`.
+- Applied remote migration: `20260630205500_fix_member_approval_notifications.sql`.
+- Deployed Supabase Edge Function: `send-membership-request-push` (ACTIVE, version 1).
 - Seeded a hidden approved demo church record with an active system-granted subscription and daily quiz/demo daily word content.
 - Added developer-flag cleanup so `users."isDeveloper"` matches active `developer_accounts`.
 - Added `scripts/setup_google_play_review_accounts.py` to create the Play reviewer member/admin accounts from environment variables only.
@@ -31,6 +38,8 @@ The reviewer account script was not executed from this terminal because `SUPABAS
 - `dart format` completed for touched Dart files.
 - `python3 -m py_compile scripts/setup_google_play_review_accounts.py` passed.
 - `flutter analyze` passed with no issues.
+- `supabase db push` applied the member approval/notification migration to the remote project.
+- `supabase functions deploy send-membership-request-push` completed and `supabase functions list` shows the function active.
 - Focused test suite passed:
   - `test/beta_hardening_static_test.dart`
   - `test/membership_service_test.dart`
@@ -41,9 +50,9 @@ The reviewer account script was not executed from this terminal because `SUPABAS
 
 ## Release
 
-- Release name: `Grace Connect 1.0.15-beta (16)`
+- Release name: `Grace Connect 1.0.16-beta (17)`
 - Package id: `love.graceconnect`
-- AAB: `build/app/outputs/bundle/release/app-release.aab`
+- AAB: `build/app/outputs/bundle/release/app-release.aab` (58.6 MB from Flutter build output)
 - Release notes: `release_notes/internal-testing-en-US.txt`
 - Play reviewer access instructions: `docs/google_play_review_access.md`
 

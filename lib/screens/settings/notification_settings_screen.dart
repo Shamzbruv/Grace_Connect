@@ -93,9 +93,13 @@ class _NotificationSettingsScreenState
     if (mounted) {
       final userProvider =
           Provider.of<UserRoleProvider>(context, listen: false);
-      if (userProvider.userProfile?.churchId != null) {
-        await NotificationService()
-            .syncSubscriptions(userProvider.userProfile!.churchId);
+      final profile = userProvider.userProfile;
+      if (profile?.churchId != null) {
+        await NotificationService().syncSubscriptions(
+          profile!.churchId,
+          roles: profile.roles,
+          privileges: profile.appPrivileges,
+        );
       }
     }
   }

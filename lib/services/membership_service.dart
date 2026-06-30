@@ -1,5 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
+import 'notification_service.dart';
 
 class MembershipLoadStatus {
   static const ready = 'ready';
@@ -241,13 +245,19 @@ class MembershipService {
     required String churchId,
     String? message,
   }) async {
-    await _client.rpc(
+    final membershipId = await _client.rpc(
       'request_church_membership',
       params: {
         'target_church_id': churchId,
         'request_note': message,
       },
     );
+    final cleanMembershipId = membershipId?.toString().trim() ?? '';
+    if (cleanMembershipId.isNotEmpty) {
+      unawaited(
+        NotificationService().sendMembershipRequestPush(cleanMembershipId),
+      );
+    }
   }
 
   Future<void> cancelMembershipRequest() async {

@@ -114,9 +114,12 @@ class UserRoleProvider with ChangeNotifier {
         previousChurchId,
       ));
     }
-    if (previousChurchId != profile.churchId && profile.churchId.isNotEmpty) {
-      unawaited(NotificationService().syncSubscriptions(profile.churchId));
-    }
+    unawaited(NotificationService().ensureStartupPermissionsAndSubscriptions(
+      userId: profile.uid,
+      churchId: profile.churchId,
+      roles: profile.roles,
+      privileges: profile.appPrivileges,
+    ));
     NotificationService().watchForegroundNotifications(profile.uid);
     if (!kIsWeb && !AttendanceService().isMonitoring) {
       unawaited(AttendanceService().initialize());

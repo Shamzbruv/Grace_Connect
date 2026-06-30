@@ -17,3 +17,6 @@ verify_jwt = false
 
 [functions.grace-mailer]
 verify_jwt = false
+
+[functions.send-membership-request-push]
+verify_jwt = false

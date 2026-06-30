@@ -104,6 +104,12 @@ class NotificationsScreen extends StatelessWidget {
     CommunityService communityService,
     AppNotification notification,
   ) async {
+    if (notification.type == 'membership_request_received') {
+      if (!context.mounted) return;
+      Navigator.pushNamed(context, '/membership_requests');
+      return;
+    }
+
     await notificationService.markAsRead(notification.id);
     if (!context.mounted) return;
 
@@ -371,6 +377,17 @@ class _NotificationTile extends StatelessWidget {
                       const SizedBox(height: 10),
                       _BibleNudgeActions(
                         notification: notification,
+                      ),
+                    ],
+                    if (notification.type == 'membership_request_received') ...[
+                      const SizedBox(height: 10),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: FilledButton.icon(
+                          onPressed: onTap,
+                          icon: const Icon(Icons.how_to_reg_outlined),
+                          label: const Text('Review request'),
+                        ),
                       ),
                     ],
                   ],

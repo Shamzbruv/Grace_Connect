@@ -4,7 +4,7 @@ Use this checklist for the Grace Connect internal testing upload.
 
 ## Release
 
-- Release name: `Grace Connect 1.0.15-beta (16)`
+- Release name: `Grace Connect 1.0.16-beta (17)`
 - App bundle: `build/app/outputs/bundle/release/app-release.aab`
 - Release notes: `release_notes/internal-testing-en-US.txt`
 - Package ID: `love.graceconnect`

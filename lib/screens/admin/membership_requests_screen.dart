@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../providers/user_role_provider.dart';
+import '../../services/notification_service.dart';
 import '../../widgets/app_button.dart';
 import '../../widgets/app_card.dart';
 import '../../widgets/app_scaffold.dart';
@@ -54,6 +55,7 @@ class _MembershipRequestsScreenState extends State<MembershipRequestsScreen> {
     final reason = await _decisionReason(approve: approve);
     if (reason == null || !mounted) return;
 
+    final currentUser = context.read<UserRoleProvider>().userProfile;
     final rpc =
         approve ? 'approve_church_membership' : 'decline_church_membership';
     await Supabase.instance.client.rpc(
@@ -63,6 +65,13 @@ class _MembershipRequestsScreenState extends State<MembershipRequestsScreen> {
         'decision_note': reason,
       },
     );
+    if (currentUser != null) {
+      await NotificationService().markEntityAsRead(
+        userId: currentUser.uid,
+        entityTable: 'church_memberships',
+        entityId: membershipId,
+      );
+    }
 
     if (!mounted) return;
     setState(() {

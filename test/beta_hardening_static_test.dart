@@ -258,8 +258,8 @@ void main() {
       ).readAsStringSync();
 
       expect(gradle, contains('"love.graceconnect"'));
-      expect(gradle, contains('versionCode 16'));
-      expect(gradle, contains('versionName "1.0.15-beta"'));
+      expect(gradle, contains('versionCode 17'));
+      expect(gradle, contains('versionName "1.0.16-beta"'));
       expect(activity, contains('package love.graceconnect'));
       expect(manifest, contains('love.graceconnect.MainActivity'));
       expect(manifest, contains('default_notification_icon'));
@@ -299,17 +299,29 @@ void main() {
           motivationSource, contains('timeout(const Duration(seconds: 18))'));
     });
 
-    test('push notifications are opt-in and topic broadcasts stay public', () {
+    test(
+        'push notifications prompt at startup and topic broadcasts stay scoped',
+        () {
       final serviceSource =
           File('lib/services/notification_service.dart').readAsStringSync();
       final settingsSource =
           File('lib/screens/settings/notification_settings_screen.dart')
               .readAsStringSync();
       final functionsSource = File('functions/index.js').readAsStringSync();
+      final membershipPushSource = File(
+        'supabase/functions/send-membership-request-push/index.ts',
+      ).readAsStringSync();
+      final notificationMigration = File(
+        'supabase/migrations/20260630205500_fix_member_approval_notifications.sql',
+      ).readAsStringSync();
 
-      expect(serviceSource,
-          isNot(contains('await _messaging.requestPermission();')));
+      expect(
+          serviceSource, contains('ensureStartupPermissionsAndSubscriptions'));
       expect(serviceSource, contains('Future<bool> ensurePushPermission()'));
+      expect(serviceSource, contains('requestNotificationsPermission'));
+      expect(serviceSource, contains('Duration(hours: 3)'));
+      expect(serviceSource, contains("church_\${churchId}_leaders"));
+      expect(serviceSource, contains('send-membership-request-push'));
       expect(
           serviceSource, contains("churchWidePrefKey = 'notify_church_wide'"));
       expect(serviceSource, contains("prefs.getBool(prefKey) ?? false"));
@@ -319,6 +331,14 @@ void main() {
       expect(functionsSource, contains('PUBLIC_BROADCAST_TYPES'));
       expect(functionsSource,
           contains('Only public church-wide broadcasts can use topic push.'));
+      expect(membershipPushSource, contains('authenticatedUser'));
+      expect(membershipPushSource, contains('church_\${churchId}_leaders'));
+      expect(membershipPushSource, contains('/membership_requests'));
+      expect(
+          notificationMigration, contains('developer_approve_member_request'));
+      expect(notificationMigration,
+          isNot(contains('left join public.users u on u.id = cm.user_id')));
+      expect(notificationMigration, contains('/membership_requests'));
     });
 
     test('Google Play reviewer demo access stays non-developer', () {
