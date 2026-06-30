@@ -20,9 +20,15 @@ class EventsScreen extends StatefulWidget {
   const EventsScreen({
     super.key,
     this.showBottomMenu = true,
+    this.initialMinistryId,
+    this.initialMinistryName,
+    this.openComposerOnReady = false,
   });
 
   final bool showBottomMenu;
+  final String? initialMinistryId;
+  final String? initialMinistryName;
+  final bool openComposerOnReady;
 
   @override
   State<EventsScreen> createState() => _EventsScreenState();
@@ -49,6 +55,7 @@ class _EventsScreenState extends State<EventsScreen> {
   TimeOfDay _selectedTime = TimeOfDay.now();
   bool _showSharedEvents = false;
   bool _eventVisibleToAllChurches = false;
+  bool _openedInitialComposer = false;
 
   @override
   void initState() {
@@ -89,6 +96,25 @@ class _EventsScreenState extends State<EventsScreen> {
       _canAddMinistryEvent =
           managedMinistries.any((manager) => manager.canCreateEvents);
     });
+    if (widget.openComposerOnReady && !_openedInitialComposer) {
+      final roleProvider =
+          Provider.of<UserRoleProvider>(context, listen: false);
+      final targetMinistryId = widget.initialMinistryId?.trim();
+      final canCreateForTarget = roleProvider.canManageEvents ||
+          managedMinistries.any((manager) =>
+              manager.canCreateEvents &&
+              manager.ministryId == targetMinistryId);
+      if (targetMinistryId != null &&
+          targetMinistryId.isNotEmpty &&
+          canCreateForTarget) {
+        _openedInitialComposer = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            _showEventDialog(preselectedMinistryId: targetMinistryId);
+          }
+        });
+      }
+    }
   }
 
   @override
@@ -249,7 +275,10 @@ class _EventsScreenState extends State<EventsScreen> {
     _showEventDialog(existingEvent: event);
   }
 
-  void _showEventDialog({EventModel? existingEvent}) {
+  void _showEventDialog({
+    EventModel? existingEvent,
+    String? preselectedMinistryId,
+  }) {
     final isEditing = existingEvent != null;
     _titleController.text = existingEvent?.title ?? '';
     _descriptionController.text = existingEvent?.description ?? '';
@@ -263,6 +292,7 @@ class _EventsScreenState extends State<EventsScreen> {
     final ministryEventAccess =
         _managedMinistries.where((manager) => manager.canCreateEvents).toList();
     _selectedMinistryId = existingEvent?.ministryId ??
+        preselectedMinistryId ??
         (roleProvider.canManageEvents
             ? null
             : ministryEventAccess.isNotEmpty

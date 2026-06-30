@@ -1,7 +1,8 @@
 <en-US>
-Internal beta hardening for Grace Connect 1.0.13-beta:
-- Locks Android release identity to love.graceconnect.
-- Tightens notification opt-in and public church-wide push behavior.
-- Removes background-location permissions from the beta manifest.
-- Adds issue reporting, church profile, subscription, onboarding, video media, and developer portal review fixes from the one-day readiness pass.
+Internal beta hardening for Grace Connect 1.0.14-beta:
+- Fixes web email verification so church and member signups return to Grace Connect instead of localhost.
+- Adds group join requests, group admin approval/promotion tools, and clearer message sender details.
+- Improves ministry event entry so ministry leaders can create services/events with ministry context.
+- Adds richer member and pastor profile fields with privacy controls.
+- Keeps Android release identity on love.graceconnect and bumps the Play version code to 15.
 </en-US>

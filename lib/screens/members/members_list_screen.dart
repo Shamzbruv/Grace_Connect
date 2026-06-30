@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:intl/intl.dart';
 import '../../theme/app_colors.dart';
 import '../../providers/user_role_provider.dart';
 import '../../models/family_relationship.dart';
@@ -300,6 +301,17 @@ class _MembersListScreenState extends State<MembersListScreen> {
     final showContactInfo = isOwnProfile ||
         (!isPrivate &&
             memberProfile.canShowContactInfoTo(isSameChurch: isSameChurch));
+    final canViewExtendedProfile = isOwnProfile ||
+        currentUser?.capabilities.canManageMembersBasic == true ||
+        currentUser?.hasPastoralRole == true;
+    final hasExtendedProfileDetails = memberProfile.dateOfBirth != null ||
+        memberProfile.gender.trim().isNotEmpty ||
+        memberProfile.occupation.trim().isNotEmpty ||
+        memberProfile.address.trim().isNotEmpty ||
+        memberProfile.city.trim().isNotEmpty ||
+        memberProfile.parish.trim().isNotEmpty ||
+        memberProfile.emergencyContactName.trim().isNotEmpty ||
+        memberProfile.emergencyContactPhone.trim().isNotEmpty;
     final careAlert = _careAlertsByUserId[memberProfile.uid];
     final canMessage =
         !isOwnProfile && memberProfile.allowMessages && !isPrivate;
@@ -425,6 +437,74 @@ class _MembersListScreenState extends State<MembersListScreen> {
                           'Contact info hidden',
                           'This member has turned off email and phone visibility.',
                         ),
+                      if (canViewExtendedProfile &&
+                          hasExtendedProfileDetails) ...[
+                        const Divider(height: 24),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            'Member Details',
+                            style: theme.textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                        if (memberProfile.dateOfBirth != null)
+                          ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: const Icon(Icons.cake_outlined),
+                            title: Text(DateFormat.yMMMMd()
+                                .format(memberProfile.dateOfBirth!)),
+                            subtitle: const Text('Date of birth'),
+                          ),
+                        if (memberProfile.gender.trim().isNotEmpty)
+                          ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: const Icon(Icons.person_search_outlined),
+                            title: Text(memberProfile.gender.trim()),
+                            subtitle: const Text('Gender'),
+                          ),
+                        if (memberProfile.occupation.trim().isNotEmpty)
+                          ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: const Icon(Icons.work_outline),
+                            title: Text(memberProfile.occupation.trim()),
+                            subtitle: const Text('Occupation'),
+                          ),
+                        if (memberProfile.address.trim().isNotEmpty ||
+                            memberProfile.city.trim().isNotEmpty ||
+                            memberProfile.parish.trim().isNotEmpty)
+                          ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: const Icon(Icons.home_outlined),
+                            title: Text([
+                              memberProfile.address,
+                              memberProfile.city,
+                              memberProfile.parish,
+                            ]
+                                .where((part) => part.trim().isNotEmpty)
+                                .join(', ')),
+                            subtitle: const Text('Address'),
+                          ),
+                        if (memberProfile.emergencyContactName
+                                .trim()
+                                .isNotEmpty ||
+                            memberProfile.emergencyContactPhone
+                                .trim()
+                                .isNotEmpty)
+                          ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading:
+                                const Icon(Icons.contact_emergency_outlined),
+                            title: Text([
+                              memberProfile.emergencyContactName,
+                              memberProfile.emergencyContactPhone,
+                            ]
+                                .where((part) => part.trim().isNotEmpty)
+                                .join(' - ')),
+                            subtitle: const Text('Emergency contact'),
+                          ),
+                      ],
                     ],
                   ],
                 ),

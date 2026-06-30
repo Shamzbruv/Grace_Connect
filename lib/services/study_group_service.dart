@@ -2,6 +2,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 import '../models/study_group_model.dart';
 import '../models/group_message_model.dart';
+import '../models/user_profile.dart';
 
 class StudyGroupService {
   final SupabaseClient _supabase = Supabase.instance.client;
@@ -35,16 +36,19 @@ class StudyGroupService {
     return _supabase.from('study_groups').stream(primaryKey: ['id']).map(
         (docs) => docs
             .where((doc) =>
-                (doc['memberIds'] as List<dynamic>?)?.contains(uid) == true)
+                (doc['memberIds'] as List<dynamic>?)?.contains(uid) == true ||
+                (doc['adminIds'] as List<dynamic>?)?.contains(uid) == true ||
+                doc['leaderId'] == uid)
             .map((doc) => StudyGroup.fromMap(doc))
             .toList());
   }
 
   // Join Group
-  Future<void> joinGroup(String groupId, String uid) async {
-    if (uid.isEmpty) return;
-    await _supabase
+  Future<String> joinGroup(String groupId, String uid) async {
+    if (uid.isEmpty) return 'ignored';
+    final result = await _supabase
         .rpc('join_study_group', params: {'target_group_id': groupId});
+    return (result ?? 'active').toString();
   }
 
   // Leave Group
@@ -54,15 +58,64 @@ class StudyGroupService {
         .rpc('leave_study_group', params: {'target_group_id': groupId});
   }
 
+  Future<void> approvePendingMember(String groupId, String userId) async {
+    if (groupId.isEmpty || userId.isEmpty) return;
+    await _supabase.rpc(
+      'approve_study_group_member',
+      params: {
+        'target_group_id': groupId,
+        'target_user_id': userId,
+      },
+    );
+  }
+
+  Future<void> setGroupAdmin(
+    String groupId,
+    String userId, {
+    required bool makeAdmin,
+  }) async {
+    if (groupId.isEmpty || userId.isEmpty) return;
+    await _supabase.rpc(
+      'set_study_group_admin',
+      params: {
+        'target_group_id': groupId,
+        'target_user_id': userId,
+        'make_admin': makeAdmin,
+      },
+    );
+  }
+
+  Future<List<UserProfile>> fetchGroupMembers(List<String> userIds) async {
+    final cleanIds = userIds
+        .map((id) => id.trim())
+        .where((id) => id.isNotEmpty)
+        .toSet()
+        .toList();
+    if (cleanIds.isEmpty) return const [];
+
+    final rows = await _supabase
+        .from('users')
+        .select()
+        .inFilter('uid', cleanIds)
+        .order('fullName');
+    return rows.map<UserProfile>((row) => UserProfile.fromMap(row)).toList();
+  }
+
   // Send Message
   Future<void> sendMessage(
-      String groupId, String senderId, String senderName, String text) async {
+    String groupId,
+    String senderId,
+    String senderName,
+    String text, {
+    String senderPhotoUrl = '',
+  }) async {
     if (text.trim().isEmpty) return;
     await _supabase.from('group_messages').insert({
       'id': const Uuid().v4(),
       'groupId': groupId,
       'senderId': senderId,
       'senderName': senderName,
+      'senderPhotoUrl': senderPhotoUrl,
       'text': text.trim(),
       'timestamp': DateTime.now().toIso8601String(),
     });

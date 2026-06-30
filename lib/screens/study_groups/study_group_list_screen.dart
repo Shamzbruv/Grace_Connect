@@ -34,62 +34,76 @@ class _StudyGroupListScreenState extends State<StudyGroupListScreen>
     final topicController = TextEditingController();
     final schedController = TextEditingController();
     final descController = TextEditingController();
+    var requireApproval = true;
 
     showDialog(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Create Study Group'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              AppTextField(controller: nameController, label: 'Group Name'),
-              const SizedBox(height: 8),
-              AppTextField(
-                  controller: topicController, label: 'Topic (e.g. Romans)'),
-              const SizedBox(height: 8),
-              AppTextField(
-                  controller: schedController,
-                  label: 'Schedule (e.g. Tue 7pm)'),
-              const SizedBox(height: 8),
-              AppTextField(
-                  controller: descController,
-                  label: 'Description',
-                  maxLines: 2),
-            ],
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Create Study Group'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                AppTextField(controller: nameController, label: 'Group Name'),
+                const SizedBox(height: 8),
+                AppTextField(
+                    controller: topicController, label: 'Topic (e.g. Romans)'),
+                const SizedBox(height: 8),
+                AppTextField(
+                    controller: schedController,
+                    label: 'Schedule (e.g. Tue 7pm)'),
+                const SizedBox(height: 8),
+                AppTextField(
+                    controller: descController,
+                    label: 'Description',
+                    maxLines: 2),
+                const SizedBox(height: 8),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Require admin approval'),
+                  value: requireApproval,
+                  onChanged: (value) {
+                    setDialogState(() => requireApproval = value);
+                  },
+                ),
+              ],
+            ),
           ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Cancel')),
+            ElevatedButton(
+              onPressed: () async {
+                final user = Supabase.instance.client.auth.currentUser;
+                final profile =
+                    Provider.of<UserRoleProvider>(context, listen: false)
+                        .userProfile;
+                if (user != null && nameController.text.isNotEmpty) {
+                  final group = StudyGroup(
+                    id: const Uuid().v4(),
+                    name: nameController.text,
+                    topic: topicController.text,
+                    description: descController.text,
+                    leaderId: user.id,
+                    leaderName: profile?.fullName ?? 'Unknown',
+                    adminIds: [user.id],
+                    memberIds: [user.id], // Leader is member
+                    pendingMemberIds: const [],
+                    schedule: schedController.text,
+                    churchId: profile?.placeId ?? '',
+                    createdAt: DateTime.now(),
+                    requireJoinApproval: requireApproval,
+                  );
+                  await _service.createGroup(group);
+                  if (dialogContext.mounted) Navigator.pop(dialogContext);
+                }
+              },
+              child: const Text('Create'),
+            )
+          ],
         ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Cancel')),
-          ElevatedButton(
-            onPressed: () async {
-              final user = Supabase.instance.client.auth.currentUser;
-              final profile =
-                  Provider.of<UserRoleProvider>(context, listen: false)
-                      .userProfile;
-              if (user != null && nameController.text.isNotEmpty) {
-                final group = StudyGroup(
-                  id: const Uuid().v4(),
-                  name: nameController.text,
-                  topic: topicController.text,
-                  description: descController.text,
-                  leaderId: user.id,
-                  leaderName: profile?.fullName ?? 'Unknown',
-                  adminIds: [user.id],
-                  memberIds: [user.id], // Leader is member
-                  schedule: schedController.text,
-                  churchId: profile?.placeId ?? '',
-                  createdAt: DateTime.now(),
-                );
-                await _service.createGroup(group);
-                if (dialogContext.mounted) Navigator.pop(dialogContext);
-              }
-            },
-            child: const Text('Create'),
-          )
-        ],
       ),
     );
   }
@@ -154,6 +168,11 @@ class _StudyGroupListScreenState extends State<StudyGroupListScreen>
           itemCount: groups.length,
           itemBuilder: (context, index) {
             final group = groups[index];
+            final uid = Supabase.instance.client.auth.currentUser?.id ?? '';
+            final isMember = group.memberIds.contains(uid) ||
+                group.adminIds.contains(uid) ||
+                group.leaderId == uid;
+            final isPending = group.pendingMemberIds.contains(uid);
             return AppCard(
               child: ListTile(
                 leading: CircleAvatar(
@@ -165,7 +184,14 @@ class _StudyGroupListScreenState extends State<StudyGroupListScreen>
                 title: Text(group.name,
                     style: const TextStyle(fontWeight: FontWeight.bold)),
                 subtitle: Text('${group.topic} • ${group.schedule}'),
-                trailing: const Icon(Icons.chevron_right),
+                trailing: isMember
+                    ? const Icon(Icons.chevron_right)
+                    : isPending
+                        ? const Chip(
+                            label: Text('Requested'),
+                            visualDensity: VisualDensity.compact,
+                          )
+                        : const Icon(Icons.chevron_right),
                 onTap: () {
                   Navigator.push(
                       context,

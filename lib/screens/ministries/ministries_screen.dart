@@ -9,6 +9,7 @@ import '../../widgets/ui/app_button.dart';
 import '../../widgets/ui/app_card.dart';
 import '../../widgets/ui/app_scaffold.dart';
 import '../../widgets/ui/app_text_field.dart';
+import '../events/events_screen.dart';
 
 class MinistriesScreen extends StatefulWidget {
   const MinistriesScreen({super.key});
@@ -318,6 +319,11 @@ class _MinistryCard extends StatelessWidget {
             future: service.fetchMinistryManagers(ministry.id),
             builder: (context, snapshot) {
               final managers = snapshot.data ?? const <MinistryManager>[];
+              final currentUser = context.watch<UserRoleProvider>().userProfile;
+              final canCreateMinistryEvent = canManage ||
+                  managers.any((manager) =>
+                      manager.userId == currentUser?.uid &&
+                      manager.canCreateEvents);
               if (snapshot.connectionState == ConnectionState.waiting) {
                 return Text(
                   'Loading managers...',
@@ -326,13 +332,41 @@ class _MinistryCard extends StatelessWidget {
                   ),
                 );
               }
-              return Text(
-                managers.isEmpty
-                    ? 'No managers assigned yet.'
-                    : '${managers.length} manager${managers.length == 1 ? '' : 's'} assigned',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    managers.isEmpty
+                        ? 'No managers assigned yet.'
+                        : '${managers.length} manager${managers.length == 1 ? '' : 's'} assigned',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  if (canCreateMinistryEvent) ...[
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => EventsScreen(
+                                showBottomMenu: false,
+                                initialMinistryId: ministry.id,
+                                initialMinistryName: ministry.name,
+                                openComposerOnReady: true,
+                              ),
+                            ),
+                          );
+                        },
+                        icon: const Icon(Icons.event_available_outlined),
+                        label: const Text('Create Service/Event'),
+                      ),
+                    ),
+                  ],
+                ],
               );
             },
           ),

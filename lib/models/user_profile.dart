@@ -17,11 +17,24 @@ class UserProfile {
   final String coverPhotoUrl;
   final String bio;
   final List<String> appPrivileges;
+  final DateTime? dateOfBirth;
+  final String gender;
+  final String occupation;
+  final String emergencyContactName;
+  final String emergencyContactPhone;
 
   // Social Links
   final String? instagramLink;
   final String? facebookLink;
   final String? whatsappLink;
+
+  // Pastor public profile
+  final String pastoralTitle;
+  final String pastorPublicBio;
+  final DateTime? ordinationDate;
+  final String publicEmail;
+  final String publicPhone;
+  final bool showPastorPublicContact;
 
   // Settings
   final bool isProfilePrivate;
@@ -64,9 +77,20 @@ class UserProfile {
     this.coverPhotoUrl = '',
     this.bio = '',
     this.appPrivileges = const [],
+    this.dateOfBirth,
+    this.gender = '',
+    this.occupation = '',
+    this.emergencyContactName = '',
+    this.emergencyContactPhone = '',
     this.instagramLink,
     this.facebookLink,
     this.whatsappLink,
+    this.pastoralTitle = '',
+    this.pastorPublicBio = '',
+    this.ordinationDate,
+    this.publicEmail = '',
+    this.publicPhone = '',
+    this.showPastorPublicContact = true,
     this.isProfilePrivate = false,
     this.allowMessages = true,
     this.notifyAttendance = true,
@@ -100,6 +124,15 @@ class UserProfile {
     return DateTime.now();
   }
 
+  static DateTime? _parseOptionalDate(dynamic value) {
+    if (value == null) return null;
+    if (value is DateTime) return value;
+    if (value is String && value.trim().isNotEmpty) {
+      return DateTime.tryParse(value);
+    }
+    return null;
+  }
+
   factory UserProfile.fromMap(Map<String, dynamic> data) {
     return UserProfile(
       uid: data['uid'] ?? data['id'] ?? '',
@@ -118,9 +151,20 @@ class UserProfile {
       coverPhotoUrl: data['coverPhotoUrl'] ?? '',
       bio: data['bio'] ?? '',
       appPrivileges: List<String>.from(data['appPrivileges'] ?? const []),
+      dateOfBirth: _parseOptionalDate(data['dateOfBirth']),
+      gender: data['gender'] ?? '',
+      occupation: data['occupation'] ?? '',
+      emergencyContactName: data['emergencyContactName'] ?? '',
+      emergencyContactPhone: data['emergencyContactPhone'] ?? '',
       instagramLink: data['instagramLink'],
       facebookLink: data['facebookLink'],
       whatsappLink: data['whatsappLink'],
+      pastoralTitle: data['pastoralTitle'] ?? '',
+      pastorPublicBio: data['pastorPublicBio'] ?? '',
+      ordinationDate: _parseOptionalDate(data['ordinationDate']),
+      publicEmail: data['publicEmail'] ?? '',
+      publicPhone: data['publicPhone'] ?? '',
+      showPastorPublicContact: data['showPastorPublicContact'] ?? true,
       isProfilePrivate: data['isProfilePrivate'] ?? false,
       allowMessages: data['allowMessages'] ?? true,
       notifyAttendance: data['notifyAttendance'] ?? true,
@@ -161,9 +205,20 @@ class UserProfile {
       'coverPhotoUrl': coverPhotoUrl,
       'bio': bio,
       'appPrivileges': appPrivileges,
+      'dateOfBirth': dateOfBirth?.toIso8601String(),
+      'gender': gender,
+      'occupation': occupation,
+      'emergencyContactName': emergencyContactName,
+      'emergencyContactPhone': emergencyContactPhone,
       'instagramLink': instagramLink,
       'facebookLink': facebookLink,
       'whatsappLink': whatsappLink,
+      'pastoralTitle': pastoralTitle,
+      'pastorPublicBio': pastorPublicBio,
+      'ordinationDate': ordinationDate?.toIso8601String(),
+      'publicEmail': publicEmail,
+      'publicPhone': publicPhone,
+      'showPastorPublicContact': showPastorPublicContact,
       'isProfilePrivate': isProfilePrivate,
       'allowMessages': allowMessages,
       'notifyAttendance': notifyAttendance,
@@ -204,9 +259,20 @@ class UserProfile {
     String? coverPhotoUrl,
     String? bio,
     List<String>? appPrivileges,
+    DateTime? dateOfBirth,
+    String? gender,
+    String? occupation,
+    String? emergencyContactName,
+    String? emergencyContactPhone,
     String? instagramLink,
     String? facebookLink,
     String? whatsappLink,
+    String? pastoralTitle,
+    String? pastorPublicBio,
+    DateTime? ordinationDate,
+    String? publicEmail,
+    String? publicPhone,
+    bool? showPastorPublicContact,
     bool? isProfilePrivate,
     bool? allowMessages,
     bool? notifyAttendance,
@@ -242,9 +308,22 @@ class UserProfile {
       coverPhotoUrl: coverPhotoUrl ?? this.coverPhotoUrl,
       bio: bio ?? this.bio,
       appPrivileges: appPrivileges ?? this.appPrivileges,
+      dateOfBirth: dateOfBirth ?? this.dateOfBirth,
+      gender: gender ?? this.gender,
+      occupation: occupation ?? this.occupation,
+      emergencyContactName: emergencyContactName ?? this.emergencyContactName,
+      emergencyContactPhone:
+          emergencyContactPhone ?? this.emergencyContactPhone,
       instagramLink: instagramLink ?? this.instagramLink,
       facebookLink: facebookLink ?? this.facebookLink,
       whatsappLink: whatsappLink ?? this.whatsappLink,
+      pastoralTitle: pastoralTitle ?? this.pastoralTitle,
+      pastorPublicBio: pastorPublicBio ?? this.pastorPublicBio,
+      ordinationDate: ordinationDate ?? this.ordinationDate,
+      publicEmail: publicEmail ?? this.publicEmail,
+      publicPhone: publicPhone ?? this.publicPhone,
+      showPastorPublicContact:
+          showPastorPublicContact ?? this.showPastorPublicContact,
       isProfilePrivate: isProfilePrivate ?? this.isProfilePrivate,
       allowMessages: allowMessages ?? this.allowMessages,
       notifyAttendance: notifyAttendance ?? this.notifyAttendance,
@@ -296,6 +375,11 @@ class UserProfile {
       role == 'prayer_warrior' ||
       role == 'intercessor' ||
       role == 'prayer_team_intercessor');
+  bool get hasPastoralRole => _normalizedRoles.any((role) =>
+      role == 'pastor' ||
+      role == 'senior_pastor' ||
+      role == 'assistant_pastor' ||
+      role == 'acting_pastor');
   bool get isActingPastor => _normalizedRoles.contains('acting_pastor');
   bool get isAssistantPastor => _normalizedRoles.contains('assistant_pastor');
 

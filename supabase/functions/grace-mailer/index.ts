@@ -93,6 +93,26 @@ function allowedRedirect(rawRedirect?: string): string {
   return url.href;
 }
 
+function publicAuthCallbackUrl(params: {
+  nextUrl: string;
+  flowType: string;
+  tokenHash?: string | null;
+  token?: string | null;
+  email?: string | null;
+  type?: string | null;
+}): string {
+  const siteUrl = Deno.env.get("PUBLIC_SITE_URL") ?? defaultSiteUrl;
+  const callback = new URL("/auth-callback.html", siteUrl);
+  const next = new URL(params.nextUrl, siteUrl);
+  callback.searchParams.set("flow", params.flowType);
+  callback.searchParams.set("next", `${next.pathname}${next.search}${next.hash}`);
+  if (params.tokenHash) callback.searchParams.set("token_hash", params.tokenHash);
+  if (params.token) callback.searchParams.set("token", params.token);
+  if (params.email) callback.searchParams.set("email", params.email);
+  callback.searchParams.set("type", params.type || "signup");
+  return callback.href;
+}
+
 function normalizeEmail(email?: string): string {
   const value = String(email ?? "").trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
@@ -174,6 +194,46 @@ function actionLinkFromGenerateLink(data: Record<string, unknown> | null): strin
   return actionLink;
 }
 
+function verificationUrlFromGenerateLink(
+  data: Record<string, unknown> | null,
+  nextUrl: string,
+  flowType: string,
+  email: string,
+): string {
+  const properties = data?.properties as Record<string, unknown> | undefined;
+  const actionLink = actionLinkFromGenerateLink(data);
+  let tokenHash = String(
+    properties?.token_hash ??
+      properties?.hashed_token ??
+      properties?.hashedToken ??
+      "",
+  );
+  let token = String(properties?.email_otp ?? properties?.token ?? "");
+  let type = String(properties?.type ?? "signup");
+
+  try {
+    const parsed = new URL(actionLink);
+    tokenHash = tokenHash || parsed.searchParams.get("token_hash") || "";
+    token = token || parsed.searchParams.get("token") || "";
+    type = parsed.searchParams.get("type") || type;
+  } catch (_) {
+    // If Supabase changes the shape, the fallback below still sends the raw link.
+  }
+
+  if (tokenHash || token) {
+    return publicAuthCallbackUrl({
+      nextUrl,
+      flowType,
+      tokenHash,
+      token,
+      email,
+      type,
+    });
+  }
+
+  return actionLink;
+}
+
 async function sendSignupVerification(body: MailRequest): Promise<Response> {
   requireResendKey();
   const email = normalizeEmail(body.email);
@@ -184,8 +244,9 @@ async function sendSignupVerification(body: MailRequest): Promise<Response> {
     throw new Error("Unsupported signup flow.");
   }
   const redirectTo = allowedRedirect(body.redirectTo);
+  const authRedirectTo = publicAuthCallbackUrl({ nextUrl: redirectTo, flowType });
   const supabase = serviceClient();
-  let actionLink = "";
+  let verificationUrl = "";
   let usedExistingAccount = false;
   const userData = normalizeSignupData(body.userData, flowType);
 
@@ -195,7 +256,7 @@ async function sendSignupVerification(body: MailRequest): Promise<Response> {
     password,
     options: {
       data: userData,
-      redirectTo,
+      redirectTo: authRedirectTo,
     },
   });
 
@@ -208,12 +269,22 @@ async function sendSignupVerification(body: MailRequest): Promise<Response> {
     const magicResult = await supabase.auth.admin.generateLink({
       type: "magiclink",
       email,
-      options: { redirectTo },
+      options: { redirectTo: authRedirectTo },
     });
     if (magicResult.error) throw magicResult.error;
-    actionLink = actionLinkFromGenerateLink(magicResult.data as Record<string, unknown>);
+    verificationUrl = verificationUrlFromGenerateLink(
+      magicResult.data as Record<string, unknown>,
+      redirectTo,
+      flowType,
+      email,
+    );
   } else {
-    actionLink = actionLinkFromGenerateLink(signupResult.data as Record<string, unknown>);
+    verificationUrl = verificationUrlFromGenerateLink(
+      signupResult.data as Record<string, unknown>,
+      redirectTo,
+      flowType,
+      email,
+    );
   }
 
   const isChurch = flowType === "web_church_registration";
@@ -222,7 +293,7 @@ async function sendSignupVerification(body: MailRequest): Promise<Response> {
     preview: "Use this secure link to verify your email and continue Grace Connect signup.",
     body: `<p>Hello${userData.full_name ? ` ${userData.full_name}` : ""},</p><p>Use the button below to verify your email address and continue your ${isChurch ? "church registration" : "membership request"}.</p><p>This link is time-sensitive and should only be used by you.</p>`,
     ctaLabel: "Verify Email",
-    ctaUrl: actionLink,
+    ctaUrl: verificationUrl,
   });
 
   const resendId = await sendResendEmail({

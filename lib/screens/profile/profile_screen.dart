@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:intl/intl.dart';
 import '../../theme/app_colors.dart';
 import '../../providers/user_role_provider.dart';
 import '../../models/user_profile.dart';
@@ -358,6 +359,128 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ]
                   ]),
                   const SizedBox(height: 24),
+                  Text('MEMBER DETAILS',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1.2,
+                          color: colorScheme.onSurfaceVariant)),
+                  const SizedBox(height: 12),
+                  _buildInfoCard(context, [
+                    if (userProfile.dateOfBirth != null)
+                      _buildInfoRow(
+                        context,
+                        Icons.cake_outlined,
+                        'Date of Birth',
+                        DateFormat.yMMMMd().format(userProfile.dateOfBirth!),
+                      ),
+                    if (userProfile.gender.trim().isNotEmpty) ...[
+                      if (userProfile.dateOfBirth != null)
+                        const Divider(height: 24),
+                      _buildInfoRow(context, Icons.person_search_outlined,
+                          'Gender', userProfile.gender.trim()),
+                    ],
+                    if (userProfile.occupation.trim().isNotEmpty) ...[
+                      if (userProfile.dateOfBirth != null ||
+                          userProfile.gender.trim().isNotEmpty)
+                        const Divider(height: 24),
+                      _buildInfoRow(context, Icons.work_outline, 'Occupation',
+                          userProfile.occupation.trim()),
+                    ],
+                    if (userProfile.address.trim().isNotEmpty ||
+                        userProfile.city.trim().isNotEmpty ||
+                        userProfile.parish.trim().isNotEmpty) ...[
+                      if (userProfile.dateOfBirth != null ||
+                          userProfile.gender.trim().isNotEmpty ||
+                          userProfile.occupation.trim().isNotEmpty)
+                        const Divider(height: 24),
+                      _buildInfoRow(
+                        context,
+                        Icons.home_outlined,
+                        'Address',
+                        [
+                          userProfile.address,
+                          userProfile.city,
+                          userProfile.parish,
+                        ].where((part) => part.trim().isNotEmpty).join(', '),
+                      ),
+                    ],
+                    if (userProfile.dateOfBirth == null &&
+                        userProfile.gender.trim().isEmpty &&
+                        userProfile.occupation.trim().isEmpty &&
+                        userProfile.address.trim().isEmpty &&
+                        userProfile.city.trim().isEmpty &&
+                        userProfile.parish.trim().isEmpty)
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          'No member details added yet.',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                  ]),
+                  const SizedBox(height: 24),
+                  if (userProfile.hasPastoralRole) ...[
+                    Text('PASTOR PROFILE',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 1.2,
+                            color: colorScheme.onSurfaceVariant)),
+                    const SizedBox(height: 12),
+                    _buildInfoCard(context, [
+                      if (userProfile.pastoralTitle.trim().isNotEmpty)
+                        _buildInfoRow(
+                          context,
+                          Icons.workspace_premium_outlined,
+                          'Title',
+                          userProfile.pastoralTitle.trim(),
+                        ),
+                      if (userProfile.ordinationDate != null) ...[
+                        if (userProfile.pastoralTitle.trim().isNotEmpty)
+                          const Divider(height: 24),
+                        _buildInfoRow(
+                          context,
+                          Icons.event_note_outlined,
+                          'Ordination',
+                          DateFormat.yMMMMd()
+                              .format(userProfile.ordinationDate!),
+                        ),
+                      ],
+                      if (userProfile.pastorPublicBio.trim().isNotEmpty) ...[
+                        if (userProfile.pastoralTitle.trim().isNotEmpty ||
+                            userProfile.ordinationDate != null)
+                          const Divider(height: 24),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(userProfile.pastorPublicBio.trim()),
+                        ),
+                      ],
+                      if (userProfile.showPastorPublicContact &&
+                          (userProfile.publicEmail.trim().isNotEmpty ||
+                              userProfile.publicPhone.trim().isNotEmpty)) ...[
+                        const Divider(height: 24),
+                        if (userProfile.publicEmail.trim().isNotEmpty)
+                          _buildInfoRow(
+                            context,
+                            Icons.alternate_email_outlined,
+                            'Public Email',
+                            userProfile.publicEmail.trim(),
+                          ),
+                        if (userProfile.publicPhone.trim().isNotEmpty) ...[
+                          if (userProfile.publicEmail.trim().isNotEmpty)
+                            const Divider(height: 24),
+                          _buildInfoRow(
+                            context,
+                            Icons.phone_forwarded_outlined,
+                            'Public Phone',
+                            userProfile.publicPhone.trim(),
+                          ),
+                        ],
+                      ],
+                    ]),
+                    const SizedBox(height: 24),
+                  ],
                   if (userProfile.bio.trim().isNotEmpty) ...[
                     Text('ABOUT',
                         style: theme.textTheme.labelSmall?.copyWith(

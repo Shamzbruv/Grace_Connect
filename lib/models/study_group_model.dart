@@ -7,6 +7,7 @@ class StudyGroup {
   final String leaderName;
   final List<String> adminIds;
   final List<String> memberIds;
+  final List<String> pendingMemberIds;
   final String schedule; // e.g. "Fridays 7PM"
   final String churchId;
   final DateTime createdAt;
@@ -23,6 +24,7 @@ class StudyGroup {
     required this.leaderName,
     this.adminIds = const [],
     required this.memberIds,
+    this.pendingMemberIds = const [],
     required this.schedule,
     required this.churchId,
     required this.createdAt,
@@ -41,6 +43,7 @@ class StudyGroup {
       leaderName: data['leaderName'] ?? 'Unknown',
       adminIds: List<String>.from(data['adminIds'] ?? []),
       memberIds: List<String>.from(data['memberIds'] ?? []),
+      pendingMemberIds: List<String>.from(data['pendingMemberIds'] ?? []),
       schedule: data['schedule'] ?? '',
       churchId: data['churchId'] ?? '',
       createdAt: data['createdAt'] != null
@@ -61,6 +64,7 @@ class StudyGroup {
       'leaderName': leaderName,
       'adminIds': adminIds,
       'memberIds': memberIds,
+      'pendingMemberIds': pendingMemberIds,
       'schedule': schedule,
       'churchId': churchId,
       'id': id,
@@ -80,6 +84,7 @@ class StudyGroup {
     String? leaderName,
     List<String>? adminIds,
     List<String>? memberIds,
+    List<String>? pendingMemberIds,
     String? schedule,
     String? churchId,
     DateTime? createdAt,
@@ -96,6 +101,7 @@ class StudyGroup {
       leaderName: leaderName ?? this.leaderName,
       adminIds: adminIds ?? this.adminIds,
       memberIds: memberIds ?? this.memberIds,
+      pendingMemberIds: pendingMemberIds ?? this.pendingMemberIds,
       schedule: schedule ?? this.schedule,
       churchId: churchId ?? this.churchId,
       createdAt: createdAt ?? this.createdAt,
