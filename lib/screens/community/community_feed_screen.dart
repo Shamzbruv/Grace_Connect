@@ -33,9 +33,15 @@ class CommunityFeedScreen extends StatefulWidget {
   const CommunityFeedScreen({
     super.key,
     this.showBottomMenu = true,
+    this.limitedAccessTitle,
+    this.limitedAccessMessage,
+    this.showFindChurchAction = true,
   });
 
   final bool showBottomMenu;
+  final String? limitedAccessTitle;
+  final String? limitedAccessMessage;
+  final bool showFindChurchAction;
 
   @override
   State<CommunityFeedScreen> createState() => _CommunityFeedScreenState();
@@ -77,6 +83,11 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
   String? _mediaType; // 'image' or 'video'
   MediaDisplayFormat _postMediaFormat = MediaDisplayFormat.fill;
   double? _postMediaAspectRatio;
+
+  bool get _hasLimitedAccess =>
+      widget.limitedAccessMessage?.trim().isNotEmpty == true;
+
+  bool _isBrowseOnly(String churchId) => _hasLimitedAccess || churchId.isEmpty;
 
   @override
   void initState() {
@@ -122,12 +133,15 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
           !dataSaver && (prefs.getBool('community_show_media') ?? true);
       _confirmBeforePosting =
           prefs.getBool('community_confirm_before_posting') ?? false;
-      _feedScope = validScope == 'custom' &&
-              (savedChurchIds == null || savedChurchIds.isEmpty)
-          ? 'church'
-          : validScope;
-      _selectedFeedChurchIds = _feedScope == 'custom' ? savedChurchIds : null;
-      _selectedFeedLabel = _feedScope == 'custom' ? savedLabel : null;
+      final nextScope = _hasLimitedAccess
+          ? 'all'
+          : validScope == 'custom' &&
+                  (savedChurchIds == null || savedChurchIds.isEmpty)
+              ? 'church'
+              : validScope;
+      _feedScope = nextScope;
+      _selectedFeedChurchIds = nextScope == 'custom' ? savedChurchIds : null;
+      _selectedFeedLabel = nextScope == 'custom' ? savedLabel : null;
     });
   }
 
@@ -1075,106 +1089,110 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
     final theme = Theme.of(context);
     final userProvider = Provider.of<UserRoleProvider>(context);
     final churchId = userProvider.userProfile?.placeId ?? "";
-    final feedChurchIds = _feedChurchIds(churchId);
+    final browseOnly = _isBrowseOnly(churchId);
+    final feedChurchIds = churchId.isEmpty ? null : _feedChurchIds(churchId);
+    final includeShared = browseOnly || _feedScope != 'church';
 
     return AppScaffold(
       title: 'Community Feed',
       leading: IconButton(
         tooltip: 'Search feed',
         icon: const Icon(Icons.search),
-        onPressed:
-            churchId.isEmpty ? null : () => _showFeedSearchSheet(churchId),
+        onPressed: churchId.isEmpty || browseOnly
+            ? null
+            : () => _showFeedSearchSheet(churchId),
       ),
       actions: [
         Builder(
           builder: (actionContext) => IconButton(
             tooltip: 'Feed settings',
             icon: const Icon(Icons.tune_outlined),
-            onPressed: churchId.isEmpty
+            onPressed: churchId.isEmpty || browseOnly
                 ? null
                 : () => Scaffold.maybeOf(actionContext)?.openDrawer(),
           ),
         ),
-        const InboxIconButton(),
+        if (!browseOnly) const InboxIconButton(),
       ],
-      drawer:
-          churchId.isEmpty ? null : _buildFeedSettingsDrawer(context, churchId),
+      drawer: churchId.isEmpty || browseOnly
+          ? null
+          : _buildFeedSettingsDrawer(context, churchId),
       showBottomMenu: widget.showBottomMenu,
       appBarHeight: 48,
       appBarTitleStyle: theme.textTheme.titleMedium?.copyWith(
         fontWeight: FontWeight.w800,
       ),
       bodySafeAreaTop: false,
-      body: churchId.isEmpty
-          ? const Center(child: CircularProgressIndicator())
-          : Stack(
-              children: [
-                StreamBuilder<List<Post>>(
-                  key: ValueKey(
-                    'feed-$churchId-$_feedScope-${_selectedFeedChurchIds?.join('|')}-$_feedRefreshToken',
-                  ),
-                  stream: _communityService.getPostsForChurches(
-                    churchId,
-                    feedChurchIds,
-                    includeShared: _feedScope != 'church',
-                  ),
-                  builder: (context, snapshot) {
-                    final posts = (snapshot.data ?? [])
-                        .where(
-                          (post) => !_blockedUserIds.contains(post.authorId),
-                        )
-                        .toList();
-                    _queueChurchNameLoads(posts, churchId);
-                    final isWaiting =
-                        snapshot.connectionState == ConnectionState.waiting;
-                    final hasLoadIssue = snapshot.hasError && posts.isEmpty;
-
-                    return NotificationListener<ScrollNotification>(
-                      onNotification: _handleFeedScrollNotification,
-                      child: RefreshIndicator(
-                        onRefresh: () async {
-                          await _communityService.cleanupVanishingContent();
-                          if (mounted) {
-                            setState(() => _feedRefreshToken++);
-                          }
-                        },
-                        child: ListView.builder(
-                          key: PageStorageKey<String>(
-                            'community-feed-list-$churchId-$_feedScope-${_selectedFeedChurchIds?.join('|') ?? 'own'}',
-                          ),
-                          controller: _feedScrollController,
-                          physics: const ClampingScrollPhysics(
-                            parent: AlwaysScrollableScrollPhysics(),
-                          ),
-                          padding: EdgeInsets.zero,
-                          cacheExtent: 1200,
-                          clipBehavior: Clip.hardEdge,
-                          keyboardDismissBehavior:
-                              ScrollViewKeyboardDismissBehavior.onDrag,
-                          itemCount: _feedListItemCount(
-                            postsLength: posts.length,
-                            isWaiting: isWaiting,
-                            hasConnectionNotice: snapshot.hasError,
-                          ),
-                          itemBuilder: (context, index) {
-                            return _buildFeedListItem(
-                              context,
-                              index: index,
-                              churchId: churchId,
-                              posts: posts,
-                              isWaiting: isWaiting,
-                              hasConnectionNotice: snapshot.hasError,
-                              hasLoadIssue: hasLoadIssue,
-                            );
-                          },
-                        ),
-                      ),
-                    );
-                  },
-                ),
-                _buildFloatingComposeMenu(context),
-              ],
+      body: Stack(
+        children: [
+          StreamBuilder<List<Post>>(
+            key: ValueKey(
+              'feed-${churchId.isEmpty ? 'public' : churchId}-$_feedScope-${_selectedFeedChurchIds?.join('|')}-$_feedRefreshToken',
             ),
+            stream: _communityService.getPostsForChurches(
+              churchId,
+              feedChurchIds,
+              includeShared: includeShared,
+            ),
+            builder: (context, snapshot) {
+              final posts = (snapshot.data ?? [])
+                  .where(
+                    (post) => !_blockedUserIds.contains(post.authorId),
+                  )
+                  .toList();
+              _queueChurchNameLoads(posts, churchId);
+              final isWaiting =
+                  snapshot.connectionState == ConnectionState.waiting;
+              final hasLoadIssue = snapshot.hasError && posts.isEmpty;
+
+              return NotificationListener<ScrollNotification>(
+                onNotification: _handleFeedScrollNotification,
+                child: RefreshIndicator(
+                  onRefresh: () async {
+                    await _communityService.cleanupVanishingContent();
+                    if (mounted) {
+                      setState(() => _feedRefreshToken++);
+                    }
+                  },
+                  child: ListView.builder(
+                    key: PageStorageKey<String>(
+                      'community-feed-list-$churchId-$_feedScope-${_selectedFeedChurchIds?.join('|') ?? 'own'}',
+                    ),
+                    controller: _feedScrollController,
+                    physics: const ClampingScrollPhysics(
+                      parent: AlwaysScrollableScrollPhysics(),
+                    ),
+                    padding: EdgeInsets.zero,
+                    cacheExtent: 1200,
+                    clipBehavior: Clip.hardEdge,
+                    keyboardDismissBehavior:
+                        ScrollViewKeyboardDismissBehavior.onDrag,
+                    itemCount: _feedListItemCount(
+                      postsLength: posts.length,
+                      isWaiting: isWaiting,
+                      hasConnectionNotice: snapshot.hasError,
+                      hasAccessNotice: _hasLimitedAccess,
+                    ),
+                    itemBuilder: (context, index) {
+                      return _buildFeedListItem(
+                        context,
+                        index: index,
+                        churchId: churchId,
+                        posts: posts,
+                        isWaiting: isWaiting,
+                        hasConnectionNotice: snapshot.hasError,
+                        hasLoadIssue: hasLoadIssue,
+                        hasAccessNotice: _hasLimitedAccess,
+                      );
+                    },
+                  ),
+                ),
+              );
+            },
+          ),
+          if (!browseOnly) _buildFloatingComposeMenu(context),
+        ],
+      ),
     );
   }
 
@@ -1182,8 +1200,9 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
     required int postsLength,
     required bool isWaiting,
     required bool hasConnectionNotice,
+    required bool hasAccessNotice,
   }) {
-    const headerCount = 3;
+    final headerCount = hasAccessNotice ? 4 : 3;
     final noticeCount = hasConnectionNotice ? 1 : 0;
     final contentCount = isWaiting && postsLength == 0
         ? 5
@@ -1201,12 +1220,19 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
     required bool isWaiting,
     required bool hasConnectionNotice,
     required bool hasLoadIssue,
+    required bool hasAccessNotice,
   }) {
-    if (index == 0) return _buildStoriesSection(context, churchId);
-    if (index == 1) return _buildFeedScopeSummary(context);
-    if (index == 2) return const Divider(height: 1);
+    var itemIndex = index;
+    if (hasAccessNotice) {
+      if (itemIndex == 0) return _buildLimitedAccessNotice(context);
+      itemIndex--;
+    }
 
-    var contentIndex = index - 3;
+    if (itemIndex == 0) return _buildStoriesSection(context, churchId);
+    if (itemIndex == 1) return _buildFeedScopeSummary(context);
+    if (itemIndex == 2) return const Divider(height: 1);
+
+    var contentIndex = itemIndex - 3;
     if (hasConnectionNotice) {
       if (contentIndex == 0) {
         return _buildFeedConnectionNotice(context, hasLoadIssue);
@@ -1239,6 +1265,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
   }
 
   List<String>? _feedChurchIds(String ownChurchId) {
+    if (ownChurchId.trim().isEmpty) return null;
     if (_feedScope == 'all') return null;
     if (_feedScope == 'custom') return _selectedFeedChurchIds;
     return [ownChurchId];
@@ -1246,11 +1273,16 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
 
   Widget _buildFeedScopeSummary(BuildContext context) {
     final theme = Theme.of(context);
-    final subtitle = switch (_feedScope) {
-      'all' => 'Showing shared posts from all churches',
-      'custom' => _selectedFeedLabel ?? 'Shared posts from selected churches',
-      _ => 'Showing your church',
-    };
+    final profileChurchId =
+        context.read<UserRoleProvider>().userProfile?.placeId ?? '';
+    final subtitle = _isBrowseOnly(profileChurchId)
+        ? 'Showing public posts shared across Grace Connect'
+        : switch (_feedScope) {
+            'all' => 'Showing shared posts from all churches',
+            'custom' =>
+              _selectedFeedLabel ?? 'Shared posts from selected churches',
+            _ => 'Showing your church',
+          };
 
     return Container(
       width: double.infinity,
@@ -1280,6 +1312,65 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildLimitedAccessNotice(BuildContext context) {
+    final theme = Theme.of(context);
+    final title = widget.limitedAccessTitle ?? 'Browse Only';
+    final message = widget.limitedAccessMessage ??
+        'You can browse the public feed for now. Posting and member tools unlock after church approval.';
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: theme.colorScheme.primaryContainer.withValues(alpha: 0.5),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: theme.colorScheme.primary.withValues(alpha: 0.18),
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.lock_open_outlined, color: theme.colorScheme.primary),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      message,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    if (widget.showFindChurchAction) ...[
+                      const SizedBox(height: 10),
+                      OutlinedButton.icon(
+                        onPressed: () =>
+                            Navigator.of(context).pushNamed('/find_church'),
+                        icon: const Icon(Icons.church_outlined),
+                        label: const Text('Find a Church'),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -2050,6 +2141,9 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
 
   Widget _buildEmptyFeedState(BuildContext context) {
     final theme = Theme.of(context);
+    final churchId =
+        context.read<UserRoleProvider>().userProfile?.placeId ?? '';
+    final browseOnly = _isBrowseOnly(churchId);
 
     return SizedBox(
       height: 260,
@@ -2064,7 +2158,9 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
             ),
             const SizedBox(height: 12),
             Text(
-              'No posts yet. Be the first!',
+              browseOnly
+                  ? 'No public posts yet.'
+                  : 'No posts yet. Be the first!',
               style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
             ),
           ],
@@ -2135,7 +2231,25 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
     return _postLikeOverrides[post.id] ?? post.likes;
   }
 
+  void _showLimitedFeedNotice() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          widget.limitedAccessMessage ??
+              'Church access is required before you can interact with the feed.',
+        ),
+      ),
+    );
+  }
+
   Future<void> _togglePostLike(Post post) async {
+    final churchId =
+        context.read<UserRoleProvider>().userProfile?.placeId ?? '';
+    if (_isBrowseOnly(churchId)) {
+      _showLimitedFeedNotice();
+      return;
+    }
+
     final uid = _auth.currentUser?.id ?? '';
     if (uid.isEmpty) return;
 
@@ -2174,6 +2288,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
     final canDelete = _canDeletePost(post);
     final isOtherChurch =
         post.placeId.trim().isNotEmpty && post.placeId != viewerChurchId;
+    final browseOnly = _isBrowseOnly(viewerChurchId);
     final churchName = _churchNamesById[post.placeId] ??
         _prettifyChurchIdentifier(post.placeId);
     final churchLabel = _compactChurchLabel(churchName);
@@ -2182,6 +2297,10 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
       margin: const EdgeInsets.only(bottom: 12),
       child: InkWell(
         onTap: () {
+          if (browseOnly) {
+            _showLimitedFeedNotice();
+            return;
+          }
           Navigator.push(
             context,
             MaterialPageRoute(builder: (_) => PostDetailScreen(post: post)),
@@ -2194,7 +2313,9 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
               children: [
                 InkWell(
                   customBorder: const CircleBorder(),
-                  onTap: () => _messagePostAuthor(post),
+                  onTap: browseOnly
+                      ? _showLimitedFeedNotice
+                      : () => _messagePostAuthor(post),
                   child: CircleAvatar(
                     backgroundImage: post.authorPhoto != null
                         ? NetworkImage(post.authorPhoto!)
@@ -2207,7 +2328,9 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                 const SizedBox(width: 12),
                 Expanded(
                   child: InkWell(
-                    onTap: () => _messagePostAuthor(post),
+                    onTap: browseOnly
+                        ? _showLimitedFeedNotice
+                        : () => _messagePostAuthor(post),
                     borderRadius: BorderRadius.circular(8),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(vertical: 2),
@@ -2281,7 +2404,9 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                   IconButton(
                     tooltip: 'Message',
                     icon: const Icon(Icons.chat_bubble_outline, size: 20),
-                    onPressed: () => _messagePostAuthor(post),
+                    onPressed: browseOnly
+                        ? _showLimitedFeedNotice
+                        : () => _messagePostAuthor(post),
                   ),
                 PopupMenuButton<String>(
                   tooltip: 'Post options',
@@ -2328,16 +2453,17 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                           ],
                         ),
                       ),
-                      const PopupMenuItem(
-                        value: 'block',
-                        child: Row(
-                          children: [
-                            Icon(Icons.block, color: Colors.red),
-                            SizedBox(width: 8),
-                            Text('Block user'),
-                          ],
+                      if (!browseOnly)
+                        const PopupMenuItem(
+                          value: 'block',
+                          child: Row(
+                            children: [
+                              Icon(Icons.block, color: Colors.red),
+                              SizedBox(width: 8),
+                              Text('Block user'),
+                            ],
+                          ),
                         ),
-                      ),
                     ],
                   ],
                 ),
@@ -2431,6 +2557,10 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                     style: const TextStyle(color: Colors.grey),
                   ),
                   onPressed: () {
+                    if (browseOnly) {
+                      _showLimitedFeedNotice();
+                      return;
+                    }
                     Navigator.push(
                       context,
                       MaterialPageRoute(
@@ -2450,6 +2580,8 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
     final theme = Theme.of(context);
     final currentUser = context.watch<UserRoleProvider>().userProfile;
     final currentUid = _auth.currentUser?.id;
+    final browseOnly = _isBrowseOnly(churchId);
+    final canCreateStory = !browseOnly && churchId.isNotEmpty;
 
     return Container(
       width: double.infinity,
@@ -2468,96 +2600,108 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                       ?.copyWith(fontWeight: FontWeight.w800),
                 ),
                 const Spacer(),
-                TextButton.icon(
-                  style: TextButton.styleFrom(
-                    minimumSize: const Size(58, 32),
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    visualDensity: VisualDensity.compact,
+                if (canCreateStory)
+                  TextButton.icon(
+                    style: TextButton.styleFrom(
+                      minimumSize: const Size(58, 32),
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    onPressed: _showCreateStorySheet,
+                    icon: const Icon(Icons.add_circle_outline, size: 17),
+                    label: const Text('Add'),
                   ),
-                  onPressed: _showCreateStorySheet,
-                  icon: const Icon(Icons.add_circle_outline, size: 17),
-                  label: const Text('Add'),
-                ),
               ],
             ),
           ),
           SizedBox(
             height: 82,
-            child: churchId.isEmpty
-                ? const Center(child: CircularProgressIndicator())
-                : StreamBuilder<List<CommunityStory>>(
-                    key: ValueKey('statuses-$churchId-$_storiesRefreshToken'),
-                    stream: _communityService.getActiveStories(
-                      churchId,
-                      churchIds: _feedChurchIds(churchId),
-                      includeShared: _feedScope != 'church',
+            child: StreamBuilder<List<CommunityStory>>(
+              key: ValueKey(
+                'statuses-${churchId.isEmpty ? 'public' : churchId}-$_storiesRefreshToken',
+              ),
+              stream: _communityService.getActiveStories(
+                churchId,
+                churchIds: churchId.isEmpty ? null : _feedChurchIds(churchId),
+                includeShared: browseOnly || _feedScope != 'church',
+              ),
+              builder: (context, snapshot) {
+                final stories = (snapshot.data ?? [])
+                    .where((story) => !_blockedUserIds.contains(story.authorId))
+                    .toList();
+                final groups = _buildStoryGroups(stories);
+                _StoryGroup? ownGroup;
+                if (currentUid != null) {
+                  for (final group in groups) {
+                    if (group.authorId == currentUid) {
+                      ownGroup = group;
+                      break;
+                    }
+                  }
+                }
+                final otherGroups = groups
+                    .where((group) => group.authorId != currentUid)
+                    .toList();
+
+                final leadingCount = canCreateStory ? 1 : 0;
+                if (otherGroups.isEmpty && leadingCount == 0) {
+                  return Center(
+                    child: Text(
+                      'No public statuses yet.',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
                     ),
-                    builder: (context, snapshot) {
-                      final stories = (snapshot.data ?? [])
-                          .where((story) =>
-                              !_blockedUserIds.contains(story.authorId))
-                          .toList();
-                      final groups = _buildStoryGroups(stories);
-                      _StoryGroup? ownGroup;
-                      if (currentUid != null) {
-                        for (final group in groups) {
-                          if (group.authorId == currentUid) {
-                            ownGroup = group;
-                            break;
-                          }
-                        }
-                      }
-                      final otherGroups = groups
-                          .where((group) => group.authorId != currentUid)
-                          .toList();
+                  );
+                }
 
-                      return ListView.separated(
-                        scrollDirection: Axis.horizontal,
-                        itemCount: otherGroups.length + 1,
-                        separatorBuilder: (_, __) => const SizedBox(width: 12),
-                        itemBuilder: (context, index) {
-                          if (index == 0) {
-                            final currentUserGroup = ownGroup;
-                            final thumbnail = ownGroup?.thumbnailFor(
-                              _watchedStoryIds,
-                            );
-                            return _StoryBubble(
-                              label: 'Your Story',
-                              photoUrl: thumbnail?.authorPhoto ??
-                                  currentUser?.photoUrl,
-                              thumbnailUrl: thumbnail?.mediaType == 'image'
-                                  ? thumbnail?.mediaUrl
-                                  : null,
-                              hasUnwatched: ownGroup?.hasUnwatched(
-                                    _watchedStoryIds,
-                                  ) ??
-                                  false,
-                              isAddButton: true,
-                              statusCount: ownGroup?.stories.length ?? 0,
-                              onTap: currentUserGroup == null
-                                  ? _showCreateStorySheet
-                                  : () => _openStoryViewer(currentUserGroup),
-                            );
-                          }
-
-                          final group = otherGroups[index - 1];
-                          final thumbnail = group.thumbnailFor(
-                            _watchedStoryIds,
-                          );
-                          return _StoryBubble(
-                            label: _shortStoryName(group.authorName),
-                            thumbnailUrl: thumbnail.mediaType == 'image'
-                                ? thumbnail.mediaUrl
-                                : group.authorPhoto,
-                            photoUrl: group.authorPhoto,
-                            hasUnwatched: group.hasUnwatched(_watchedStoryIds),
-                            statusCount: group.stories.length,
-                            onTap: () => _openStoryViewer(group),
-                          );
-                        },
+                return ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: otherGroups.length + leadingCount,
+                  separatorBuilder: (_, __) => const SizedBox(width: 12),
+                  itemBuilder: (context, index) {
+                    if (canCreateStory && index == 0) {
+                      final currentUserGroup = ownGroup;
+                      final thumbnail = ownGroup?.thumbnailFor(
+                        _watchedStoryIds,
                       );
-                    },
-                  ),
+                      return _StoryBubble(
+                        label: 'Your Story',
+                        photoUrl:
+                            thumbnail?.authorPhoto ?? currentUser?.photoUrl,
+                        thumbnailUrl: thumbnail?.mediaType == 'image'
+                            ? thumbnail?.mediaUrl
+                            : null,
+                        hasUnwatched: ownGroup?.hasUnwatched(
+                              _watchedStoryIds,
+                            ) ??
+                            false,
+                        isAddButton: true,
+                        statusCount: ownGroup?.stories.length ?? 0,
+                        onTap: currentUserGroup == null
+                            ? _showCreateStorySheet
+                            : () => _openStoryViewer(currentUserGroup),
+                      );
+                    }
+
+                    final group = otherGroups[index - leadingCount];
+                    final thumbnail = group.thumbnailFor(
+                      _watchedStoryIds,
+                    );
+                    return _StoryBubble(
+                      label: _shortStoryName(group.authorName),
+                      thumbnailUrl: thumbnail.mediaType == 'image'
+                          ? thumbnail.mediaUrl
+                          : group.authorPhoto,
+                      photoUrl: group.authorPhoto,
+                      hasUnwatched: group.hasUnwatched(_watchedStoryIds),
+                      statusCount: group.stories.length,
+                      onTap: () => _openStoryViewer(group),
+                    );
+                  },
+                );
+              },
+            ),
           ),
         ],
       ),
@@ -2792,6 +2936,8 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
   }
 
   void _openStoryViewer(_StoryGroup group) {
+    final churchId =
+        context.read<UserRoleProvider>().userProfile?.placeId ?? '';
     showDialog<void>(
       context: context,
       barrierColor: Colors.black87,
@@ -2799,6 +2945,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
         group: group,
         currentUserId: _auth.currentUser?.id ?? '',
         initialIndex: group.firstUnwatchedIndex(_watchedStoryIds),
+        readOnly: _isBrowseOnly(churchId),
         onViewed: _markStoryWatched,
         onToggleLike: _toggleStoryLike,
         onReply: _replyToStory,
@@ -2908,6 +3055,7 @@ class _StatusViewerDialog extends StatefulWidget {
     required this.group,
     required this.currentUserId,
     required this.initialIndex,
+    required this.readOnly,
     required this.onViewed,
     required this.onToggleLike,
     required this.onReply,
@@ -2916,6 +3064,7 @@ class _StatusViewerDialog extends StatefulWidget {
   final _StoryGroup group;
   final String currentUserId;
   final int initialIndex;
+  final bool readOnly;
   final Future<void> Function(CommunityStory story) onViewed;
   final Future<CommunityStory?> Function(CommunityStory story) onToggleLike;
   final Future<void> Function(CommunityStory story, String text) onReply;
@@ -2979,6 +3128,8 @@ class _StatusViewerDialogState extends State<_StatusViewerDialog> {
   }
 
   Future<void> _toggleLike() async {
+    if (widget.readOnly) return;
+
     final uid = widget.currentUserId;
     if (uid.isEmpty) return;
 
@@ -3003,6 +3154,8 @@ class _StatusViewerDialogState extends State<_StatusViewerDialog> {
   }
 
   Future<void> _sendReply() async {
+    if (widget.readOnly) return;
+
     final text = _replyController.text.trim();
     if (text.isEmpty || _isReplying) return;
 
@@ -3017,7 +3170,8 @@ class _StatusViewerDialogState extends State<_StatusViewerDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final canReply = _currentStory.authorId != widget.currentUserId;
+    final canReply =
+        !widget.readOnly && _currentStory.authorId != widget.currentUserId;
 
     return Dialog.fullscreen(
       backgroundColor: Colors.black,
@@ -3282,6 +3436,10 @@ class _StatusViewerDialogState extends State<_StatusViewerDialog> {
   Widget _buildBottomControls(BuildContext context, bool canReply) {
     final story = _currentStory;
     final isLiked = story.likes.contains(widget.currentUserId);
+
+    if (widget.readOnly) {
+      return const SizedBox.shrink();
+    }
 
     return Positioned(
       left: 12,

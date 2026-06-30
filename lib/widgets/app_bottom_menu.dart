@@ -13,11 +13,13 @@ class AppBottomMenu extends StatelessWidget {
     this.selectedIndex,
     this.onDestinationSelected,
     this.subscriptionLimited = false,
+    this.limitedNotice,
   });
 
   final int? selectedIndex;
   final ValueChanged<int>? onDestinationSelected;
   final bool subscriptionLimited;
+  final String? limitedNotice;
 
   static const List<_MenuItem> _primaryItems = [
     _MenuItem(
@@ -160,7 +162,7 @@ class AppBottomMenu extends StatelessWidget {
       labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
       onDestinationSelected: (index) {
         if (subscriptionLimited && index != 0) {
-          _showSubscriptionNotice(context);
+          _showLimitedNotice(context);
           return;
         }
 
@@ -233,7 +235,7 @@ class AppBottomMenu extends StatelessWidget {
 
   void _navigateTo(BuildContext context, String route) {
     if (subscriptionLimited && route != '/community') {
-      _showSubscriptionNotice(context);
+      _showLimitedNotice(context);
       return;
     }
 
@@ -260,6 +262,7 @@ class AppBottomMenu extends StatelessWidget {
           items: items,
           currentRoute: currentRoute,
           subscriptionLimited: subscriptionLimited,
+          limitedNotice: limitedNotice,
           onSelectRoute: (route) {
             Navigator.of(sheetContext).pop();
             _navigateTo(context, route);
@@ -308,11 +311,12 @@ class AppBottomMenu extends StatelessWidget {
     return profile.isDeveloper || profile.capabilities.canManageMediaUploads;
   }
 
-  void _showSubscriptionNotice(BuildContext context) {
+  void _showLimitedNotice(BuildContext context) {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
+      SnackBar(
         content: Text(
-          'This church subscription is not active. Please contact your church admin about subscription options.',
+          limitedNotice ??
+              'This church subscription is not active. Please contact your church admin about subscription options.',
         ),
       ),
     );
@@ -323,6 +327,7 @@ class _MoreMenuSheet extends StatelessWidget {
   final List<_MenuItem> items;
   final String? currentRoute;
   final bool subscriptionLimited;
+  final String? limitedNotice;
   final ValueChanged<String> onSelectRoute;
   final VoidCallback onLogOut;
 
@@ -330,6 +335,7 @@ class _MoreMenuSheet extends StatelessWidget {
     required this.items,
     required this.currentRoute,
     required this.subscriptionLimited,
+    this.limitedNotice,
     required this.onSelectRoute,
     required this.onLogOut,
   });
@@ -371,6 +377,7 @@ class _MoreMenuSheet extends StatelessWidget {
                     (item.route == '/settings' &&
                         currentRoute?.startsWith('/settings') == true),
                 isDisabled: subscriptionLimited,
+                limitedNotice: limitedNotice,
                 onTap: () {
                   final route = item.route;
                   if (route != null) onSelectRoute(route);
@@ -401,12 +408,14 @@ class _MoreMenuTile extends StatelessWidget {
   final _MenuItem item;
   final bool isActive;
   final bool isDisabled;
+  final String? limitedNotice;
   final VoidCallback onTap;
 
   const _MoreMenuTile({
     required this.item,
     required this.isActive,
     required this.isDisabled,
+    this.limitedNotice,
     required this.onTap,
   });
 
@@ -446,8 +455,19 @@ class _MoreMenuTile extends StatelessWidget {
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
       ),
-      enabled: !isDisabled,
-      onTap: isDisabled ? null : onTap,
+      enabled: true,
+      onTap: isDisabled
+          ? () {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    limitedNotice ??
+                        'This church subscription is not active. Please contact your church admin about subscription options.',
+                  ),
+                ),
+              );
+            }
+          : onTap,
     );
   }
 }

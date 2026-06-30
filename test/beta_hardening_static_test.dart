@@ -108,6 +108,42 @@ void main() {
       expect(developerServiceSource, isNot(contains('church_locations')));
     });
 
+    test('pending and churchless users get browse-only feed access', () {
+      final gateSource =
+          File('lib/screens/membership/membership_gate_screen.dart')
+              .readAsStringSync();
+      final tabSource =
+          File('lib/screens/main/main_tabs_screen.dart').readAsStringSync();
+      final feedSource =
+          File('lib/screens/community/community_feed_screen.dart')
+              .readAsStringSync();
+      final interactionLock = File(
+        'supabase/migrations/20260630090000_browse_only_feed_interaction_lock.sql',
+      ).readAsStringSync();
+      final resetSource = File(
+        'supabase/migrations/20260630093000_reset_beta_platform_to_empty_churches.sql',
+      ).readAsStringSync();
+
+      expect(gateSource, contains('hasPendingChurchApplication'));
+      expect(gateSource, contains('hasPendingMembership'));
+      expect(gateSource, contains('membershipLimited: true'));
+      expect(gateSource, contains("route == '/community'"));
+      expect(gateSource, contains('Browse Feed For Now'));
+      expect(tabSource, contains('_feedOnlyLimited'));
+      expect(feedSource,
+          contains('Showing public posts shared across Grace Connect'));
+      expect(feedSource, contains('readOnly: _isBrowseOnly(churchId)'));
+      expect(feedSource, contains('if (!browseOnly) const InboxIconButton()'));
+      expect(
+          interactionLock,
+          contains(
+              'Church approval is required before interacting with the feed.'));
+      expect(resetSource, contains("'church_registration_requests'"));
+      expect(resetSource, contains("'churches'"));
+      expect(resetSource, contains('"placeId" = null'));
+      expect(resetSource, contains('coalesce("isDeveloper", false)'));
+    });
+
     test('developer portal support issues and church drill-down are wired', () {
       final migrationSource = File(
         'supabase/migrations/20260629153000_developer_portal_issues_church_profiles.sql',

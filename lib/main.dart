@@ -205,6 +205,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
               '/reset_password': (context) => const ResetPasswordScreen(),
               '/signup': (context) => const SignupScreen(),
               '/church_signup': (context) => const ChurchSignupScreen(),
+              '/find_church': (context) => _protected(const FindChurchScreen()),
               '/complete_profile': (context) =>
                   _protected(const CompleteProfileScreen()),
               '/members': (context) => _protected(const MembersListScreen()),

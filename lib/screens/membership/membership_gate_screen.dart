@@ -10,6 +10,7 @@ import '../../widgets/app_button.dart';
 import '../../widgets/app_card.dart';
 import '../../widgets/app_scaffold.dart';
 import '../login screen/login_screen.dart';
+import '../main/main_tabs_screen.dart';
 import '../signup screen/complete_profile_screen.dart';
 
 class MembershipGate extends StatefulWidget {
@@ -97,27 +98,22 @@ class _MembershipGateState extends State<MembershipGate> {
         }
 
         if (membership.hasPendingChurchApplication) {
-          return _StatusScreen(
-            icon: Icons.assignment_outlined,
-            title: 'Church Application Pending',
-            message:
-                'Your church registration is ${membership.churchApplicationStatus ?? 'under review'}. Grace Connect will activate church access after approval.',
-            onRefresh: _refresh,
+          return MainTabsScreen(
+            membershipLimited: true,
+            limitedTitle: 'Church Application Pending',
+            limitedMessage:
+                'Your church registration is ${membership.churchApplicationStatus ?? 'under review'}. You can browse the public feed while Grace Connect reviews it. Church tools unlock after approval.',
+            showFindChurchAction: false,
           );
         }
 
         if (membership.hasPendingMembership) {
-          return _StatusScreen(
-            icon: Icons.hourglass_top_outlined,
-            title: 'Membership Pending',
-            message:
-                'Your request to join ${membership.churchName ?? 'this church'} is waiting for church leadership approval.',
-            onRefresh: _refresh,
-            secondaryActionLabel: 'Cancel Request',
-            onSecondaryAction: () async {
-              await MembershipService().cancelMembershipRequest();
-              _refresh();
-            },
+          return MainTabsScreen(
+            membershipLimited: true,
+            limitedTitle: 'Membership Pending',
+            limitedMessage:
+                'Your request to join ${membership.churchName ?? 'this church'} is waiting for church leadership approval. You can browse the public feed while you wait; member tools unlock after approval.',
+            showFindChurchAction: false,
           );
         }
 
@@ -132,9 +128,23 @@ class _MembershipGateState extends State<MembershipGate> {
           );
         }
 
+        if (_routeMayBrowseWithoutChurch(context)) {
+          return const MainTabsScreen(
+            membershipLimited: true,
+            limitedTitle: 'Choose a Church',
+            limitedMessage:
+                'You are not connected to a church yet. You can browse public feed posts for now, but posting, messaging, and member tools unlock after a church approves you.',
+          );
+        }
+
         return FindChurchScreen(onSubmitted: _refresh);
       },
     );
+  }
+
+  bool _routeMayBrowseWithoutChurch(BuildContext context) {
+    final route = ModalRoute.of(context)?.settings.name;
+    return route == '/community';
   }
 }
 
@@ -299,11 +309,13 @@ class FindChurchScreen extends StatefulWidget {
     this.intro =
         'Choose an approved church and submit a membership request. Church access opens after a leader approves you.',
     this.onSubmitted,
+    this.allowBrowseFeed = true,
   });
 
   final String title;
   final String intro;
   final VoidCallback? onSubmitted;
+  final bool allowBrowseFeed;
 
   @override
   State<FindChurchScreen> createState() => _FindChurchScreenState();
@@ -312,10 +324,12 @@ class FindChurchScreen extends StatefulWidget {
 class _FindChurchScreenState extends State<FindChurchScreen> {
   final _churchSearchController = TextEditingController();
   final _messageController = TextEditingController();
+  final _locationController = TextEditingController();
   String? _selectedChurchId;
   String? _selectedChurchName;
   bool _isLoading = false;
   bool _isLoadingPolicies = false;
+  bool _notPartOfChurchYet = false;
 
   List<Map<String, dynamic>> _requiredPolicies = [];
   Map<String, bool> _acceptedPolicies = {};
@@ -366,6 +380,7 @@ class _FindChurchScreenState extends State<FindChurchScreen> {
   void dispose() {
     _churchSearchController.dispose();
     _messageController.dispose();
+    _locationController.dispose();
     super.dispose();
   }
 
@@ -544,6 +559,33 @@ class _FindChurchScreenState extends State<FindChurchScreen> {
                       child: Text('No approved churches match that search.'),
                     ),
                   ),
+                  const SizedBox(height: 12),
+                  CheckboxListTile(
+                    value: _notPartOfChurchYet,
+                    onChanged: (value) {
+                      setState(() => _notPartOfChurchYet = value ?? false);
+                    },
+                    title: const Text('I am not part of a church yet'),
+                    subtitle: const Text(
+                      'You can browse the public feed now and request a church later.',
+                    ),
+                    controlAffinity: ListTileControlAffinity.leading,
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                  if (_notPartOfChurchYet) ...[
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: _locationController,
+                      decoration: InputDecoration(
+                        labelText: 'Your area or parish',
+                        hintText: 'Example: Kingston, St. Ann, Montego Bay',
+                        prefixIcon: const Icon(Icons.place_outlined),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 16),
                   TextField(
                     controller: _messageController,
@@ -671,6 +713,20 @@ class _FindChurchScreenState extends State<FindChurchScreen> {
                     isLoading: _isLoading,
                     onPressed: _canSubmit ? _submitRequest : null,
                   ),
+                  if (widget.allowBrowseFeed) ...[
+                    const SizedBox(height: 12),
+                    AppButton(
+                      text: 'Browse Feed For Now',
+                      icon: Icons.dynamic_feed_outlined,
+                      isSecondary: true,
+                      onPressed: () {
+                        Navigator.of(context).pushNamedAndRemoveUntil(
+                          '/community',
+                          (route) => false,
+                        );
+                      },
+                    ),
+                  ],
                   const SizedBox(height: 12),
                   TextButton(
                     onPressed: () async {
@@ -700,16 +756,12 @@ class _StatusScreen extends StatelessWidget {
     required this.title,
     required this.message,
     required this.onRefresh,
-    this.secondaryActionLabel,
-    this.onSecondaryAction,
   });
 
   final IconData icon;
   final String title;
   final String message;
   final VoidCallback onRefresh;
-  final String? secondaryActionLabel;
-  final Future<void> Function()? onSecondaryAction;
 
   @override
   Widget build(BuildContext context) {
@@ -751,18 +803,6 @@ class _StatusScreen extends StatelessWidget {
                     icon: Icons.refresh,
                     onPressed: onRefresh,
                   ),
-                  if (secondaryActionLabel != null &&
-                      onSecondaryAction != null) ...[
-                    const SizedBox(height: 12),
-                    AppButton(
-                      text: secondaryActionLabel!,
-                      icon: Icons.cancel_outlined,
-                      isSecondary: true,
-                      onPressed: () {
-                        onSecondaryAction!.call();
-                      },
-                    ),
-                  ],
                   const SizedBox(height: 12),
                   TextButton(
                     onPressed: () async {

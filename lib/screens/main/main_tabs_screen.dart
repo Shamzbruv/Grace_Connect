@@ -18,9 +18,17 @@ class MainTabsScreen extends StatefulWidget {
   const MainTabsScreen({
     super.key,
     this.initialIndex = 0,
+    this.membershipLimited = false,
+    this.limitedTitle,
+    this.limitedMessage,
+    this.showFindChurchAction = true,
   });
 
   final int initialIndex;
+  final bool membershipLimited;
+  final String? limitedTitle;
+  final String? limitedMessage;
+  final bool showFindChurchAction;
 
   @override
   State<MainTabsScreen> createState() => _MainTabsScreenState();
@@ -30,6 +38,16 @@ class _MainTabsScreenState extends State<MainTabsScreen> {
   late final PageController _pageController;
   late int _currentIndex;
   bool _subscriptionLimited = false;
+
+  bool get _feedOnlyLimited => widget.membershipLimited || _subscriptionLimited;
+
+  String get _limitedNotice {
+    if (widget.membershipLimited) {
+      return widget.limitedMessage ??
+          'Your church access is not active yet. You can browse the public feed, but member tools unlock after church approval.';
+    }
+    return 'This church subscription is not active. Please contact your church admin about subscription options.';
+  }
 
   @override
   void initState() {
@@ -50,8 +68,8 @@ class _MainTabsScreenState extends State<MainTabsScreen> {
       if (index == 0) FeedScrollService.requestScrollToTop();
       return;
     }
-    if (_subscriptionLimited && index != 0) {
-      _showSubscriptionNotice();
+    if (_feedOnlyLimited && index != 0) {
+      _showLimitedNotice();
       return;
     }
     setState(() => _currentIndex = index);
@@ -63,6 +81,18 @@ class _MainTabsScreenState extends State<MainTabsScreen> {
   }
 
   Future<void> _loadSubscriptionState() async {
+    if (widget.membershipLimited) {
+      if (!mounted) return;
+      setState(() {
+        _subscriptionLimited = false;
+        _currentIndex = 0;
+      });
+      if (_pageController.hasClients) {
+        _pageController.jumpToPage(0);
+      }
+      return;
+    }
+
     final contextResult =
         await ChurchSubscriptionService().getCurrentChurchSubscription();
     if (!mounted) return;
@@ -78,12 +108,10 @@ class _MainTabsScreenState extends State<MainTabsScreen> {
     }
   }
 
-  void _showSubscriptionNotice() {
+  void _showLimitedNotice() {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-          'This church subscription is not active. Please contact your church admin about subscription options.',
-        ),
+      SnackBar(
+        content: Text(_limitedNotice),
       ),
     );
   }
@@ -101,30 +129,38 @@ class _MainTabsScreenState extends State<MainTabsScreen> {
           inTabShell: true,
           child: PageView(
             controller: _pageController,
-            physics: _subscriptionLimited
-                ? const NeverScrollableScrollPhysics()
-                : null,
+            physics:
+                _feedOnlyLimited ? const NeverScrollableScrollPhysics() : null,
             onPageChanged: (index) {
-              if (_subscriptionLimited && index != 0) {
+              if (_feedOnlyLimited && index != 0) {
                 _pageController.jumpToPage(0);
-                _showSubscriptionNotice();
+                _showLimitedNotice();
                 return;
               }
               setState(() => _currentIndex = index);
             },
             children: [
-              const CommunityFeedScreen(showBottomMenu: false),
+              CommunityFeedScreen(
+                showBottomMenu: false,
+                limitedAccessTitle: widget.limitedTitle,
+                limitedAccessMessage: widget.limitedMessage,
+                showFindChurchAction: widget.showFindChurchAction,
+              ),
               const EventsScreen(showBottomMenu: false),
               const DashboardScreen(),
               const BibleHomeScreen(showBottomNavigation: false),
-              _MoreTabScreen(subscriptionLimited: _subscriptionLimited),
+              _MoreTabScreen(
+                subscriptionLimited: _feedOnlyLimited,
+                limitedNotice: _limitedNotice,
+              ),
             ],
           ),
         ),
         bottomNavigationBar: AppBottomMenu(
           selectedIndex: _currentIndex,
           onDestinationSelected: _setTab,
-          subscriptionLimited: _subscriptionLimited,
+          subscriptionLimited: _feedOnlyLimited,
+          limitedNotice: _limitedNotice,
         ),
       ),
     );
@@ -134,9 +170,11 @@ class _MainTabsScreenState extends State<MainTabsScreen> {
 class _MoreTabScreen extends StatelessWidget {
   const _MoreTabScreen({
     required this.subscriptionLimited,
+    required this.limitedNotice,
   });
 
   final bool subscriptionLimited;
+  final String limitedNotice;
 
   @override
   Widget build(BuildContext context) {
@@ -225,6 +263,7 @@ class _MoreTabScreen extends StatelessWidget {
             _MoreActionTile(
               action: action,
               subscriptionLimited: subscriptionLimited,
+              limitedNotice: limitedNotice,
             ),
             const SizedBox(height: 8),
           ],
@@ -302,10 +341,12 @@ class _MoreActionTile extends StatelessWidget {
   const _MoreActionTile({
     required this.action,
     required this.subscriptionLimited,
+    required this.limitedNotice,
   });
 
   final _MoreAction action;
   final bool subscriptionLimited;
+  final String limitedNotice;
 
   @override
   Widget build(BuildContext context) {
@@ -338,9 +379,14 @@ class _MoreActionTile extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         side: BorderSide(color: theme.dividerColor.withValues(alpha: 0.12)),
       ),
-      enabled: !disabled,
-      onTap:
-          disabled ? null : () => Navigator.of(context).pushNamed(action.route),
+      enabled: true,
+      onTap: disabled
+          ? () {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text(limitedNotice)),
+              );
+            }
+          : () => Navigator.of(context).pushNamed(action.route),
     );
   }
 }
