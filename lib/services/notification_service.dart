@@ -69,6 +69,8 @@ class NotificationService {
     description: 'General Grace Connect notifications',
     soundName: 'grace_default',
   );
+  static const _androidNotificationLargeIcon =
+      DrawableResourceAndroidBitmap('notification_large_icon');
 
   static const Map<String, _NotificationSoundProfile> _soundProfiles = {
     'general': _defaultSound,
@@ -177,10 +179,15 @@ class NotificationService {
     await _createAndroidNotificationChannels();
 
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-      if (message.notification != null) {
+      final title =
+          message.notification?.title ?? message.data['title']?.toString();
+      final body =
+          message.notification?.body ?? message.data['body']?.toString();
+      if ((title?.trim().isNotEmpty ?? false) ||
+          (body?.trim().isNotEmpty ?? false)) {
         _showLocalNotification(
-          message.notification!.title,
-          message.notification!.body,
+          title,
+          body,
           route: message.data['route'],
           type: message.data['type'],
         );
@@ -195,6 +202,35 @@ class NotificationService {
         () => _openRouteFromMessage(initialMessage),
       ));
     }
+  }
+
+  Future<void> showDataOnlyBackgroundMessage(RemoteMessage message) async {
+    if (kIsWeb || message.notification != null) return;
+
+    final title = message.data['title']?.toString();
+    final body = message.data['body']?.toString();
+    if ((title?.trim().isEmpty ?? true) && (body?.trim().isEmpty ?? true)) {
+      return;
+    }
+
+    const androidInit = AndroidInitializationSettings('ic_stat_grace_connect');
+    const iosInit = DarwinInitializationSettings(
+      defaultPresentAlert: true,
+      defaultPresentBadge: true,
+      defaultPresentSound: true,
+    );
+    const initSettings = InitializationSettings(
+      android: androidInit,
+      iOS: iosInit,
+    );
+    await _localNotifications.initialize(initSettings);
+    await _createAndroidNotificationChannels();
+    await _showLocalNotification(
+      title,
+      body,
+      route: message.data['route'],
+      type: message.data['type'],
+    );
   }
 
   Future<void> _showLocalNotification(
@@ -214,6 +250,7 @@ class NotificationService {
       importance: Importance.max,
       priority: Priority.high,
       icon: 'ic_stat_grace_connect',
+      largeIcon: _androidNotificationLargeIcon,
       color: const Color(0xFF0B5C7D),
       playSound: true,
       sound: profile.androidSound,

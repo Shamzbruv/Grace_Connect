@@ -387,10 +387,12 @@ class _MemberMessagePickerState extends State<_MemberMessagePicker> {
       final results = await _userService.searchPeople(cleanQuery);
       if (!mounted) return;
       setState(() {
-        _results = results
-            .where((member) =>
-                member.uid != widget.currentUser.uid && member.allowMessages)
-            .toList()
+        _results = results.where((member) {
+          final sameChurch = widget.currentUser.churchId.trim().isNotEmpty &&
+              member.churchId == widget.currentUser.churchId;
+          return member.uid != widget.currentUser.uid &&
+              (sameChurch || member.allowMessages);
+        }).toList()
           ..sort((a, b) {
             final aSameChurch = a.churchId == widget.currentUser.churchId;
             final bSameChurch = b.churchId == widget.currentUser.churchId;

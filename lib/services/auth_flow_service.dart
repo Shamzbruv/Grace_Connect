@@ -14,6 +14,7 @@ class AuthFlowService {
   );
   static const String _firebaseWebBaseUrl =
       'https://graceconnect-9a97c.web.app';
+  static const String _localWebBaseUrl = 'http://localhost:3000';
 
   static String redirectUrl(AuthRedirectPurpose purpose) {
     if (kIsWeb) {
@@ -52,6 +53,8 @@ class AuthFlowService {
     if (origin.isNotEmpty && !isLocalHost) {
       return origin.replaceFirst(RegExp(r'/$'), '');
     }
+
+    if (isLocalHost) return _localWebBaseUrl;
 
     return _firebaseWebBaseUrl;
   }

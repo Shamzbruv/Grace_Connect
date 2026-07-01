@@ -13,26 +13,50 @@ if (localPropertiesFile.exists()) {
     }
 }
 
+def normalizeConfigValue = { value ->
+    return value == null ? "" : value.toString().trim()
+}
+
+def findConfigValue = { name ->
+    def keyName = name.toString()
+    if (project.hasProperty(keyName)) {
+        return normalizeConfigValue(project.property(keyName))
+    }
+    if (localProperties.containsKey(keyName)) {
+        return normalizeConfigValue(localProperties.getProperty(keyName))
+    }
+    def envValue = System.getenv(keyName)
+    if (envValue != null) {
+        return normalizeConfigValue(envValue)
+    }
+    return null
+}
+
+def readFirstConfigValue = { names, defaultValue = "" ->
+    for (name in names) {
+        def configuredValue = findConfigValue(name)
+        if (configuredValue != null) {
+            return configuredValue
+        }
+    }
+    return normalizeConfigValue(defaultValue)
+}
+
 def readMapsApiKey = { platform ->
     def platformKeyName = "GOOGLE_MAPS_API_KEY_${platform}"
     def sharedKeyName = "GOOGLE_MAPS_API_KEY"
-    return project.findProperty(platformKeyName)
-            ?: localProperties.getProperty(platformKeyName)
-            ?: System.getenv(platformKeyName)
-            ?: project.findProperty(sharedKeyName)
-            ?: localProperties.getProperty(sharedKeyName)
-            ?: System.getenv(sharedKeyName)
-            ?: ""
+    return readFirstConfigValue([platformKeyName, sharedKeyName])
 }
 
 def readConfigValue = { name, defaultValue = "" ->
-    return project.findProperty(name)
-            ?: localProperties.getProperty(name)
-            ?: System.getenv(name)
-            ?: defaultValue
+    return readFirstConfigValue([name], defaultValue)
 }
 
-def graceConnectApplicationId = readConfigValue("GRACE_CONNECT_APPLICATION_ID", "love.graceconnect")
+def configuredGraceConnectApplicationId = readConfigValue("GRACE_CONNECT_APPLICATION_ID")
+def graceConnectApplicationId = configuredGraceConnectApplicationId ?: "love.graceconnect"
+def androidMapsApiKey = readMapsApiKey("ANDROID")
+def androidMapsApiKeyFromAndroidProperty =
+        readConfigValue("GOOGLE_MAPS_API_KEY_ANDROID")
 def releaseStoreFile = readConfigValue("GRACE_CONNECT_UPLOAD_STORE_FILE")
 def releaseStorePassword = readConfigValue("GRACE_CONNECT_UPLOAD_STORE_PASSWORD")
 def releaseKeyAlias = readConfigValue("GRACE_CONNECT_UPLOAD_KEY_ALIAS")
@@ -46,8 +70,14 @@ def isReleaseTaskRequested = gradle.startParameter.taskNames.any { taskName ->
 }
 
 if (isReleaseTaskRequested) {
-    if (graceConnectApplicationId != "love.graceconnect") {
-        throw new GradleException("Release builds must use the final Play package id love.graceconnect.")
+    if (configuredGraceConnectApplicationId != "love.graceconnect") {
+        throw new GradleException("Set GRACE_CONNECT_APPLICATION_ID=love.graceconnect before building a release.")
+    }
+    if (!androidMapsApiKeyFromAndroidProperty) {
+        throw new GradleException("Set GOOGLE_MAPS_API_KEY_ANDROID before building a release. This value feeds the googleMapsApiKey manifest placeholder for com.google.android.geo.API_KEY; do not commit the secret.")
+    }
+    if (!androidMapsApiKey) {
+        throw new GradleException("Android release manifest placeholder googleMapsApiKey is blank. Set GOOGLE_MAPS_API_KEY_ANDROID before building a release.")
     }
     if (!hasReleaseSigning) {
         throw new GradleException("Set GRACE_CONNECT_UPLOAD_STORE_FILE, GRACE_CONNECT_UPLOAD_STORE_PASSWORD, GRACE_CONNECT_UPLOAD_KEY_ALIAS, and GRACE_CONNECT_UPLOAD_KEY_PASSWORD before building a release.")
@@ -77,11 +107,11 @@ android {
         applicationId graceConnectApplicationId
         minSdkVersion 23
         targetSdkVersion 35
-        versionCode 18
-        versionName "1.0.17-beta"
+        versionCode 19
+        versionName "1.0.18-beta"
         multiDexEnabled true
         manifestPlaceholders = [
-            googleMapsApiKey: readMapsApiKey("ANDROID"),
+            googleMapsApiKey: androidMapsApiKey,
         ]
     }
 
@@ -133,4 +163,35 @@ dependencies {
     implementation 'com.google.firebase:firebase-analytics'
     implementation 'com.google.firebase:firebase-messaging'
     implementation 'com.google.firebase:firebase-auth'
+}
+
+tasks.register("validateGraceReleaseConfig") {
+    group = "verification"
+    description = "Validates Grace Connect Android release package id, signing, and Maps manifest placeholder."
+
+    doLast {
+        if (configuredGraceConnectApplicationId != "love.graceconnect") {
+            throw new GradleException("Set GRACE_CONNECT_APPLICATION_ID=love.graceconnect before building a release.")
+        }
+        if (!androidMapsApiKeyFromAndroidProperty) {
+            throw new GradleException("Set GOOGLE_MAPS_API_KEY_ANDROID before building a release. This value feeds the googleMapsApiKey manifest placeholder for com.google.android.geo.API_KEY; do not commit the secret.")
+        }
+        def placeholderValue = normalizeConfigValue(
+                android.defaultConfig.manifestPlaceholders.googleMapsApiKey
+        )
+        if (!placeholderValue) {
+            throw new GradleException("Android release manifest placeholder googleMapsApiKey is blank. Set GOOGLE_MAPS_API_KEY_ANDROID before building a release.")
+        }
+        if (!hasReleaseSigning) {
+            throw new GradleException("Set GRACE_CONNECT_UPLOAD_STORE_FILE, GRACE_CONNECT_UPLOAD_STORE_PASSWORD, GRACE_CONNECT_UPLOAD_KEY_ALIAS, and GRACE_CONNECT_UPLOAD_KEY_PASSWORD before building a release.")
+        }
+    }
+}
+
+gradle.projectsEvaluated {
+    tasks.matching { task ->
+        ["assembleRelease", "bundleRelease", "processReleaseMainManifest"].contains(task.name)
+    }.configureEach {
+        dependsOn("validateGraceReleaseConfig")
+    }
 }

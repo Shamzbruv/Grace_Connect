@@ -1,8 +1,18 @@
 <en-US>
-Internal beta hardening for Grace Connect 1.0.17-beta:
-- Shows richer pending member details to pastors/admins before approval.
-- Adds the same richer membership review data for developer/platform approval.
-- Prevents Bible Nudge from showing or sending for members in the same church.
-- Keeps Bible Nudge available for cross-church connection requests only.
-- Bumps the Play version code to 18.
+Grace Connect 1.0.18-beta geofence and stability update:
+- Blocks Android release builds when the final package ID or Android Maps key is missing.
+- Improves Church Geofence setup with real map error messaging, Retry Map, and manual coordinate/radius saving.
+- Keeps church admins able to save valid latitude, longitude, and radius even when map tiles cannot load.
+- Updates Grace Connect notification artwork in the Android notification shade.
+- Fixes the direct-message/status-reply immutable map crash.
+- Allows same-church members to start messages even when cross-church messaging is restricted.
+- Lets pastors/admins view member profile details needed for care follow-up.
+- Makes feed comments load from the server immediately and refresh after posting or deleting.
+- Adds cached membership fallback for temporary backend/network membership lookup failures.
+- Adds background/data-only push notification handling.
+- Adds owner status deletion and real status video playback with retryable errors.
+- Adds real feed post video playback and safer status reply keyboard handling.
+- Hardens profile photo storage access and Android image MIME handling.
+- Adds localhost auth callback support for http://localhost:3000.
+- Bumps the Play version code to 19.
 </en-US>

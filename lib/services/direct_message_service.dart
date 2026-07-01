@@ -147,7 +147,9 @@ class DirectMessageService {
       throw Exception(_conversationErrorMessage(error));
     }
 
-    if (!otherUser.allowMessages) {
+    final sameChurch = currentUser.churchId.trim().isNotEmpty &&
+        currentUser.churchId == otherUser.churchId;
+    if (!otherUser.allowMessages && !sameChurch) {
       throw Exception('This member is not accepting messages right now.');
     }
 
@@ -335,10 +337,7 @@ class DirectMessageService {
 
     final now = DateTime.now().toUtc();
     final expiresAt = now.add(const Duration(days: 30));
-    final cleanReplyContext = replyContext == null
-        ? const <String, dynamic>{}
-        : Map<String, dynamic>.from(replyContext)
-      ..removeWhere((_, value) => value == null);
+    final cleanReplyContext = sanitizeReplyContext(replyContext);
     final payload = {
       'id': const Uuid().v4(),
       'conversation_id': conversationId,
@@ -627,5 +626,17 @@ class DirectMessageService {
     final message = error.message.toLowerCase();
     return error.code == 'PGRST204' ||
         message.contains('column') && message.contains('schema cache');
+  }
+
+  @visibleForTesting
+  static Map<String, dynamic> sanitizeReplyContext(
+    Map<String, dynamic>? replyContext,
+  ) {
+    final cleanReplyContext = <String, dynamic>{};
+    if (replyContext != null) {
+      cleanReplyContext.addAll(replyContext);
+      cleanReplyContext.removeWhere((_, value) => value == null);
+    }
+    return cleanReplyContext;
   }
 }

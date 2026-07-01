@@ -138,6 +138,22 @@ class CommunityService {
     return null;
   }
 
+  Future<void> deleteStory(CommunityStory story) async {
+    if (story.id.isEmpty) return;
+
+    await _supabase.from(_storiesTable).delete().eq('id', story.id);
+
+    final mediaPath =
+        story.mediaPath ?? _storagePathFromPublicUrl(story.mediaUrl);
+    if (mediaPath != null) {
+      try {
+        await _supabase.storage.from(_bucketName).remove([mediaPath]);
+      } catch (error) {
+        debugPrint('Status deleted, but media cleanup failed: $error');
+      }
+    }
+  }
+
   Future<List<Post>> fetchPosts(String churchId) async {
     late final List<dynamic> data;
     try {
@@ -446,7 +462,46 @@ class CommunityService {
     await _supabase.from(_commentsTable).delete().eq('id', commentId);
   }
 
-  Stream<List<Map<String, dynamic>>> getComments(String postId) {
+  Future<List<Map<String, dynamic>>> fetchComments(String postId) async {
+    final data = await _supabase
+        .from(_commentsTable)
+        .select()
+        .eq('post_id', postId)
+        .order('created_at', ascending: false)
+        .limit(100);
+    return _dedupeRowsById(
+      data.map((e) => Map<String, dynamic>.from(e)).toList(),
+    );
+  }
+
+  Stream<List<Map<String, dynamic>>> getComments(String postId) async* {
+    var lastKnown = <Map<String, dynamic>>[];
+
+    try {
+      lastKnown = await fetchComments(postId);
+      yield lastKnown;
+    } catch (error) {
+      debugPrint('Could not load comments before realtime: $error');
+    }
+
+    try {
+      await for (final comments in _commentsRealtime(postId).timeout(
+        _realtimeQuietTimeout,
+        onTimeout: (sink) {
+          sink.add(lastKnown);
+        },
+      )) {
+        lastKnown = comments;
+        yield comments;
+      }
+    } catch (error) {
+      debugPrint(
+          'Comment realtime unavailable, keeping last known data: $error');
+      if (lastKnown.isNotEmpty) yield lastKnown;
+    }
+  }
+
+  Stream<List<Map<String, dynamic>>> _commentsRealtime(String postId) {
     return _supabase
         .from(_commentsTable)
         .stream(primaryKey: ['id'])

@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'notification_service.dart';
@@ -99,6 +101,25 @@ class MembershipContext {
     );
   }
 
+  Map<String, dynamic> toMap() {
+    return {
+      'authenticated': authenticated,
+      'hasProfile': hasProfile,
+      'accountStatus': accountStatus,
+      'membershipStatus': membershipStatus,
+      if (membershipId != null) 'membershipId': membershipId,
+      if (churchId != null) 'churchId': churchId,
+      if (churchName != null) 'churchName': churchName,
+      if (churchStatus != null) 'churchStatus': churchStatus,
+      if (decisionReason != null) 'decisionReason': decisionReason,
+      'hasPendingChurchApplication': hasPendingChurchApplication,
+      if (churchApplicationStatus != null)
+        'churchApplicationStatus': churchApplicationStatus,
+      'loadStatus': loadStatus,
+      if (loadError != null) 'loadError': loadError,
+    };
+  }
+
   static const unauthenticated = MembershipContext(
     authenticated: false,
     hasProfile: false,
@@ -128,6 +149,7 @@ class MembershipService {
       : _client = client ?? Supabase.instance.client;
 
   final SupabaseClient _client;
+  static const String _cacheKeyPrefix = 'membership_context_v1';
 
   Future<List<Map<String, dynamic>>> getRequiredPolicies(
       String flowType) async {
@@ -163,10 +185,15 @@ class MembershipService {
     try {
       final data = await _client.rpc('get_current_membership_context');
       if (data is Map<String, dynamic>) {
-        return MembershipContext.fromMap(data);
+        final context = MembershipContext.fromMap(data);
+        unawaited(_cacheContext(user.id, context));
+        return context;
       }
       if (data is Map) {
-        return MembershipContext.fromMap(Map<String, dynamic>.from(data));
+        final context =
+            MembershipContext.fromMap(Map<String, dynamic>.from(data));
+        unawaited(_cacheContext(user.id, context));
+        return context;
       }
       debugPrint('Membership context returned unexpected data: $data');
       return MembershipContext.loadFailed(
@@ -175,8 +202,24 @@ class MembershipService {
       );
     } catch (error) {
       debugPrint('Membership context unavailable: $error');
+      final status = classifyContextError(error);
+      if (status == MembershipLoadStatus.backendUnavailable) {
+        final cached = await _readCachedContext(user.id);
+        if (cached != null) {
+          debugPrint(
+              'Using cached membership context after transient failure.');
+          return cached;
+        }
+        final profileFallback = await _readProfileFallbackContext(user.id);
+        if (profileFallback != null) {
+          debugPrint(
+              'Using profile membership fallback after transient failure.');
+          unawaited(_cacheContext(user.id, profileFallback));
+          return profileFallback;
+        }
+      }
       return MembershipContext.loadFailed(
-        status: classifyContextError(error),
+        status: status,
         error: error,
       );
     }
@@ -197,10 +240,95 @@ class MembershipService {
       }
     } catch (error) {
       debugPrint('Membership context stream unavailable: $error');
+      final status = classifyContextError(error);
+      if (status == MembershipLoadStatus.backendUnavailable) {
+        final cached = await _readCachedContext(user.id);
+        if (cached != null) {
+          yield cached;
+          return;
+        }
+        final profileFallback = await _readProfileFallbackContext(user.id);
+        if (profileFallback != null) {
+          yield profileFallback;
+          return;
+        }
+      }
       yield MembershipContext.loadFailed(
-        status: classifyContextError(error),
+        status: status,
         error: error,
       );
+    }
+  }
+
+  Future<void> _cacheContext(
+    String userId,
+    MembershipContext context,
+  ) async {
+    if (userId.isEmpty || context.hasLoadError || !context.authenticated) {
+      return;
+    }
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        _cacheKey(userId),
+        jsonEncode(context.toMap()),
+      );
+    } catch (error) {
+      debugPrint('Membership context cache skipped: $error');
+    }
+  }
+
+  Future<MembershipContext?> _readCachedContext(String userId) async {
+    if (userId.isEmpty) return null;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_cacheKey(userId));
+      if (raw == null || raw.trim().isEmpty) return null;
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return null;
+      final context = MembershipContext.fromMap(
+        Map<String, dynamic>.from(decoded),
+      );
+      if (!context.authenticated || context.hasLoadError) return null;
+      return context;
+    } catch (error) {
+      debugPrint('Membership context cache read skipped: $error');
+      return null;
+    }
+  }
+
+  String _cacheKey(String userId) => '$_cacheKeyPrefix:$userId';
+
+  Future<MembershipContext?> _readProfileFallbackContext(String userId) async {
+    if (userId.trim().isEmpty) return null;
+
+    try {
+      final data = await _client
+          .from('users')
+          .select('uid,id,accountState,accountStatus,placeId,placeName')
+          .or('uid.eq.$userId,id.eq.$userId')
+          .maybeSingle();
+      if (data == null) return null;
+
+      final churchId = data['placeId']?.toString().trim() ?? '';
+      final churchName = data['placeName']?.toString().trim();
+      final accountStatus =
+          (data['accountStatus'] ?? data['accountState'] ?? 'active')
+              .toString();
+
+      return MembershipContext(
+        authenticated: true,
+        hasProfile: true,
+        accountStatus: accountStatus,
+        membershipStatus: churchId.isEmpty ? 'none' : 'active',
+        churchId: churchId.isEmpty ? null : churchId,
+        churchName: churchName?.isEmpty == true ? null : churchName,
+        churchStatus: churchId.isEmpty ? null : 'approved',
+        hasPendingChurchApplication: false,
+      );
+    } catch (error) {
+      debugPrint('Membership profile fallback unavailable: $error');
+      return null;
     }
   }
 

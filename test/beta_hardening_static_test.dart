@@ -293,8 +293,8 @@ void main() {
       ).readAsStringSync();
 
       expect(gradle, contains('"love.graceconnect"'));
-      expect(gradle, contains('versionCode 18'));
-      expect(gradle, contains('versionName "1.0.17-beta"'));
+      expect(gradle, contains('versionCode 19'));
+      expect(gradle, contains('versionName "1.0.18-beta"'));
       expect(activity, contains('package love.graceconnect'));
       expect(manifest, contains('love.graceconnect.MainActivity'));
       expect(manifest, contains('default_notification_icon'));
@@ -424,6 +424,102 @@ void main() {
         legacyReadme,
         contains('not part of the active Grace Connect production'),
       );
+    });
+
+    test('Android release builds validate Maps and package config', () {
+      final gradleSource = File('android/app/build.gradle').readAsStringSync();
+      final manifestSource =
+          File('android/app/src/main/AndroidManifest.xml').readAsStringSync();
+      final releaseDocs =
+          File('docs/play_internal_testing_release.md').readAsStringSync();
+
+      expect(gradleSource, contains('validateGraceReleaseConfig'));
+      expect(gradleSource, contains('findConfigValue'));
+      expect(gradleSource, contains('def keyName = name.toString()'));
+      expect(gradleSource, contains('project.hasProperty(keyName)'));
+      expect(gradleSource, contains('localProperties.containsKey(keyName)'));
+      expect(gradleSource, contains('GRACE_CONNECT_APPLICATION_ID'));
+      expect(gradleSource, contains('GOOGLE_MAPS_API_KEY_ANDROID'));
+      expect(gradleSource, contains('googleMapsApiKey'));
+      expect(manifestSource, contains('com.google.android.geo.API_KEY'));
+      expect(releaseDocs, contains('Maps SDK for Android'));
+      expect(releaseDocs, contains('Places API (New)'));
+      expect(releaseDocs, contains('Geocoding API'));
+    });
+
+    test('notifications and direct messages have P0 beta guards', () {
+      final mainSource = File('lib/main.dart').readAsStringSync();
+      final notificationSource =
+          File('lib/services/notification_service.dart').readAsStringSync();
+      final messageSource =
+          File('lib/services/direct_message_service.dart').readAsStringSync();
+
+      expect(mainSource, contains('FirebaseMessaging.onBackgroundMessage'));
+      expect(notificationSource, contains('showDataOnlyBackgroundMessage'));
+      expect(notificationSource, contains("message.data['title']"));
+      expect(messageSource, contains('sanitizeReplyContext'));
+      expect(messageSource, contains('<String, dynamic>{}'));
+    });
+
+    test('status owner deletion and video playback are wired', () {
+      final feedSource =
+          File('lib/screens/community/community_feed_screen.dart')
+              .readAsStringSync();
+      final postDetailSource =
+          File('lib/screens/community/post_detail_screen.dart')
+              .readAsStringSync();
+      final communityServiceSource =
+          File('lib/services/community_service.dart').readAsStringSync();
+
+      expect(feedSource, contains('VideoPlayerController.networkUrl'));
+      expect(feedSource, contains('Video could not load'));
+      expect(feedSource, contains('Delete status?'));
+      expect(feedSource, contains('resizeToAvoidBottomInset: true'));
+      expect(postDetailSource, contains('VideoPlayerController.networkUrl'));
+      expect(postDetailSource, contains('Retry Video'));
+      expect(communityServiceSource, contains('Future<void> deleteStory'));
+      expect(communityServiceSource, contains('_storiesTable'));
+    });
+
+    test('same church messaging, comments, and localhost auth are hardened',
+        () {
+      final directMessageSource =
+          File('lib/services/direct_message_service.dart').readAsStringSync();
+      final inboxSource =
+          File('lib/screens/messages/inbox_screen.dart').readAsStringSync();
+      final membersSource = File('lib/screens/members/members_list_screen.dart')
+          .readAsStringSync();
+      final migrationSource = File(
+        'supabase/migrations/20260701130000_same_church_messaging_hardening.sql',
+      ).readAsStringSync();
+      final communityServiceSource =
+          File('lib/services/community_service.dart').readAsStringSync();
+      final authFlowSource =
+          File('lib/services/auth_flow_service.dart').readAsStringSync();
+      final profileServiceSource =
+          File('lib/services/profile_service.dart').readAsStringSync();
+      final avatarMigration = File(
+        'supabase/migrations/20260701131000_avatar_storage_access_hardening.sql',
+      ).readAsStringSync();
+      final releaseDocs =
+          File('docs/play_internal_testing_release.md').readAsStringSync();
+
+      expect(directMessageSource, contains('sameChurch'));
+      expect(inboxSource, contains('sameChurch || member.allowMessages'));
+      expect(membersSource,
+          contains('isSameChurch || memberProfile.allowMessages'));
+      expect(membersSource, contains('canOverrideProfilePrivacy'));
+      expect(migrationSource, contains('other_is_same_church'));
+      expect(migrationSource, contains('not other_is_same_church'));
+      expect(communityServiceSource,
+          contains('Future<List<Map<String, dynamic>>> fetchComments'));
+      expect(communityServiceSource, contains('Comment realtime unavailable'));
+      expect(profileServiceSource, contains('_imageContentType'));
+      expect(avatarMigration, contains("'avatars'"));
+      expect(avatarMigration, contains("'image/heif'"));
+      expect(avatarMigration, contains('Public read avatars'));
+      expect(authFlowSource, contains('http://localhost:3000'));
+      expect(releaseDocs, contains('http://localhost:3000/auth/callback'));
     });
   });
 }

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'providers/user_role_provider.dart';
 import 'services/attendance_service.dart';
@@ -71,6 +72,21 @@ import 'screens/ministries/ministries_screen.dart';
 import 'screens/transfer/church_transfer_screen.dart';
 import 'widgets/auth_required.dart';
 
+@pragma('vm:entry-point')
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  if (kIsWeb) return;
+
+  WidgetsFlutterBinding.ensureInitialized();
+  try {
+    Firebase.app();
+  } catch (_) {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+  }
+  await NotificationService().showDataOnlyBackgroundMessage(message);
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -78,6 +94,11 @@ Future<void> main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+  if (!kIsWeb) {
+    FirebaseMessaging.onBackgroundMessage(
+      _firebaseMessagingBackgroundHandler,
+    );
+  }
   await _configureCrashReporting();
 
   await Supabase.initialize(

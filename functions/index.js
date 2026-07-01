@@ -221,8 +221,11 @@ exports.sendTopicNotification = onRequest({ cors: true }, async (request, respon
         body: String(body).slice(0, 220),
       },
       android: {
+        priority: "high",
         notification: {
           channelId: soundProfile.channelId,
+          color: "#0B5C7D",
+          icon: "ic_stat_grace_connect",
           sound: soundProfile.sound.replace(".wav", ""),
         },
       },

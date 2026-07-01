@@ -27,6 +27,7 @@ import '../messages/message_thread_screen.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:video_player/video_player.dart';
 import '../../widgets/inbox_icon_button.dart';
 
 class CommunityFeedScreen extends StatefulWidget {
@@ -2981,6 +2982,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
         onViewed: _markStoryWatched,
         onToggleLike: _toggleStoryLike,
         onReply: _replyToStory,
+        onDelete: _deleteStory,
       ),
     );
   }
@@ -3046,6 +3048,16 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
       );
     }
   }
+
+  Future<void> _deleteStory(CommunityStory story) async {
+    final currentUserId = _auth.currentUser?.id ?? '';
+    if (story.authorId != currentUserId) {
+      throw Exception('Only the status owner can delete this status.');
+    }
+
+    await _communityService.deleteStory(story);
+    if (mounted) setState(() => _storiesRefreshToken++);
+  }
 }
 
 class _StoryGroup {
@@ -3091,6 +3103,7 @@ class _StatusViewerDialog extends StatefulWidget {
     required this.onViewed,
     required this.onToggleLike,
     required this.onReply,
+    required this.onDelete,
   });
 
   final _StoryGroup group;
@@ -3100,6 +3113,7 @@ class _StatusViewerDialog extends StatefulWidget {
   final Future<void> Function(CommunityStory story) onViewed;
   final Future<CommunityStory?> Function(CommunityStory story) onToggleLike;
   final Future<void> Function(CommunityStory story, String text) onReply;
+  final Future<void> Function(CommunityStory story) onDelete;
 
   @override
   State<_StatusViewerDialog> createState() => _StatusViewerDialogState();
@@ -3111,6 +3125,7 @@ class _StatusViewerDialogState extends State<_StatusViewerDialog> {
   late List<CommunityStory> _stories;
   late int _index;
   bool _isReplying = false;
+  bool _isDeleting = false;
 
   CommunityStory get _currentStory => _stories[_index];
 
@@ -3200,6 +3215,62 @@ class _StatusViewerDialogState extends State<_StatusViewerDialog> {
     }
   }
 
+  Future<void> _confirmDeleteCurrentStory() async {
+    if (widget.readOnly || _isDeleting || _stories.isEmpty) return;
+
+    final story = _currentStory;
+    if (story.authorId != widget.currentUserId) return;
+
+    final shouldDelete = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete status?'),
+        content:
+            const Text('This will remove your status and any attached media.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(dialogContext).colorScheme.error,
+              foregroundColor: Theme.of(dialogContext).colorScheme.onError,
+            ),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (shouldDelete != true) return;
+
+    setState(() => _isDeleting = true);
+    try {
+      await widget.onDelete(story);
+      if (!mounted) return;
+      setState(() {
+        _stories.removeWhere((item) => item.id == story.id);
+        if (_stories.isEmpty) return;
+        _index = _index.clamp(0, _stories.length - 1);
+      });
+      if (!mounted) return;
+      if (_stories.isEmpty) {
+        Navigator.pop(context);
+      } else {
+        _pageController.jumpToPage(_index);
+        _markCurrentViewed();
+      }
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not delete status: $error')),
+      );
+    } finally {
+      if (mounted) setState(() => _isDeleting = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final canReply =
@@ -3207,46 +3278,50 @@ class _StatusViewerDialogState extends State<_StatusViewerDialog> {
 
     return Dialog.fullscreen(
       backgroundColor: Colors.black,
-      child: SafeArea(
-        child: Stack(
-          children: [
-            PageView.builder(
-              controller: _pageController,
-              itemCount: _stories.length,
-              onPageChanged: (index) {
-                setState(() => _index = index);
-                _markCurrentViewed();
-              },
-              itemBuilder: (context, index) => _buildStatusContent(
-                context,
-                _stories[index],
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        resizeToAvoidBottomInset: true,
+        body: SafeArea(
+          child: Stack(
+            children: [
+              PageView.builder(
+                controller: _pageController,
+                itemCount: _stories.length,
+                onPageChanged: (index) {
+                  setState(() => _index = index);
+                  _markCurrentViewed();
+                },
+                itemBuilder: (context, index) => _buildStatusContent(
+                  context,
+                  _stories[index],
+                ),
               ),
-            ),
-            Positioned.fill(
-              top: 92,
-              bottom: canReply ? 96 : 56,
-              child: Row(
-                children: [
-                  Expanded(
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.translucent,
-                      onTap: () => _goTo(_index - 1),
-                      onHorizontalDragEnd: _handleSwipe,
+              Positioned.fill(
+                top: 92,
+                bottom: canReply ? 96 : 56,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.translucent,
+                        onTap: () => _goTo(_index - 1),
+                        onHorizontalDragEnd: _handleSwipe,
+                      ),
                     ),
-                  ),
-                  Expanded(
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.translucent,
-                      onTap: () => _goTo(_index + 1),
-                      onHorizontalDragEnd: _handleSwipe,
+                    Expanded(
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.translucent,
+                        onTap: () => _goTo(_index + 1),
+                        onHorizontalDragEnd: _handleSwipe,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-            _buildTopChrome(context),
-            _buildBottomControls(context, canReply),
-          ],
+              _buildTopChrome(context),
+              _buildBottomControls(context, canReply),
+            ],
+          ),
         ),
       ),
     );
@@ -3307,62 +3382,10 @@ class _StatusViewerDialogState extends State<_StatusViewerDialog> {
     }
 
     if (hasVideo) {
-      return Stack(
-        fit: StackFit.expand,
-        children: [
-          const ColoredBox(
-            color: Colors.black,
-            child: Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.play_circle_fill,
-                    color: Colors.white,
-                    size: 72,
-                  ),
-                  SizedBox(height: 12),
-                  Text(
-                    'Video attached',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Colors.black54,
-                  Colors.transparent,
-                  Colors.black54,
-                ],
-                stops: [0, 0.35, 1],
-              ),
-            ),
-          ),
-          if (caption?.isNotEmpty == true)
-            Positioned(
-              left: 20,
-              right: 20,
-              bottom: 104,
-              child: Text(
-                caption!,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-        ],
+      return _StatusVideoPlayer(
+        mediaUrl: story.mediaUrl!,
+        caption: caption,
+        fit: boxFitForMedia(story.mediaFit),
       );
     }
 
@@ -3453,6 +3476,21 @@ class _StatusViewerDialogState extends State<_StatusViewerDialog> {
                   ],
                 ),
               ),
+              if (story.authorId == widget.currentUserId && !widget.readOnly)
+                IconButton(
+                  tooltip: 'Delete status',
+                  icon: _isDeleting
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.delete_outline, color: Colors.white),
+                  onPressed: _isDeleting ? null : _confirmDeleteCurrentStory,
+                ),
               IconButton(
                 tooltip: 'Close',
                 icon: const Icon(Icons.close, color: Colors.white),
@@ -3476,7 +3514,7 @@ class _StatusViewerDialogState extends State<_StatusViewerDialog> {
     return Positioned(
       left: 12,
       right: 12,
-      bottom: MediaQuery.of(context).viewInsets.bottom + 12,
+      bottom: 12,
       child: Row(
         children: [
           IconButton(
@@ -3550,6 +3588,200 @@ class _StatusViewerDialogState extends State<_StatusViewerDialog> {
     final trimmed = name.trim();
     if (trimmed.isEmpty) return '?';
     return trimmed.characters.first.toUpperCase();
+  }
+}
+
+class _StatusVideoPlayer extends StatefulWidget {
+  const _StatusVideoPlayer({
+    required this.mediaUrl,
+    required this.caption,
+    required this.fit,
+  });
+
+  final String mediaUrl;
+  final String? caption;
+  final BoxFit fit;
+
+  @override
+  State<_StatusVideoPlayer> createState() => _StatusVideoPlayerState();
+}
+
+class _StatusVideoPlayerState extends State<_StatusVideoPlayer> {
+  VideoPlayerController? _controller;
+  Object? _error;
+  bool _isInitializing = true;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_initialize());
+  }
+
+  @override
+  void didUpdateWidget(covariant _StatusVideoPlayer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.mediaUrl != widget.mediaUrl) {
+      unawaited(_initialize());
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  Future<void> _initialize() async {
+    setState(() {
+      _isInitializing = true;
+      _error = null;
+    });
+
+    final previous = _controller;
+    _controller = null;
+    await previous?.dispose();
+
+    final controller = VideoPlayerController.networkUrl(
+      Uri.parse(widget.mediaUrl),
+    );
+    _controller = controller;
+
+    try {
+      await controller.initialize();
+      await controller.setLooping(true);
+      await controller.play();
+      if (!mounted) return;
+      setState(() => _isInitializing = false);
+    } catch (error) {
+      await controller.dispose();
+      if (!mounted) return;
+      setState(() {
+        if (identical(_controller, controller)) {
+          _controller = null;
+        }
+        _error = error;
+        _isInitializing = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final caption = widget.caption?.trim();
+    final controller = _controller;
+    final isReady = controller != null && controller.value.isInitialized;
+
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        ColoredBox(
+          color: Colors.black,
+          child: Center(
+            child: isReady
+                ? FittedBox(
+                    fit: widget.fit,
+                    child: SizedBox(
+                      width: controller.value.size.width,
+                      height: controller.value.size.height,
+                      child: VideoPlayer(controller),
+                    ),
+                  )
+                : _StatusVideoPlaceholder(
+                    error: _error,
+                    isInitializing: _isInitializing,
+                    onRetry: _initialize,
+                  ),
+          ),
+        ),
+        const DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Colors.black54,
+                Colors.transparent,
+                Colors.black54,
+              ],
+              stops: [0, 0.35, 1],
+            ),
+          ),
+        ),
+        if (caption?.isNotEmpty == true)
+          Positioned(
+            left: 20,
+            right: 20,
+            bottom: 104,
+            child: Text(
+              caption!,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _StatusVideoPlaceholder extends StatelessWidget {
+  const _StatusVideoPlaceholder({
+    required this.error,
+    required this.isInitializing,
+    required this.onRetry,
+  });
+
+  final Object? error;
+  final bool isInitializing;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    if (isInitializing) {
+      return const CircularProgressIndicator(color: Colors.white);
+    }
+
+    return Padding(
+      padding: const EdgeInsets.all(28),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(
+            Icons.error_outline,
+            color: Colors.white,
+            size: 48,
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            'Video could not load. Check your internet connection or try again.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          if (error != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              error.toString(),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+          ],
+          const SizedBox(height: 14),
+          OutlinedButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh),
+            label: const Text('Retry'),
+          ),
+        ],
+      ),
+    );
   }
 }
 

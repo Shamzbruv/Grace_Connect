@@ -16,7 +16,11 @@ class ProfileService {
 
     try {
       await _supabase.storage.from('avatars').upload(path, imageFile,
-          fileOptions: const FileOptions(cacheControl: '3600', upsert: true));
+          fileOptions: const FileOptions(
+            cacheControl: '3600',
+            contentType: 'image/jpeg',
+            upsert: true,
+          ));
 
       final downloadUrl =
           _cacheBustedUrl(_supabase.storage.from('avatars').getPublicUrl(path));
@@ -48,11 +52,16 @@ class ProfileService {
     final user = _supabase.auth.currentUser;
     if (user == null) throw Exception('User not authenticated');
 
-    final String path = '${user.id}/profile/$fileName';
+    final safeFileName = _safeImageFileName(fileName, 'profile.png');
+    final String path = '${user.id}/profile/$safeFileName';
 
     try {
       await _supabase.storage.from('avatars').uploadBinary(path, imageBytes,
-          fileOptions: const FileOptions(cacheControl: '3600', upsert: true));
+          fileOptions: FileOptions(
+            cacheControl: '3600',
+            contentType: _imageContentType(safeFileName),
+            upsert: true,
+          ));
 
       final downloadUrl =
           _cacheBustedUrl(_supabase.storage.from('avatars').getPublicUrl(path));
@@ -88,7 +97,11 @@ class ProfileService {
 
     try {
       await _supabase.storage.from('avatars').upload(path, imageFile,
-          fileOptions: const FileOptions(cacheControl: '3600', upsert: true));
+          fileOptions: const FileOptions(
+            cacheControl: '3600',
+            contentType: 'image/jpeg',
+            upsert: true,
+          ));
 
       final downloadUrl = _supabase.storage.from('avatars').getPublicUrl(path);
 
@@ -112,11 +125,16 @@ class ProfileService {
     final user = _supabase.auth.currentUser;
     if (user == null) throw Exception('User not authenticated');
 
-    final String path = '${user.id}/cover/$fileName';
+    final safeFileName = _safeImageFileName(fileName, 'cover.png');
+    final String path = '${user.id}/cover/$safeFileName';
 
     try {
       await _supabase.storage.from('avatars').uploadBinary(path, imageBytes,
-          fileOptions: const FileOptions(cacheControl: '3600', upsert: true));
+          fileOptions: FileOptions(
+            cacheControl: '3600',
+            contentType: _imageContentType(safeFileName),
+            upsert: true,
+          ));
 
       final downloadUrl = _supabase.storage.from('avatars').getPublicUrl(path);
 
@@ -168,6 +186,29 @@ class ProfileService {
   String _cacheBustedUrl(String url) {
     final separator = url.contains('?') ? '&' : '?';
     return '$url${separator}v=${DateTime.now().millisecondsSinceEpoch}';
+  }
+
+  String _safeImageFileName(String fileName, String fallback) {
+    final cleaned = fileName
+        .split('/')
+        .last
+        .trim()
+        .replaceAll(RegExp(r'[^A-Za-z0-9._-]+'), '_')
+        .replaceAll(RegExp(r'_+'), '_');
+    if (cleaned.isEmpty || !cleaned.contains('.')) return fallback;
+    return cleaned;
+  }
+
+  String _imageContentType(String fileName) {
+    final extension = fileName.split('.').last.toLowerCase();
+    return switch (extension) {
+      'jpg' || 'jpeg' => 'image/jpeg',
+      'png' => 'image/png',
+      'webp' => 'image/webp',
+      'heic' => 'image/heic',
+      'heif' => 'image/heif',
+      _ => 'image/jpeg',
+    };
   }
 
   Future<void> _syncProfilePhotoReferences(

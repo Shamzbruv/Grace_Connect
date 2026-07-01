@@ -27,6 +27,8 @@ class AppScaffold extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
     final effectiveBottomNavigationBar = bottomNavigationBar ??
         (showBottomMenu && !MainTabScope.isInTabShell(context)
             ? const AppBottomMenu()
@@ -43,16 +45,20 @@ class AppScaffold extends StatelessWidget {
             )
           : null,
       drawer: drawer,
-      backgroundColor:
-          Theme.of(context).scaffoldBackgroundColor, // Default background
+      backgroundColor: theme.scaffoldBackgroundColor,
       floatingActionButton: floatingActionButton,
       bottomNavigationBar: effectiveBottomNavigationBar,
       body: SafeArea(
         child: withBackground
             ? Container(
-                decoration: const BoxDecoration(
-                  gradient: AppColors
-                      .primaryGradient, // Use primary gradient for background
+                decoration: BoxDecoration(
+                  gradient: isDark
+                      ? AppColors.primaryGradient
+                      : const LinearGradient(
+                          colors: [Color(0xFFFFFFFF), Color(0xFFF8F9FA)],
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                        ),
                 ),
                 child: body,
               )

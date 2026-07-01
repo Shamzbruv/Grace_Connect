@@ -1,7 +1,9 @@
 import 'dart:async';
 
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -25,11 +27,14 @@ class ChurchLocationPickerScreen extends StatefulWidget {
 class _ChurchLocationPickerScreenState
     extends State<ChurchLocationPickerScreen> {
   static const LatLng _jamaicaCenter = LatLng(18.1096, -77.2975);
+  static const MethodChannel _configChannel =
+      MethodChannel('love.graceconnect/config');
 
   final AttendanceService _attendanceService = AttendanceService();
   final TextEditingController _searchController = TextEditingController();
   final TextEditingController _latitudeController = TextEditingController();
   final TextEditingController _longitudeController = TextEditingController();
+  final TextEditingController _radiusController = TextEditingController();
 
   GoogleMapController? _mapController;
   LatLng _selectedPosition = _jamaicaCenter;
@@ -39,12 +44,19 @@ class _ChurchLocationPickerScreenState
   bool _isSaving = false;
   bool _isSearching = false;
   bool _isLocating = false;
+  bool _isCheckingMap = false;
+  bool _mapLoadFailed = false;
+  bool? _androidMapsApiKeyPresent;
+  int _mapRetryToken = 0;
   List<GooglePlaceResult> _searchResults = const [];
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _loadCurrentLocation());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_loadCurrentLocation());
+      unawaited(_refreshMapAvailability());
+    });
   }
 
   @override
@@ -52,6 +64,7 @@ class _ChurchLocationPickerScreenState
     _searchController.dispose();
     _latitudeController.dispose();
     _longitudeController.dispose();
+    _radiusController.dispose();
     _mapController?.dispose();
     super.dispose();
   }
@@ -59,6 +72,15 @@ class _ChurchLocationPickerScreenState
   bool get _supportsInteractiveMap =>
       defaultTargetPlatform == TargetPlatform.android ||
       defaultTargetPlatform == TargetPlatform.iOS;
+
+  bool get _isAndroidMapBuild =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+
+  bool get _canRenderInteractiveMap =>
+      _supportsInteractiveMap &&
+      !_isCheckingMap &&
+      !_mapLoadFailed &&
+      _androidMapsApiKeyPresent != false;
 
   bool _canManageAttendanceSetup(UserProfile user) {
     if (user.capabilities.canManageSchedules ||
@@ -103,6 +125,7 @@ class _ChurchLocationPickerScreenState
         _radiusMeters = current.radiusMeters.clamp(50, 500).toDouble();
       }
       _syncCoordinateFields();
+      _syncRadiusField();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -110,6 +133,50 @@ class _ChurchLocationPickerScreenState
       );
     } finally {
       if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _refreshMapAvailability() async {
+    if (!_supportsInteractiveMap) return;
+
+    setState(() {
+      _isCheckingMap = true;
+      _mapLoadFailed = false;
+    });
+
+    try {
+      final connectivity = await Connectivity().checkConnectivity();
+      final isOffline = connectivity.isEmpty ||
+          connectivity.every((result) => result == ConnectivityResult.none);
+      if (isOffline) {
+        if (!mounted) return;
+        setState(() {
+          _mapLoadFailed = true;
+          _androidMapsApiKeyPresent =
+              _isAndroidMapBuild ? (_androidMapsApiKeyPresent ?? true) : true;
+        });
+        return;
+      }
+
+      if (_isAndroidMapBuild) {
+        final hasKey = await _configChannel
+                .invokeMethod<bool>('isAndroidMapsApiKeyPresent') ??
+            false;
+        if (!mounted) return;
+        setState(() {
+          _androidMapsApiKeyPresent = hasKey;
+          _mapLoadFailed = !hasKey;
+        });
+      } else if (mounted) {
+        setState(() => _androidMapsApiKeyPresent = true);
+      }
+    } catch (error) {
+      debugPrint('Map availability check skipped: $error');
+      if (mounted) {
+        setState(() => _androidMapsApiKeyPresent = true);
+      }
+    } finally {
+      if (mounted) setState(() => _isCheckingMap = false);
     }
   }
 
@@ -129,7 +196,9 @@ class _ChurchLocationPickerScreenState
       if (results.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('No places found. Tap the map to place the pin.'),
+            content: Text(
+              'No places found. Enter coordinates manually or tap the map if it is available.',
+            ),
           ),
         );
       }
@@ -137,7 +206,9 @@ class _ChurchLocationPickerScreenState
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Search unavailable. Tap the map to place the pin: $e'),
+          content: Text(
+            'Search unavailable. Enter coordinates manually or tap the map if it is available: $e',
+          ),
         ),
       );
     } finally {
@@ -192,9 +263,14 @@ class _ChurchLocationPickerScreenState
     _longitudeController.text = _selectedPosition.longitude.toStringAsFixed(6);
   }
 
-  void _applyManualCoordinates() {
+  void _syncRadiusField() {
+    _radiusController.text = _radiusMeters.toStringAsFixed(0);
+  }
+
+  _ValidatedGeofence? _readValidatedGeofenceFromFields() {
     final latitude = double.tryParse(_latitudeController.text.trim());
     final longitude = double.tryParse(_longitudeController.text.trim());
+    final radius = double.tryParse(_radiusController.text.trim());
 
     if (latitude == null ||
         longitude == null ||
@@ -203,28 +279,88 @@ class _ChurchLocationPickerScreenState
         longitude < -180 ||
         longitude > 180) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter a valid latitude and longitude.')),
+        const SnackBar(
+          content: Text(
+            'Enter a valid latitude between -90 and 90 and longitude between -180 and 180.',
+          ),
+        ),
+      );
+      return null;
+    }
+
+    if (radius == null || radius < 50 || radius > 500) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Enter a geofence radius between 50 and 500 meters.'),
+        ),
+      );
+      return null;
+    }
+
+    return _ValidatedGeofence(
+      position: LatLng(latitude, longitude),
+      radiusMeters: radius,
+    );
+  }
+
+  void _applyManualCoordinates() {
+    final geofence = _readValidatedGeofenceFromFields();
+    if (geofence == null) return;
+
+    setState(() {
+      _radiusMeters = geofence.radiusMeters;
+      _syncRadiusField();
+    });
+    unawaited(_movePin(geofence.position, address: 'Manual coordinates'));
+  }
+
+  void _retryMap() {
+    _mapController?.dispose();
+    _mapController = null;
+    setState(() {
+      _mapRetryToken += 1;
+      _mapLoadFailed = false;
+    });
+    unawaited(_refreshMapAvailability());
+  }
+
+  Future<void> _saveLocation(UserProfile user) async {
+    if (!_canManageAttendanceSetup(user)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('You do not have permission to save this geofence.'),
+        ),
+      );
+      return;
+    }
+    if (user.churchId.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Your account is not assigned to a church.'),
+        ),
       );
       return;
     }
 
-    unawaited(_movePin(
-      LatLng(latitude, longitude),
-      address: 'Manual coordinates',
-    ));
-  }
+    final geofence = _readValidatedGeofenceFromFields();
+    if (geofence == null) return;
 
-  Future<void> _saveLocation(UserProfile user) async {
     setState(() => _isSaving = true);
     try {
       await _attendanceService.saveChurchLocation(
         churchId: user.churchId,
-        latitude: _selectedPosition.latitude,
-        longitude: _selectedPosition.longitude,
-        radiusMeters: _radiusMeters,
+        latitude: geofence.position.latitude,
+        longitude: geofence.position.longitude,
+        radiusMeters: geofence.radiusMeters,
         address: _selectedAddress,
       );
       if (!mounted) return;
+      setState(() {
+        _selectedPosition = geofence.position;
+        _radiusMeters = geofence.radiusMeters;
+        _syncCoordinateFields();
+        _syncRadiusField();
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Church geofence saved.')),
       );
@@ -353,70 +489,83 @@ class _ChurchLocationPickerScreenState
             ),
           ],
           const SizedBox(height: 12),
-          _supportsInteractiveMap
-              ? SizedBox(
-                  height: 420,
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(16),
-                    child: GoogleMap(
-                      initialCameraPosition: CameraPosition(
-                        target: _selectedPosition,
-                        zoom: _selectedPosition == _jamaicaCenter ? 8 : 17,
-                      ),
-                      markers: {
-                        Marker(
-                          markerId: const MarkerId('church_location'),
-                          position: _selectedPosition,
-                          draggable: true,
-                          onDragEnd: (position) {
+          _isCheckingMap
+              ? const _MapCheckingCard()
+              : _canRenderInteractiveMap
+                  ? SizedBox(
+                      height: 420,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(16),
+                        child: GoogleMap(
+                          key: ValueKey(_mapRetryToken),
+                          initialCameraPosition: CameraPosition(
+                            target: _selectedPosition,
+                            zoom: _selectedPosition == _jamaicaCenter ? 8 : 17,
+                          ),
+                          markers: {
+                            Marker(
+                              markerId: const MarkerId('church_location'),
+                              position: _selectedPosition,
+                              draggable: true,
+                              onDragEnd: (position) {
+                                setState(() {
+                                  _selectedPosition = position;
+                                  _selectedAddress = 'Pinned location';
+                                  _syncCoordinateFields();
+                                });
+                              },
+                            ),
+                          },
+                          circles: {
+                            Circle(
+                              circleId: const CircleId('church_radius'),
+                              center: _selectedPosition,
+                              radius: _radiusMeters,
+                              fillColor: theme.colorScheme.primary.withValues(
+                                alpha: 0.16,
+                              ),
+                              strokeColor: theme.colorScheme.primary,
+                              strokeWidth: 2,
+                            ),
+                          },
+                          myLocationButtonEnabled: false,
+                          myLocationEnabled: false,
+                          mapToolbarEnabled: false,
+                          zoomControlsEnabled: true,
+                          onTap: (position) {
                             setState(() {
                               _selectedPosition = position;
                               _selectedAddress = 'Pinned location';
                               _syncCoordinateFields();
                             });
                           },
+                          onMapCreated: (controller) {
+                            _mapController = controller;
+                          },
                         ),
-                      },
-                      circles: {
-                        Circle(
-                          circleId: const CircleId('church_radius'),
-                          center: _selectedPosition,
-                          radius: _radiusMeters,
-                          fillColor: theme.colorScheme.primary.withValues(
-                            alpha: 0.16,
-                          ),
-                          strokeColor: theme.colorScheme.primary,
-                          strokeWidth: 2,
-                        ),
-                      },
-                      myLocationButtonEnabled: false,
-                      myLocationEnabled: false,
-                      mapToolbarEnabled: false,
-                      zoomControlsEnabled: true,
-                      onTap: (position) {
-                        setState(() {
-                          _selectedPosition = position;
-                          _selectedAddress = 'Pinned location';
-                          _syncCoordinateFields();
-                        });
-                      },
-                      onMapCreated: (controller) {
-                        _mapController = controller;
-                      },
+                      ),
+                    )
+                  : _MapFailureCard(
+                      onRetry: _retryMap,
+                      unsupportedPlatform: !_supportsInteractiveMap,
                     ),
-                  ),
-                )
-              : _UnsupportedMapFallback(
-                  latitudeController: _latitudeController,
-                  longitudeController: _longitudeController,
-                  onApply: _applyManualCoordinates,
-                ),
           if (_supportsInteractiveMap) ...[
             const SizedBox(height: 12),
-            _UnsupportedMapFallback(
+            _ManualGeofenceFields(
               latitudeController: _latitudeController,
               longitudeController: _longitudeController,
+              radiusController: _radiusController,
               onApply: _applyManualCoordinates,
+              onRetryMap: _retryMap,
+            ),
+          ] else ...[
+            const SizedBox(height: 12),
+            _ManualGeofenceFields(
+              latitudeController: _latitudeController,
+              longitudeController: _longitudeController,
+              radiusController: _radiusController,
+              onApply: _applyManualCoordinates,
+              onRetryMap: null,
             ),
           ],
           const SizedBox(height: 12),
@@ -456,7 +605,10 @@ class _ChurchLocationPickerScreenState
                   value: _radiusMeters.clamp(50, 500).toDouble(),
                   label: '${_radiusMeters.toStringAsFixed(0)}m',
                   onChanged: (value) {
-                    setState(() => _radiusMeters = value);
+                    setState(() {
+                      _radiusMeters = value;
+                      _syncRadiusField();
+                    });
                   },
                 ),
                 const SizedBox(height: 8),
@@ -475,16 +627,113 @@ class _ChurchLocationPickerScreenState
   }
 }
 
-class _UnsupportedMapFallback extends StatelessWidget {
-  const _UnsupportedMapFallback({
+class _ValidatedGeofence {
+  const _ValidatedGeofence({
+    required this.position,
+    required this.radiusMeters,
+  });
+
+  final LatLng position;
+  final double radiusMeters;
+}
+
+class _MapCheckingCard extends StatelessWidget {
+  const _MapCheckingCard();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return AppCard(
+      color: theme.colorScheme.surfaceContainerHigh,
+      child: Row(
+        children: [
+          const SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              'Preparing map',
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MapFailureCard extends StatelessWidget {
+  const _MapFailureCard({
+    required this.onRetry,
+    required this.unsupportedPlatform,
+  });
+
+  final VoidCallback onRetry;
+  final bool unsupportedPlatform;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return AppCard(
+      color: theme.colorScheme.errorContainer,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                unsupportedPlatform ? Icons.map_outlined : Icons.error_outline,
+                color: theme.colorScheme.onErrorContainer,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  unsupportedPlatform
+                      ? 'Map is only available in the Android or iOS app.'
+                      : 'Map could not load. Check your internet connection or try again.',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    color: theme.colorScheme.onErrorContainer,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (!unsupportedPlatform) ...[
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Retry Map'),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _ManualGeofenceFields extends StatelessWidget {
+  const _ManualGeofenceFields({
     required this.latitudeController,
     required this.longitudeController,
+    required this.radiusController,
     required this.onApply,
+    required this.onRetryMap,
   });
 
   final TextEditingController latitudeController;
   final TextEditingController longitudeController;
+  final TextEditingController radiusController;
   final VoidCallback onApply;
+  final VoidCallback? onRetryMap;
 
   @override
   Widget build(BuildContext context) {
@@ -504,7 +753,7 @@ class _UnsupportedMapFallback extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'Map preview is available on phone',
+                  'Manual geofence details',
                   style: theme.textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.w800,
                   ),
@@ -514,7 +763,7 @@ class _UnsupportedMapFallback extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            'If the map is blank, search results, current location, and exact coordinates still work. Blank map tiles usually mean the Google Maps key needs billing, Maps SDK access, or bundle/package restrictions checked.',
+            'Latitude, longitude, and radius can be saved even if the map does not load.',
             style: theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
             ),
@@ -552,13 +801,35 @@ class _UnsupportedMapFallback extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 12),
-          Align(
-            alignment: Alignment.centerRight,
-            child: FilledButton.icon(
-              onPressed: onApply,
-              icon: const Icon(Icons.add_location_alt_outlined),
-              label: const Text('Apply Coordinates'),
+          TextField(
+            controller: radiusController,
+            keyboardType: const TextInputType.numberWithOptions(
+              decimal: false,
+              signed: false,
             ),
+            decoration: const InputDecoration(
+              labelText: 'Radius in meters',
+              prefixIcon: Icon(Icons.radar_outlined),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            alignment: WrapAlignment.end,
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              if (onRetryMap != null)
+                OutlinedButton.icon(
+                  onPressed: onRetryMap,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Retry Map'),
+                ),
+              FilledButton.icon(
+                onPressed: onApply,
+                icon: const Icon(Icons.add_location_alt_outlined),
+                label: const Text('Apply Coordinates'),
+              ),
+            ],
           ),
         ],
       ),

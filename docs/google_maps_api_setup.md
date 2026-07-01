@@ -47,7 +47,15 @@ Android Maps key:
 - Debug/release package name: `love.graceconnect`
 - SHA-1 certificate: add the debug SHA-1 for local builds and the release/Play App Signing SHA-1 for production
 - API restriction: Maps SDK for Android
-- Local config: add `GOOGLE_MAPS_API_KEY_ANDROID=...` to `android/local.properties`, or export it as an environment variable
+- Local/release config: add `GOOGLE_MAPS_API_KEY_ANDROID=...` to ignored `android/local.properties`, pass it as a Gradle property, or export it as an environment variable
+- Gradle manifest placeholder: `googleMapsApiKey`
+- Android manifest metadata populated by that placeholder: `com.google.android.geo.API_KEY`
+
+`GOOGLE_MAPS_API_KEY_ANDROID` is required for Android release builds. The
+Gradle release validation fails before packaging when it is missing or blank,
+or when `GRACE_CONNECT_APPLICATION_ID` is not explicitly set to
+`love.graceconnect`. Do not commit Maps keys to GitHub, Flutter source,
+AndroidManifest.xml, or public docs.
 
 iOS Maps key:
 

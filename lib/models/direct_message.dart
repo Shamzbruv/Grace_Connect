@@ -87,7 +87,7 @@ class DirectMessage {
   }
 
   static Map<String, dynamic> _parseMap(dynamic value) {
-    if (value is Map<String, dynamic>) return value;
+    if (value is Map<String, dynamic>) return Map<String, dynamic>.from(value);
     if (value is Map) return Map<String, dynamic>.from(value);
     return const {};
   }

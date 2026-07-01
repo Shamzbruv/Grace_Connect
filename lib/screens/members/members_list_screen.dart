@@ -305,7 +305,12 @@ class _MembersListScreenState extends State<MembersListScreen> {
         currentUser?.uid ?? Supabase.instance.client.auth.currentUser?.id;
     final memberProfile = UserProfile.fromMap(data);
     final isOwnProfile = memberProfile.uid == currentUserId;
-    final isPrivate = memberProfile.isProfilePrivate && !isOwnProfile;
+    final canOverrideProfilePrivacy =
+        currentUser?.capabilities.canManageMembersBasic == true ||
+            currentUser?.hasPastoralRole == true;
+    final isPrivate = memberProfile.isProfilePrivate &&
+        !isOwnProfile &&
+        !canOverrideProfilePrivacy;
     final displayName =
         memberProfile.fullName.isNotEmpty ? memberProfile.fullName : 'Member';
     final bio = memberProfile.bio.trim();
@@ -314,9 +319,7 @@ class _MembersListScreenState extends State<MembersListScreen> {
     final showContactInfo = isOwnProfile ||
         (!isPrivate &&
             memberProfile.canShowContactInfoTo(isSameChurch: isSameChurch));
-    final canViewExtendedProfile = isOwnProfile ||
-        currentUser?.capabilities.canManageMembersBasic == true ||
-        currentUser?.hasPastoralRole == true;
+    final canViewExtendedProfile = isOwnProfile || canOverrideProfilePrivacy;
     final hasExtendedProfileDetails = memberProfile.dateOfBirth != null ||
         memberProfile.gender.trim().isNotEmpty ||
         memberProfile.occupation.trim().isNotEmpty ||
@@ -326,8 +329,9 @@ class _MembersListScreenState extends State<MembersListScreen> {
         memberProfile.emergencyContactName.trim().isNotEmpty ||
         memberProfile.emergencyContactPhone.trim().isNotEmpty;
     final careAlert = _careAlertsByUserId[memberProfile.uid];
-    final canMessage =
-        !isOwnProfile && memberProfile.allowMessages && !isPrivate;
+    final canMessage = !isOwnProfile &&
+        !isPrivate &&
+        (isSameChurch || memberProfile.allowMessages);
     final canNudge = !isOwnProfile && !isPrivate && !isSameChurch;
 
     showModalBottomSheet(

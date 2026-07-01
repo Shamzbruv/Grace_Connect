@@ -111,7 +111,7 @@ class AttendanceService {
 
   Future<void> _initializeNotifications() async {
     const androidSettings =
-        AndroidInitializationSettings('@mipmap/ic_launcher');
+        AndroidInitializationSettings('ic_stat_grace_connect');
     const iosSettings = DarwinInitializationSettings();
     const settings =
         InitializationSettings(android: androidSettings, iOS: iosSettings);
@@ -984,6 +984,8 @@ class AttendanceService {
       channelDescription: 'Notifications for automatic attendance tracking',
       importance: Importance.high,
       priority: Priority.high,
+      icon: 'ic_stat_grace_connect',
+      largeIcon: DrawableResourceAndroidBitmap('notification_large_icon'),
     );
     const iosDetails = DarwinNotificationDetails();
     const details =
