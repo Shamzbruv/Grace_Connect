@@ -247,6 +247,41 @@ void main() {
       expect(userManagementSource, contains('"appPrivileges"'));
     });
 
+    test(
+        'member review cards show requester details and same-church nudge is hidden',
+        () {
+      final membershipReviewSource =
+          File('lib/screens/admin/membership_requests_screen.dart')
+              .readAsStringSync();
+      final membershipReviewMigration = File(
+        'supabase/migrations/20260701031000_membership_review_details.sql',
+      ).readAsStringSync();
+      final memberListSource =
+          File('lib/screens/members/members_list_screen.dart')
+              .readAsStringSync();
+      final communityFeedSource =
+          File('lib/screens/community/community_feed_screen.dart')
+              .readAsStringSync();
+      final bibleNudgeServiceSource =
+          File('lib/services/bible_nudge_service.dart').readAsStringSync();
+
+      expect(
+          membershipReviewSource, contains('list_church_membership_requests'));
+      expect(membershipReviewSource, contains('request_message'));
+      expect(membershipReviewSource, contains('No email on profile'));
+      expect(membershipReviewSource, contains('No phone on profile'));
+      expect(membershipReviewSource, contains('Message to leaders'));
+      expect(membershipReviewMigration, contains('jsonb_build_object'));
+      expect(membershipReviewMigration, contains('left join auth.users'));
+      expect(membershipReviewMigration, contains('request_message'));
+      expect(memberListSource,
+          contains('!isOwnProfile && !isPrivate && !isSameChurch'));
+      expect(communityFeedSource, contains('canNudgePerson'));
+      expect(communityFeedSource, contains('_isDifferentKnownChurch'));
+      expect(bibleNudgeServiceSource,
+          contains('Bible Nudge is only for people outside your church'));
+    });
+
     test('android release identity and permissions are beta-safe', () {
       final manifest =
           File('android/app/src/main/AndroidManifest.xml').readAsStringSync();
@@ -258,8 +293,8 @@ void main() {
       ).readAsStringSync();
 
       expect(gradle, contains('"love.graceconnect"'));
-      expect(gradle, contains('versionCode 17'));
-      expect(gradle, contains('versionName "1.0.16-beta"'));
+      expect(gradle, contains('versionCode 18'));
+      expect(gradle, contains('versionName "1.0.17-beta"'));
       expect(activity, contains('package love.graceconnect'));
       expect(manifest, contains('love.graceconnect.MainActivity'));
       expect(manifest, contains('default_notification_icon'));

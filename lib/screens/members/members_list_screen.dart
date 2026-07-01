@@ -226,6 +226,19 @@ class _MembersListScreenState extends State<MembersListScreen> {
         Provider.of<UserRoleProvider>(context, listen: false).userProfile;
     if (sender == null) return;
 
+    final senderChurch = sender.churchId.trim();
+    final recipientChurch = recipient.churchId.trim();
+    if (senderChurch.isNotEmpty &&
+        recipientChurch.isNotEmpty &&
+        senderChurch == recipientChurch) {
+      AppFeedback.show(
+        context,
+        'Bible Nudge is only for people outside your church. Use Message for members of your church.',
+        type: AppFeedbackType.info,
+      );
+      return;
+    }
+
     final messageController = TextEditingController();
     final confirmed = await showDialog<bool>(
       context: context,
@@ -315,7 +328,7 @@ class _MembersListScreenState extends State<MembersListScreen> {
     final careAlert = _careAlertsByUserId[memberProfile.uid];
     final canMessage =
         !isOwnProfile && memberProfile.allowMessages && !isPrivate;
-    final canNudge = !isOwnProfile && !isPrivate;
+    final canNudge = !isOwnProfile && !isPrivate && !isSameChurch;
 
     showModalBottomSheet(
       context: context,

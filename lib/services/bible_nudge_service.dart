@@ -16,6 +16,16 @@ class BibleNudgeService {
       throw Exception('You cannot Bible Nudge yourself.');
     }
 
+    final senderChurch = sender.churchId.trim();
+    final recipientChurch = recipient.churchId.trim();
+    if (senderChurch.isNotEmpty &&
+        recipientChurch.isNotEmpty &&
+        senderChurch == recipientChurch) {
+      throw Exception(
+        'Bible Nudge is only for people outside your church. Use Message for members of your church.',
+      );
+    }
+
     final row = await _supabase
         .from('bible_nudges')
         .insert({

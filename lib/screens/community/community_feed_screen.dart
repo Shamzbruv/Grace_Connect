@@ -1693,7 +1693,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                                           ),
                                     ),
                                     subtitle: const Text(
-                                      'Expand to message or Bible Nudge members.',
+                                      'Expand to message members or Bible Nudge people from other churches.',
                                     ),
                                     trailing: Icon(
                                       peopleExpanded
@@ -1708,56 +1708,72 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                                   ),
                                   if (peopleExpanded)
                                     for (final person in people)
-                                      ListTile(
-                                        leading: CircleAvatar(
-                                          backgroundImage:
-                                              person.photoUrl.isNotEmpty
-                                                  ? NetworkImage(
-                                                      person.photoUrl,
-                                                    )
+                                      Builder(
+                                        builder: (context) {
+                                          final canNudgePerson =
+                                              _isDifferentKnownChurch(
+                                            person.churchId,
+                                            ownChurchId,
+                                          );
+                                          return ListTile(
+                                            leading: CircleAvatar(
+                                              backgroundImage:
+                                                  person.photoUrl.isNotEmpty
+                                                      ? NetworkImage(
+                                                          person.photoUrl,
+                                                        )
+                                                      : null,
+                                              child: person.photoUrl.isEmpty
+                                                  ? Text(person.fullName.isEmpty
+                                                      ? '?'
+                                                      : person.fullName[0])
                                                   : null,
-                                          child: person.photoUrl.isEmpty
-                                              ? Text(person.fullName.isEmpty
-                                                  ? '?'
-                                                  : person.fullName[0])
-                                              : null,
-                                        ),
-                                        title: Text(person.fullName.isEmpty
-                                            ? person.email
-                                            : person.fullName),
-                                        subtitle: Text(person.placeName.isEmpty
-                                            ? 'Member'
-                                            : person.placeName),
-                                        trailing: Wrap(
-                                          spacing: 2,
-                                          children: [
-                                            IconButton(
-                                              tooltip: 'Bible Nudge',
-                                              icon: const Icon(
-                                                Icons.menu_book_outlined,
-                                              ),
-                                              onPressed: () {
-                                                Navigator.pop(sheetContext);
-                                                _sendBibleNudge(person);
-                                              },
                                             ),
-                                            IconButton(
-                                              tooltip: 'Message',
-                                              icon: const Icon(
-                                                Icons.chat_bubble_outline,
-                                              ),
-                                              onPressed: () {
-                                                Navigator.pop(sheetContext);
-                                                _openMessageWithUserProfile(
-                                                  person,
-                                                );
-                                              },
+                                            title: Text(person.fullName.isEmpty
+                                                ? person.email
+                                                : person.fullName),
+                                            subtitle: Text(
+                                              person.placeName.isEmpty
+                                                  ? 'Member'
+                                                  : person.placeName,
                                             ),
-                                          ],
-                                        ),
-                                        onTap: () {
-                                          Navigator.pop(sheetContext);
-                                          _openMessageWithUserProfile(person);
+                                            trailing: Wrap(
+                                              spacing: 2,
+                                              children: [
+                                                if (canNudgePerson)
+                                                  IconButton(
+                                                    tooltip: 'Bible Nudge',
+                                                    icon: const Icon(
+                                                      Icons.menu_book_outlined,
+                                                    ),
+                                                    onPressed: () {
+                                                      Navigator.pop(
+                                                        sheetContext,
+                                                      );
+                                                      _sendBibleNudge(person);
+                                                    },
+                                                  ),
+                                                IconButton(
+                                                  tooltip: 'Message',
+                                                  icon: const Icon(
+                                                    Icons.chat_bubble_outline,
+                                                  ),
+                                                  onPressed: () {
+                                                    Navigator.pop(sheetContext);
+                                                    _openMessageWithUserProfile(
+                                                      person,
+                                                    );
+                                                  },
+                                                ),
+                                              ],
+                                            ),
+                                            onTap: () {
+                                              Navigator.pop(sheetContext);
+                                              _openMessageWithUserProfile(
+                                                person,
+                                              );
+                                            },
+                                          );
                                         },
                                       ),
                                 ],
@@ -1833,6 +1849,19 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
   Future<void> _sendBibleNudge(UserProfile recipient) async {
     final sender = context.read<UserRoleProvider>().userProfile;
     if (sender == null) return;
+
+    final senderChurch = sender.churchId.trim();
+    final recipientChurch = recipient.churchId.trim();
+    if (senderChurch.isNotEmpty &&
+        recipientChurch.isNotEmpty &&
+        senderChurch == recipientChurch) {
+      AppFeedback.show(
+        context,
+        'Bible Nudge is only for people outside your church. Use Message for members of your church.',
+        type: AppFeedbackType.info,
+      );
+      return;
+    }
 
     final displayName =
         recipient.fullName.isNotEmpty ? recipient.fullName : recipient.email;
