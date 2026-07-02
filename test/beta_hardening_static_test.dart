@@ -521,5 +521,98 @@ void main() {
       expect(authFlowSource, contains('http://localhost:3000'));
       expect(releaseDocs, contains('http://localhost:3000/auth/callback'));
     });
+
+    test('profile photos open profiles/viewers instead of inboxes', () {
+      final feedSource =
+          File('lib/screens/community/community_feed_screen.dart')
+              .readAsStringSync();
+      final profileSource =
+          File('lib/screens/profile/profile_screen.dart').readAsStringSync();
+      final membersSource = File('lib/screens/members/members_list_screen.dart')
+          .readAsStringSync();
+      final viewerSource =
+          File('lib/widgets/profile_photo_viewer.dart').readAsStringSync();
+
+      expect(feedSource, contains('_openPostAuthorProfile'));
+      expect(feedSource, contains('showProfilePhotoViewer'));
+      expect(feedSource, contains("tooltip: 'Message'"));
+      expect(profileSource, contains('_openProfilePhotoPreview'));
+      expect(profileSource, contains('onChangePhoto: _isUploading'));
+      expect(profileSource, contains('_handlePhotoUpload'));
+      expect(membersSource, contains('showProfilePhotoViewer'));
+      expect(viewerSource, contains('InteractiveViewer'));
+      expect(viewerSource, contains('Profile photo'));
+    });
+
+    test('community videos use mobile-safe uploads and inline playback', () {
+      final feedSource =
+          File('lib/screens/community/community_feed_screen.dart')
+              .readAsStringSync();
+      final uploadExport =
+          File('lib/utils/community_media_upload.dart').readAsStringSync();
+      final uploadIo =
+          File('lib/utils/community_media_upload_io.dart').readAsStringSync();
+      final uploadBytes = File('lib/utils/community_media_upload_bytes.dart')
+          .readAsStringSync();
+      final migrationSource = File(
+        'supabase/migrations/20260701193000_counseling_testimony_media_email_hardening.sql',
+      ).readAsStringSync();
+
+      expect(feedSource, contains('uploadCommunityMediaXFile'));
+      expect(feedSource, contains('_maxCommunityVideoBytes'));
+      expect(feedSource, contains('200MB'));
+      expect(feedSource, contains('_InlineCommunityVideoPlayer'));
+      expect(feedSource, contains('_preloadNextVideo'));
+      expect(uploadExport, contains('if (dart.library.io)'));
+      expect(uploadIo, contains('uploadMediaFile'));
+      expect(uploadBytes, contains('uploadMediaBytes'));
+      expect(migrationSource, contains('209715200'));
+      expect(migrationSource, contains('video/quicktime'));
+    });
+
+    test('counseling requests and testimony notifications are hardened', () {
+      final counselingModel =
+          File('lib/models/counseling_request_model.dart').readAsStringSync();
+      final testimonyService =
+          File('lib/services/testimony_service.dart').readAsStringSync();
+      final notificationService =
+          File('lib/services/notification_service.dart').readAsStringSync();
+      final firebaseFunctions = File('functions/index.js').readAsStringSync();
+      final migrationSource = File(
+        'supabase/migrations/20260701193000_counseling_testimony_media_email_hardening.sql',
+      ).readAsStringSync();
+
+      expect(counselingModel, contains("if (id.trim().isNotEmpty) 'id': id"));
+      expect(migrationSource, contains('gen_random_uuid'));
+      expect(migrationSource, contains('notify_church_on_testimony'));
+      expect(migrationSource, contains('trg_notify_church_on_testimony'));
+      expect(migrationSource, contains("'testimony'"));
+      expect(testimonyService, contains("type: 'testimony'"));
+      expect(testimonyService, contains("route: '/testimonies'"));
+      expect(notificationService, contains("'testimony'"));
+      expect(firebaseFunctions, contains('"testimony"'));
+      expect(firebaseFunctions, contains('type === "testimony"'));
+    });
+
+    test('password reset and app emails use branded mailer paths', () {
+      final authFlowSource =
+          File('lib/services/auth_flow_service.dart').readAsStringSync();
+      final emailService =
+          File('lib/services/email_service.dart').readAsStringSync();
+      final mailerSource =
+          File('supabase/functions/grace-mailer/index.ts').readAsStringSync();
+      final docsSource = File('docs/resend-email-setup.md').readAsStringSync();
+
+      expect(authFlowSource, contains("'action': 'password-reset'"));
+      expect(authFlowSource, contains('functions.invoke'));
+      expect(authFlowSource, contains('reset-callback'));
+      expect(emailService, contains('data-grace-email="true"'));
+      expect(emailService, contains('_brandHtmlBody'));
+      expect(mailerSource, contains('password-reset'));
+      expect(mailerSource, contains('queuedEmailBody'));
+      expect(mailerSource, contains('data-grace-email="true"'));
+      expect(docsSource, contains('http://localhost:3000'));
+      expect(docsSource, contains('app.graceconnect.church://reset-callback/'));
+    });
   });
 }

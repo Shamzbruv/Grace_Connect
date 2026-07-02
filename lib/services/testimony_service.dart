@@ -2,9 +2,11 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/testimony.dart';
 import '../models/user_profile.dart';
+import 'notification_service.dart';
 
 class TestimonyService {
   final SupabaseClient _supabase = Supabase.instance.client;
+  final NotificationService _notificationService = NotificationService();
 
   Stream<List<Testimony>> watchTestimonies(String churchId) {
     return _supabase
@@ -37,6 +39,21 @@ class TestimonyService {
       'is_anonymous': isAnonymous,
       'created_at': DateTime.now().toUtc().toIso8601String(),
     });
+
+    final churchId = author.churchId.trim();
+    if (churchId.isEmpty) return;
+
+    final displayName =
+        author.fullName.trim().isNotEmpty ? author.fullName.trim() : 'Someone';
+    await _notificationService.sendNotification(
+      'New testimony',
+      isAnonymous
+          ? 'Someone shared a testimony.'
+          : '$displayName shared a testimony.',
+      'church_$churchId',
+      route: '/testimonies',
+      type: 'testimony',
+    );
   }
 
   Future<void> toggleReaction(String testimonyId, String emoji) async {

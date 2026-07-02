@@ -13,6 +13,11 @@ Grace Connect 1.0.18-beta geofence and stability update:
 - Adds owner status deletion and real status video playback with retryable errors.
 - Adds real feed post video playback and safer status reply keyboard handling.
 - Hardens profile photo storage access and Android image MIME handling.
+- Opens feed/profile photos as profile/photo views instead of jumping straight to inbox or edit-photo.
+- Fixes counseling request submission by guaranteeing request IDs in app and database.
+- Sends church-wide testimony notifications and adds the testimony push type.
+- Improves feed/status video uploads, larger community media limits, inline playback, and story video preloading.
+- Sends branded password reset emails and wraps app emails in Grace Connect styling.
 - Adds localhost auth callback support for http://localhost:3000.
 - Bumps the Play version code to 19.
 </en-US>

@@ -24,6 +24,27 @@ void main() {
       expect(() => source['media_url'] = 'changed', throwsUnsupportedError);
     });
 
+    test('deep-copies nested immutable reply context values', () {
+      final source = Map<String, dynamic>.unmodifiable({
+        'type': 'community_story',
+        'metadata': Map<String, dynamic>.unmodifiable({
+          'media': List<String>.unmodifiable(['video']),
+          'empty': null,
+        }),
+      });
+
+      final cleaned = DirectMessageService.sanitizeReplyContext(source);
+      final metadata = cleaned['metadata'] as Map<String, dynamic>;
+      final media = metadata['media'] as List<dynamic>;
+
+      metadata['opened'] = true;
+      media.add('reply');
+
+      expect(metadata['empty'], isNull);
+      expect(metadata['opened'], isTrue);
+      expect(media, ['video', 'reply']);
+    });
+
     test('model parsing returns mutable reply context copies', () {
       final message = DirectMessage.fromMap({
         'id': 'message-1',

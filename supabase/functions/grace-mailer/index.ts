@@ -17,6 +17,11 @@ type MailRequest =
       userData?: Record<string, unknown>;
     }
   | {
+      action: "password-reset";
+      email?: string;
+      redirectTo?: string;
+    }
+  | {
       action: "flush-queue";
       limit?: number;
     }
@@ -73,9 +78,15 @@ function plainText(html: string): string {
     .trim();
 }
 
-function allowedRedirect(rawRedirect?: string): string {
+function allowedRedirect(
+  rawRedirect?: string,
+  options: { allowNativeApp?: boolean } = {},
+): string {
   const fallback = `${Deno.env.get("PUBLIC_SITE_URL") ?? defaultSiteUrl}/`;
   const url = new URL(rawRedirect || fallback, fallback);
+  if (options.allowNativeApp && url.protocol === "app.graceconnect.church:") {
+    return url.href;
+  }
   const allowed = (Deno.env.get("MAIL_ALLOWED_REDIRECT_ORIGINS") ??
     [
       "https://www.graceconnect.love",
@@ -141,7 +152,7 @@ function brandedEmail(params: {
     ? `<p style="margin:32px 0 8px;"><a href="${params.ctaUrl}" style="display:inline-block;background:#102655;color:#ffffff;text-decoration:none;font-weight:700;padding:14px 22px;border-radius:8px;">${params.ctaLabel ?? "Open Grace Connect"}</a></p>`
     : "";
   const html = `
-    <div style="display:none;max-height:0;overflow:hidden;opacity:0;">${params.preview}</div>
+    <div data-grace-email="true" style="display:none;max-height:0;overflow:hidden;opacity:0;">${params.preview}</div>
     <div style="font-family:Arial,Helvetica,sans-serif;background:#f7f3ea;padding:32px 16px;color:#12213d;">
       <div style="max-width:620px;margin:0 auto;background:#ffffff;border-radius:16px;padding:34px;border:1px solid #eadcb6;">
         <p style="margin:0 0 18px;color:#c39213;font-size:13px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;">Grace Connect</p>
@@ -156,6 +167,25 @@ function brandedEmail(params: {
     html,
     text: `${params.title}\n\n${plainText(params.body)}${params.ctaUrl ? `\n\n${params.ctaLabel ?? "Open Grace Connect"}: ${params.ctaUrl}` : ""}`,
   };
+}
+
+function queuedEmailBody(row: EmailRow): { html: string; text: string } {
+  const existingHtml = String(row.html_body ?? "");
+  if (existingHtml.includes('data-grace-email="true"')) {
+    return {
+      html: existingHtml,
+      text: row.text_body ?? plainText(existingHtml),
+    };
+  }
+
+  const body = existingHtml.trim().startsWith("<")
+    ? existingHtml
+    : `<p>${existingHtml.replace(/\n/g, "<br>")}</p>`;
+  return brandedEmail({
+    title: row.subject || "Grace Connect Update",
+    preview: plainText(body).slice(0, 140) || "Grace Connect has an update for you.",
+    body,
+  });
 }
 
 async function sendResendEmail(params: {
@@ -306,6 +336,42 @@ async function sendSignupVerification(body: MailRequest): Promise<Response> {
   return jsonResponse({ ok: true, provider: "resend", id: resendId, existing_account: usedExistingAccount });
 }
 
+async function sendPasswordReset(body: MailRequest): Promise<Response> {
+  requireResendKey();
+  const email = normalizeEmail(body.email);
+  const redirectTo = allowedRedirect(body.redirectTo, { allowNativeApp: true });
+  const supabase = serviceClient();
+
+  const recoveryResult = await supabase.auth.admin.generateLink({
+    type: "recovery",
+    email,
+    options: { redirectTo },
+  });
+  if (recoveryResult.error) throw recoveryResult.error;
+
+  const resetUrl = actionLinkFromGenerateLink(
+    recoveryResult.data as Record<string, unknown>,
+  );
+
+  const emailBody = brandedEmail({
+    title: "Reset Your Grace Connect Password",
+    preview: "Use this secure Grace Connect link to create a new password.",
+    body:
+      "<p>Hello,</p><p>We received a request to reset your Grace Connect password.</p><p>Tap the button below to create a new password in the app. This link is time-sensitive and should only be used by you.</p>",
+    ctaLabel: "Reset Password",
+    ctaUrl: resetUrl,
+  });
+
+  const resendId = await sendResendEmail({
+    to: email,
+    subject: "Reset your Grace Connect password",
+    html: emailBody.html,
+    text: emailBody.text,
+  });
+
+  return jsonResponse({ ok: true, provider: "resend", id: resendId });
+}
+
 async function requireDeveloper(request: Request): Promise<void> {
   const token = accessTokenFromRequest(request);
   if (!token) throw new Error("Developer sign-in is required.");
@@ -360,11 +426,12 @@ async function deliverRows(rows: EmailRow[]): Promise<{ ok: boolean; total: numb
 
   for (const row of rows) {
     try {
+      const emailBody = queuedEmailBody(row);
       const providerId = await sendResendEmail({
         to: row.to_email,
         subject: row.subject,
-        html: row.html_body,
-        text: row.text_body,
+        html: emailBody.html,
+        text: emailBody.text,
       });
       sent += 1;
       await supabase
@@ -418,6 +485,7 @@ Deno.serve(async (request) => {
     const body = (await request.json().catch(() => ({}))) as MailRequest;
 
     if (body.action === "auth-signup") return await sendSignupVerification(body);
+    if (body.action === "password-reset") return await sendPasswordReset(body);
     if (body.action === "flush-queue") return await flushDeveloperQueue(request, body.limit);
     if (body.action === "flush-support-ticket") {
       const rows = await queuedRowsForSupportTicket(request, body.ticketId);

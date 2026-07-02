@@ -21,7 +21,9 @@ import '../../models/church_model.dart';
 import '../../models/community_story.dart';
 import '../../models/post.dart';
 import '../../models/user_profile.dart';
+import '../../utils/community_media_upload.dart';
 import '../../utils/media_display_format.dart';
+import '../../widgets/profile_photo_viewer.dart';
 import 'post_detail_screen.dart';
 import '../messages/message_thread_screen.dart';
 import 'package:image_picker/image_picker.dart';
@@ -50,6 +52,7 @@ class CommunityFeedScreen extends StatefulWidget {
 
 class _CommunityFeedScreenState extends State<CommunityFeedScreen>
     with WidgetsBindingObserver {
+  static const int _maxCommunityVideoBytes = 200 * 1024 * 1024;
   final TextEditingController _postController = TextEditingController();
   final CommunityService _communityService = CommunityService();
   final DirectMessageService _messageService = DirectMessageService();
@@ -258,12 +261,12 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
     // Check file size limit (50 MB) before accepting
     if (video != null) {
       final size = await video.length();
-      if (size > 52428800) {
-        // 50MB
+      if (size > _maxCommunityVideoBytes) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-                content: Text('Video file size must be less than 50MB')),
+              content: Text('Video file size must be less than 200MB'),
+            ),
           );
         }
         return;
@@ -316,11 +319,11 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
             if (video == null) return;
 
             final size = await video.length();
-            if (size > 52428800) {
+            if (size > _maxCommunityVideoBytes) {
               if (sheetContext.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
-                    content: Text('Video file size must be less than 50MB'),
+                    content: Text('Video file size must be less than 200MB'),
                   ),
                 );
               }
@@ -524,16 +527,16 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
       String? mediaUrl;
       String? mediaPath;
       if (media != null) {
-        final mimeType = media.mimeType ??
-            (mediaType == 'video' ? 'video/mp4' : 'image/jpeg');
+        final mimeType = _contentTypeFor(media, mediaType);
         final extension =
             _extensionFor(media, mimeType, fallbackMediaType: mediaType);
         final fileName =
             '$churchId/stories/${DateTime.now().millisecondsSinceEpoch}_${authUser.id}.$extension';
         mediaPath = fileName;
-        mediaUrl = await _communityService.uploadMediaBytes(
-          await media.readAsBytes(),
-          fileName,
+        mediaUrl = await uploadCommunityMediaXFile(
+          service: _communityService,
+          media: media,
+          path: fileName,
           contentType: mimeType,
         );
       }
@@ -628,8 +631,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
       String? mediaUrl;
       String? mediaPath;
       if (_selectedMedia != null) {
-        final mimeType = _selectedMedia!.mimeType ??
-            (_mediaType == 'image' ? 'image/jpeg' : 'video/mp4');
+        final mimeType = _contentTypeFor(_selectedMedia!, _mediaType);
         final extension = _extensionFor(
           _selectedMedia!,
           mimeType,
@@ -638,9 +640,10 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
         final fileName =
             '$churchId/${DateTime.now().millisecondsSinceEpoch}_${user.id}.$extension';
         mediaPath = fileName;
-        mediaUrl = await _communityService.uploadMediaBytes(
-          await _selectedMedia!.readAsBytes(),
-          fileName,
+        mediaUrl = await uploadCommunityMediaXFile(
+          service: _communityService,
+          media: _selectedMedia!,
+          path: fileName,
           contentType: mimeType,
         );
       }
@@ -727,6 +730,32 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
       'video/mp4' => 'mp4',
       _ => (fallbackMediaType ?? _mediaType) == 'video' ? 'mp4' : 'jpg',
     };
+  }
+
+  String _contentTypeFor(XFile file, String? mediaType) {
+    final explicitMime = file.mimeType?.trim();
+    if (explicitMime?.isNotEmpty == true) return explicitMime!;
+
+    final extension = file.name.split('.').last.toLowerCase();
+    return switch (extension) {
+      'jpg' || 'jpeg' => 'image/jpeg',
+      'png' => 'image/png',
+      'webp' => 'image/webp',
+      'gif' => 'image/gif',
+      'heic' => 'image/heic',
+      'heif' => 'image/heif',
+      'mov' => 'video/quicktime',
+      'm4v' => 'video/x-m4v',
+      'webm' => 'video/webm',
+      'mp4' => 'video/mp4',
+      _ => mediaType == 'video' ? 'video/mp4' : 'image/jpeg',
+    };
+  }
+
+  String _profileInitialFor(String name) {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) return '?';
+    return trimmed.characters.first.toUpperCase();
   }
 
   bool _canDeletePost(Post post) {
@@ -818,6 +847,136 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
         type: AppFeedbackType.warning,
       );
     }
+  }
+
+  Future<void> _openPostAuthorProfile(Post post) async {
+    final currentUser = context.read<UserRoleProvider>().userProfile;
+    final currentAuthUser = _auth.currentUser;
+    if (currentUser == null || currentAuthUser == null) return;
+
+    if (post.authorId == currentAuthUser.id) {
+      Navigator.pushNamed(context, '/profile');
+      return;
+    }
+
+    final loadedProfile = await _userService.getUserProfile(post.authorId);
+    if (!mounted) return;
+    final profile = loadedProfile ?? _profileFromPostAuthor(post);
+    final isSameChurch = profile.placeId == currentUser.placeId;
+    final showContact =
+        profile.canShowContactInfoTo(isSameChurch: isSameChurch);
+    final canMessage = isSameChurch || profile.allowMessages;
+    final displayName =
+        profile.fullName.trim().isEmpty ? post.authorName : profile.fullName;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (sheetContext) {
+        final theme = Theme.of(sheetContext);
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 42,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: theme.dividerColor,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+              const SizedBox(height: 22),
+              GestureDetector(
+                onTap: profile.photoUrl.isEmpty
+                    ? null
+                    : () => showProfilePhotoViewer(
+                          context: sheetContext,
+                          imageUrl: profile.photoUrl,
+                          displayName: displayName,
+                        ),
+                child: CircleAvatar(
+                  radius: 48,
+                  backgroundImage: profile.photoUrl.isNotEmpty
+                      ? NetworkImage(profile.photoUrl)
+                      : null,
+                  child: profile.photoUrl.isEmpty
+                      ? Text(
+                          _profileInitialFor(displayName),
+                          style: theme.textTheme.headlineMedium,
+                        )
+                      : null,
+                ),
+              ),
+              const SizedBox(height: 14),
+              Text(
+                displayName,
+                textAlign: TextAlign.center,
+                style: theme.textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              if (profile.placeName.trim().isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  profile.placeName,
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+              if (profile.bio.trim().isNotEmpty) ...[
+                const SizedBox(height: 16),
+                Text(
+                  profile.bio.trim(),
+                  textAlign: TextAlign.center,
+                  maxLines: 4,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+              const SizedBox(height: 18),
+              if (profile.isProfilePrivate)
+                ListTile(
+                  leading: const Icon(Icons.lock_outline),
+                  title: const Text('Private profile'),
+                  subtitle: const Text(
+                    'This member keeps some profile details private.',
+                  ),
+                )
+              else if (showContact) ...[
+                if (profile.email.trim().isNotEmpty)
+                  ListTile(
+                    leading: const Icon(Icons.email_outlined),
+                    title: Text(profile.email),
+                  ),
+                if (profile.phone.trim().isNotEmpty)
+                  ListTile(
+                    leading: const Icon(Icons.phone_outlined),
+                    title: Text(profile.phone),
+                  ),
+              ],
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: canMessage
+                      ? () {
+                          Navigator.pop(sheetContext);
+                          _messagePostAuthor(post);
+                        }
+                      : null,
+                  icon: const Icon(Icons.chat_bubble_outline),
+                  label: const Text('Message'),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   UserProfile _profileFromPostAuthor(Post post) {
@@ -2348,7 +2507,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                   customBorder: const CircleBorder(),
                   onTap: browseOnly
                       ? _showLimitedFeedNotice
-                      : () => _messagePostAuthor(post),
+                      : () => _openPostAuthorProfile(post),
                   child: CircleAvatar(
                     backgroundImage: post.authorPhoto != null
                         ? NetworkImage(post.authorPhoto!)
@@ -2363,7 +2522,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                   child: InkWell(
                     onTap: browseOnly
                         ? _showLimitedFeedNotice
-                        : () => _messagePostAuthor(post),
+                        : () => _openPostAuthorProfile(post),
                     borderRadius: BorderRadius.circular(8),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(vertical: 2),
@@ -2534,26 +2693,20 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                 post.mediaUrl != null &&
                 post.mediaType == 'video') ...[
               const SizedBox(height: 12),
-              Container(
-                height: 200,
-                width: double.infinity,
-                decoration: BoxDecoration(
-                  color: Colors.black,
-                  borderRadius: BorderRadius.circular(8),
+              AspectRatio(
+                aspectRatio: safeMediaAspectRatio(
+                  post.mediaAspectRatio,
+                  fallback: 4 / 3,
                 ),
-                child: const Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.play_circle_fill,
-                          color: Colors.white, size: 48),
-                      SizedBox(height: 8),
-                      Text('Video Attached',
-                          style: TextStyle(color: Colors.white)),
-                    ],
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: _InlineCommunityVideoPlayer(
+                    mediaUrl: post.mediaUrl!,
+                    fit: boxFitForMedia(post.mediaFit),
+                    autoPlay: false,
                   ),
                 ),
-              )
+              ),
             ],
             if (!_showMediaPreviews && post.mediaUrl != null) ...[
               const SizedBox(height: 12),
@@ -3124,6 +3277,7 @@ class _StatusViewerDialogState extends State<_StatusViewerDialog> {
   late final TextEditingController _replyController;
   late List<CommunityStory> _stories;
   late int _index;
+  final Map<String, VideoPlayerController> _preloadedVideoControllers = {};
   bool _isReplying = false;
   bool _isDeleting = false;
 
@@ -3141,6 +3295,10 @@ class _StatusViewerDialogState extends State<_StatusViewerDialog> {
 
   @override
   void dispose() {
+    for (final controller in _preloadedVideoControllers.values) {
+      controller.dispose();
+    }
+    _preloadedVideoControllers.clear();
     _pageController.dispose();
     _replyController.dispose();
     super.dispose();
@@ -3149,6 +3307,45 @@ class _StatusViewerDialogState extends State<_StatusViewerDialog> {
   void _markCurrentViewed() {
     if (!mounted || _stories.isEmpty) return;
     widget.onViewed(_currentStory);
+    _preloadNextVideo();
+  }
+
+  void _preloadNextVideo() {
+    final nextIndex = _index + 1;
+    if (nextIndex >= _stories.length) return;
+
+    final nextStory = _stories[nextIndex];
+    final mediaUrl = nextStory.mediaUrl;
+    if (nextStory.mediaType != 'video' ||
+        mediaUrl == null ||
+        mediaUrl.isEmpty ||
+        _preloadedVideoControllers.containsKey(mediaUrl)) {
+      return;
+    }
+
+    unawaited(() async {
+      final controller = VideoPlayerController.networkUrl(Uri.parse(mediaUrl));
+      try {
+        await controller.initialize();
+        await controller.setLooping(true);
+        if (!mounted || _index + 1 >= _stories.length) {
+          await controller.dispose();
+          return;
+        }
+        final stillNext = _stories[_index + 1].mediaUrl == mediaUrl;
+        if (!stillNext) {
+          await controller.dispose();
+          return;
+        }
+        _preloadedVideoControllers[mediaUrl] = controller;
+      } catch (_) {
+        await controller.dispose();
+      }
+    }());
+  }
+
+  VideoPlayerController? _takePreloadedVideoController(String mediaUrl) {
+    return _preloadedVideoControllers.remove(mediaUrl);
   }
 
   void _goTo(int nextIndex) {
@@ -3386,6 +3583,7 @@ class _StatusViewerDialogState extends State<_StatusViewerDialog> {
         mediaUrl: story.mediaUrl!,
         caption: caption,
         fit: boxFitForMedia(story.mediaFit),
+        initialController: _takePreloadedVideoController(story.mediaUrl!),
       );
     }
 
@@ -3596,11 +3794,13 @@ class _StatusVideoPlayer extends StatefulWidget {
     required this.mediaUrl,
     required this.caption,
     required this.fit,
+    this.initialController,
   });
 
   final String mediaUrl;
   final String? caption;
   final BoxFit fit;
+  final VideoPlayerController? initialController;
 
   @override
   State<_StatusVideoPlayer> createState() => _StatusVideoPlayerState();
@@ -3614,7 +3814,11 @@ class _StatusVideoPlayerState extends State<_StatusVideoPlayer> {
   @override
   void initState() {
     super.initState();
-    unawaited(_initialize());
+    if (widget.initialController != null) {
+      unawaited(_adoptController(widget.initialController!));
+    } else {
+      unawaited(_initialize());
+    }
   }
 
   @override
@@ -3659,6 +3863,30 @@ class _StatusVideoPlayerState extends State<_StatusVideoPlayer> {
         if (identical(_controller, controller)) {
           _controller = null;
         }
+        _error = error;
+        _isInitializing = false;
+      });
+    }
+  }
+
+  Future<void> _adoptController(VideoPlayerController controller) async {
+    _controller = controller;
+    try {
+      if (!controller.value.isInitialized) {
+        await controller.initialize();
+      }
+      await controller.setLooping(true);
+      await controller.play();
+      if (!mounted) return;
+      setState(() {
+        _isInitializing = false;
+        _error = null;
+      });
+    } catch (error) {
+      await controller.dispose();
+      if (!mounted) return;
+      setState(() {
+        _controller = null;
         _error = error;
         _isInitializing = false;
       });
@@ -3780,6 +4008,233 @@ class _StatusVideoPlaceholder extends StatelessWidget {
             label: const Text('Retry'),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _InlineCommunityVideoPlayer extends StatefulWidget {
+  const _InlineCommunityVideoPlayer({
+    required this.mediaUrl,
+    required this.fit,
+    this.autoPlay = false,
+    this.initialController,
+  });
+
+  final String mediaUrl;
+  final BoxFit fit;
+  final bool autoPlay;
+  final VideoPlayerController? initialController;
+
+  @override
+  State<_InlineCommunityVideoPlayer> createState() =>
+      _InlineCommunityVideoPlayerState();
+}
+
+class _InlineCommunityVideoPlayerState
+    extends State<_InlineCommunityVideoPlayer> {
+  VideoPlayerController? _controller;
+  Object? _error;
+  bool _isInitializing = true;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.initialController != null) {
+      _adoptController(widget.initialController!);
+    } else {
+      unawaited(_initialize());
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _InlineCommunityVideoPlayer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.mediaUrl != widget.mediaUrl) {
+      unawaited(_initialize());
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  Future<void> _adoptController(VideoPlayerController controller) async {
+    _controller = controller;
+    try {
+      if (!controller.value.isInitialized) {
+        await controller.initialize();
+      }
+      await controller.setLooping(true);
+      if (widget.autoPlay) await controller.play();
+      if (!mounted) return;
+      setState(() {
+        _isInitializing = false;
+        _error = null;
+      });
+    } catch (error) {
+      await controller.dispose();
+      if (!mounted) return;
+      setState(() {
+        _controller = null;
+        _error = error;
+        _isInitializing = false;
+      });
+    }
+  }
+
+  Future<void> _initialize() async {
+    setState(() {
+      _isInitializing = true;
+      _error = null;
+    });
+
+    final previous = _controller;
+    _controller = null;
+    await previous?.dispose();
+
+    final controller = VideoPlayerController.networkUrl(
+      Uri.parse(widget.mediaUrl),
+    );
+    _controller = controller;
+
+    try {
+      await controller.initialize();
+      await controller.setLooping(true);
+      if (widget.autoPlay) await controller.play();
+      if (!mounted) return;
+      setState(() => _isInitializing = false);
+    } catch (error) {
+      await controller.dispose();
+      if (!mounted) return;
+      setState(() {
+        if (identical(_controller, controller)) {
+          _controller = null;
+        }
+        _error = error;
+        _isInitializing = false;
+      });
+    }
+  }
+
+  Future<void> _togglePlayback() async {
+    final controller = _controller;
+    if (controller == null || !controller.value.isInitialized) return;
+
+    if (controller.value.isPlaying) {
+      await controller.pause();
+    } else {
+      await controller.play();
+    }
+    if (mounted) setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = _controller;
+    final isReady = controller != null && controller.value.isInitialized;
+
+    return ColoredBox(
+      color: Colors.black,
+      child: Stack(
+        fit: StackFit.expand,
+        alignment: Alignment.center,
+        children: [
+          if (isReady)
+            FittedBox(
+              fit: widget.fit,
+              child: SizedBox(
+                width: controller.value.size.width,
+                height: controller.value.size.height,
+                child: VideoPlayer(controller),
+              ),
+            )
+          else
+            _CommunityVideoPlaceholder(
+              error: _error,
+              isInitializing: _isInitializing,
+              onRetry: _initialize,
+            ),
+          if (isReady)
+            Center(
+              child: IconButton.filled(
+                tooltip:
+                    controller.value.isPlaying ? 'Pause video' : 'Play video',
+                style: IconButton.styleFrom(
+                  backgroundColor: Colors.white.withValues(alpha: 0.88),
+                  foregroundColor: Colors.black,
+                  fixedSize: const Size(56, 56),
+                ),
+                onPressed: _togglePlayback,
+                icon: Icon(
+                  controller.value.isPlaying ? Icons.pause : Icons.play_arrow,
+                  size: 32,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CommunityVideoPlaceholder extends StatelessWidget {
+  const _CommunityVideoPlaceholder({
+    required this.error,
+    required this.isInitializing,
+    required this.onRetry,
+  });
+
+  final Object? error;
+  final bool isInitializing;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    if (isInitializing) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.error_outline, color: Colors.white, size: 42),
+            const SizedBox(height: 10),
+            const Text(
+              'Video could not load. Check your internet connection or try again.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            if (error != null) ...[
+              const SizedBox(height: 6),
+              Text(
+                error.toString(),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white70, fontSize: 12),
+              ),
+            ],
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.white,
+                side: const BorderSide(color: Colors.white70),
+              ),
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Retry Video'),
+            ),
+          ],
+        ),
       ),
     );
   }

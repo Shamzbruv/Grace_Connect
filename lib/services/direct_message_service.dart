@@ -634,9 +634,31 @@ class DirectMessageService {
   ) {
     final cleanReplyContext = <String, dynamic>{};
     if (replyContext != null) {
-      cleanReplyContext.addAll(replyContext);
+      replyContext.forEach((key, value) {
+        cleanReplyContext[key] = _mutableJsonValue(value);
+      });
       cleanReplyContext.removeWhere((_, value) => value == null);
     }
     return cleanReplyContext;
+  }
+
+  static dynamic _mutableJsonValue(dynamic value) {
+    if (value is Map) {
+      return Map<String, dynamic>.fromEntries(
+        value.entries.map(
+          (entry) => MapEntry(
+            entry.key.toString(),
+            _mutableJsonValue(entry.value),
+          ),
+        ),
+      )..removeWhere((_, nestedValue) => nestedValue == null);
+    }
+    if (value is List) {
+      return value
+          .map(_mutableJsonValue)
+          .where((item) => item != null)
+          .toList();
+    }
+    return value;
   }
 }

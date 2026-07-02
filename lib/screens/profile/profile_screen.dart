@@ -11,6 +11,7 @@ import '../../models/family_relationship.dart';
 import '../../services/family_service.dart';
 import '../../services/profile_service.dart';
 import '../../utils/profile_photo_picker.dart';
+import '../../widgets/profile_photo_viewer.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -85,6 +86,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
       isScrollControlled: true,
       useSafeArea: true,
       builder: (_) => FamilyLinkSheet(currentUser: user),
+    );
+  }
+
+  Future<void> _openProfilePhotoPreview(UserProfile userProfile) {
+    return showProfilePhotoViewer(
+      context: context,
+      imageUrl: userProfile.photoUrl,
+      displayName: userProfile.fullName,
+      onChangePhoto: _isUploading ? null : _handlePhotoUpload,
     );
   }
 
@@ -205,7 +215,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     children: [
                       // Avatar
                       GestureDetector(
-                        onTap: _isUploading ? null : _handlePhotoUpload,
+                        onTap: _isUploading || userProfile.photoUrl.isEmpty
+                            ? null
+                            : () => _openProfilePhotoPreview(userProfile),
                         child: Stack(
                           children: [
                             Container(
@@ -241,19 +253,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               Positioned(
                                 bottom: 0,
                                 right: 0,
-                                child: Container(
-                                  padding: const EdgeInsets.all(8),
-                                  decoration: BoxDecoration(
-                                      color: theme.colorScheme.surface,
-                                      shape: BoxShape.circle,
-                                      boxShadow: [
-                                        BoxShadow(
-                                            color: theme.shadowColor
-                                                .withValues(alpha: 0.1),
-                                            blurRadius: 4)
-                                      ]),
-                                  child: Icon(Icons.camera_alt,
-                                      size: 16, color: colorScheme.primary),
+                                child: GestureDetector(
+                                  onTap: _handlePhotoUpload,
+                                  child: Container(
+                                    padding: const EdgeInsets.all(8),
+                                    decoration: BoxDecoration(
+                                        color: theme.colorScheme.surface,
+                                        shape: BoxShape.circle,
+                                        boxShadow: [
+                                          BoxShadow(
+                                              color: theme.shadowColor
+                                                  .withValues(alpha: 0.1),
+                                              blurRadius: 4)
+                                        ]),
+                                    child: Icon(Icons.camera_alt,
+                                        size: 16, color: colorScheme.primary),
+                                  ),
                                 ),
                               ),
                           ],

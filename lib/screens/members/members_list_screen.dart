@@ -13,6 +13,7 @@ import '../../services/attendance_analysis_service.dart';
 import '../../services/direct_message_service.dart';
 import '../../services/bible_nudge_service.dart';
 import '../../services/family_service.dart';
+import '../../widgets/profile_photo_viewer.dart';
 import '../../widgets/ui/app_feedback.dart';
 import '../messages/message_thread_screen.dart';
 
@@ -358,17 +359,26 @@ class _MembersListScreenState extends State<MembersListScreen> {
                 padding: const EdgeInsets.fromLTRB(24, 20, 24, 8),
                 child: Column(
                   children: [
-                    CircleAvatar(
-                      radius: 50,
-                      backgroundImage: memberProfile.photoUrl.isNotEmpty
-                          ? NetworkImage(memberProfile.photoUrl)
-                          : null,
-                      child: memberProfile.photoUrl.isEmpty
-                          ? Text(
-                              displayName[0].toUpperCase(),
-                              style: const TextStyle(fontSize: 30),
-                            )
-                          : null,
+                    GestureDetector(
+                      onTap: memberProfile.photoUrl.isEmpty
+                          ? null
+                          : () => showProfilePhotoViewer(
+                                context: context,
+                                imageUrl: memberProfile.photoUrl,
+                                displayName: displayName,
+                              ),
+                      child: CircleAvatar(
+                        radius: 50,
+                        backgroundImage: memberProfile.photoUrl.isNotEmpty
+                            ? NetworkImage(memberProfile.photoUrl)
+                            : null,
+                        child: memberProfile.photoUrl.isEmpty
+                            ? Text(
+                                displayName[0].toUpperCase(),
+                                style: const TextStyle(fontSize: 30),
+                              )
+                            : null,
+                      ),
                     ),
                     const SizedBox(height: 16),
                     Text(

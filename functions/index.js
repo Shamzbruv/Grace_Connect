@@ -74,6 +74,7 @@ const PUBLIC_BROADCAST_TYPES = new Set([
   "announcement",
   "live_stream",
   "general",
+  "testimony",
 ]);
 
 function hasAnyPrivilege(profile, allowedPrivileges) {
@@ -82,6 +83,10 @@ function hasAnyPrivilege(profile, allowedPrivileges) {
 }
 
 function canSendChurchWidePush(profile, type) {
+  if (type === "testimony") {
+    return Boolean(profile.placeId);
+  }
+
   const allowedRoles = new Set([
     "pastor",
     "senior_pastor",
@@ -126,6 +131,7 @@ function notificationSoundProfile(type) {
     quiz: { channelId: "grace_daily_quiz_channel_v1", sound: "grace_quiz.wav" },
     monthly_quiz_winners: { channelId: "grace_daily_quiz_channel_v1", sound: "grace_quiz.wav" },
     live_stream: { channelId: "grace_live_channel_v1", sound: "grace_live.wav" },
+    testimony: { channelId: "grace_default_channel_v1", sound: "grace_default.wav" },
   };
   return profiles[normalized] || profiles.general;
 }

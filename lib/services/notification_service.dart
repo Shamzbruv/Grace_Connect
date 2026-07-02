@@ -61,6 +61,7 @@ class NotificationService {
     'announcement',
     'live_stream',
     'general',
+    'testimony',
   };
 
   static const _defaultSound = _NotificationSoundProfile(
@@ -138,6 +139,7 @@ class NotificationService {
       description: 'Live service notifications',
       soundName: 'grace_live',
     ),
+    'testimony': _defaultSound,
   };
 
   // Default topics and their pref keys

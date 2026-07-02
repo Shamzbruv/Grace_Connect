@@ -1,5 +1,3 @@
-
-
 class CounselingRequest {
   final String id;
   final String userId;
@@ -30,6 +28,7 @@ class CounselingRequest {
 
   Map<String, dynamic> toMap() {
     return {
+      if (id.trim().isNotEmpty) 'id': id,
       'userId': userId,
       'churchId': churchId,
       'category': category,
@@ -53,8 +52,12 @@ class CounselingRequest {
       preferredContactMethod: data['preferredContactMethod'] ?? 'Email',
       description: data['description'] ?? '',
       status: data['status'] ?? 'pending',
-      createdAt: data['createdAt'] != null ? DateTime.parse(data['createdAt']) : DateTime.now(),
-      scheduledAt: data['scheduledAt'] != null ? DateTime.parse(data['scheduledAt']) : null,
+      createdAt: data['createdAt'] != null
+          ? DateTime.parse(data['createdAt'])
+          : DateTime.now(),
+      scheduledAt: data['scheduledAt'] != null
+          ? DateTime.parse(data['scheduledAt'])
+          : null,
       assignedToHelperId: data['assignedToHelperId'],
     );
   }

@@ -13,6 +13,7 @@ class EmailService {
     defaultValue: '',
   );
   static const String _apiUrl = 'https://api.resend.com/emails';
+  static const String _brandingMarker = 'data-grace-email="true"';
 
   /// Core method to send an email via Resend API
   Future<void> sendEmail({
@@ -28,6 +29,10 @@ class EmailService {
         );
       }
 
+      final emailHtml = htmlBody.contains(_brandingMarker)
+          ? htmlBody
+          : _brandHtmlBody(title: subject, htmlBody: htmlBody);
+
       final response = await http.post(
         Uri.parse(_apiUrl),
         headers: {
@@ -38,7 +43,7 @@ class EmailService {
           'from': from ?? _fromEmail,
           'to': to,
           'subject': subject,
-          'html': htmlBody,
+          'html': emailHtml,
         }),
       );
 
@@ -73,6 +78,45 @@ class EmailService {
   }
 
   String _escape(String value) => const HtmlEscape().convert(value);
+
+  String _brandHtmlBody({
+    required String title,
+    required String htmlBody,
+  }) {
+    final safeTitle = _escape(title.trim().isEmpty ? 'Grace Connect' : title);
+    return '''
+      <!doctype html>
+      <html>
+        <body style="margin:0;padding:0;background:#eef5f8;font-family:Arial,Helvetica,sans-serif;color:#162033;">
+          <div $_brandingMarker style="display:none;max-height:0;overflow:hidden;opacity:0;">Grace Connect</div>
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#eef5f8;padding:32px 12px;">
+            <tr>
+              <td align="center">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:640px;background:#ffffff;border-radius:20px;overflow:hidden;border:1px solid #d8e5ea;box-shadow:0 14px 36px rgba(13,40,54,0.12);">
+                  <tr>
+                    <td style="background:#0b5c7d;padding:28px 32px;color:#ffffff;">
+                      <div style="font-size:13px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#bfe7f7;">Grace Connect</div>
+                      <h1 style="margin:8px 0 0;font-size:28px;line-height:1.2;font-weight:800;">$safeTitle</h1>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding:30px 32px;font-size:16px;line-height:1.6;color:#162033;">
+                      $htmlBody
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding:20px 32px;background:#f7fafb;color:#66788a;font-size:13px;line-height:1.5;">
+                      You are receiving this from Grace Connect because of activity in your church community.
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+          </table>
+        </body>
+      </html>
+    ''';
+  }
 
   /// Sends a report from the Help/Support screen
   Future<void> sendSupportReportEmail({
