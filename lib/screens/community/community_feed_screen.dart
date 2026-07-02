@@ -4018,13 +4018,11 @@ class _InlineCommunityVideoPlayer extends StatefulWidget {
     required this.mediaUrl,
     required this.fit,
     this.autoPlay = false,
-    this.initialController,
   });
 
   final String mediaUrl;
   final BoxFit fit;
   final bool autoPlay;
-  final VideoPlayerController? initialController;
 
   @override
   State<_InlineCommunityVideoPlayer> createState() =>
@@ -4040,11 +4038,7 @@ class _InlineCommunityVideoPlayerState
   @override
   void initState() {
     super.initState();
-    if (widget.initialController != null) {
-      _adoptController(widget.initialController!);
-    } else {
-      unawaited(_initialize());
-    }
+    unawaited(_initialize());
   }
 
   @override
@@ -4059,30 +4053,6 @@ class _InlineCommunityVideoPlayerState
   void dispose() {
     _controller?.dispose();
     super.dispose();
-  }
-
-  Future<void> _adoptController(VideoPlayerController controller) async {
-    _controller = controller;
-    try {
-      if (!controller.value.isInitialized) {
-        await controller.initialize();
-      }
-      await controller.setLooping(true);
-      if (widget.autoPlay) await controller.play();
-      if (!mounted) return;
-      setState(() {
-        _isInitializing = false;
-        _error = null;
-      });
-    } catch (error) {
-      await controller.dispose();
-      if (!mounted) return;
-      setState(() {
-        _controller = null;
-        _error = error;
-        _isInitializing = false;
-      });
-    }
   }
 
   Future<void> _initialize() async {
