@@ -293,7 +293,7 @@ void main() {
       ).readAsStringSync();
 
       expect(gradle, contains('"love.graceconnect"'));
-      expect(gradle, contains('versionCode 19'));
+      expect(gradle, contains('versionCode 20'));
       expect(gradle, contains('versionName "1.0.18-beta"'));
       expect(activity, contains('package love.graceconnect'));
       expect(manifest, contains('love.graceconnect.MainActivity'));
