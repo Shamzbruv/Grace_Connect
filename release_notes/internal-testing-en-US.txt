@@ -19,5 +19,5 @@ Grace Connect 1.0.18-beta geofence and stability update:
 - Improves feed/status video uploads, larger community media limits, inline playback, and story video preloading.
 - Sends branded password reset emails and wraps app emails in Grace Connect styling.
 - Adds localhost auth callback support for http://localhost:3000.
-- Bumps the Play version code to 19.
+- Bumps the Play version code to 20.
 </en-US>
