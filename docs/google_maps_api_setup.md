@@ -4,10 +4,11 @@ Firebase/Google Cloud project: `graceconnect-9a97c`
 
 ## Current Cloud state
 
-Updated on 2026-06-19:
+Updated on 2026-07-03:
 
-- Enabled API Keys API, Maps SDK for Android, Maps SDK for iOS, Maps JavaScript API, and Places API.
-- Created `GraceConnect Android Maps SDK` for local debug builds. Production release keys must be restricted to package `love.graceconnect` and the release/Play App Signing SHA-1.
+- Enabled API Keys API, Maps SDK for Android, Maps SDK for iOS, Maps JavaScript API, Places API, and Geocoding API.
+- `GraceConnect Android Maps SDK` is restricted to Android apps and Maps SDK for Android only.
+- The Android Maps key currently allows package `love.graceconnect` with the debug SHA-1, upload/release SHA-1, and Firebase-recorded Play App Signing SHA-1.
 - Created `GraceConnect iOS Maps SDK`, restricted to bundle ID `com.example.graceconnect` and Maps SDK for iOS only.
 - Added the new native key strings to ignored local config files: `android/local.properties` and `ios/Flutter/MapsKeys.xcconfig`.
 
@@ -45,7 +46,7 @@ Android Maps key:
 
 - Application restriction: Android apps
 - Debug/release package name: `love.graceconnect`
-- SHA-1 certificate: add the debug SHA-1 for local builds and the release/Play App Signing SHA-1 for production
+- SHA-1 certificate: add the debug SHA-1 for local builds, the upload/release SHA-1 for locally installed release builds, and the Play App Signing SHA-1 for Play-distributed builds
 - API restriction: Maps SDK for Android
 - Local/release config: add `GOOGLE_MAPS_API_KEY_ANDROID=...` to ignored `android/local.properties`, pass it as a Gradle property, or export it as an environment variable
 - Gradle manifest placeholder: `googleMapsApiKey`
