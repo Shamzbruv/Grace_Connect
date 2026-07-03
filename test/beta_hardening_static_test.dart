@@ -282,6 +282,27 @@ void main() {
           contains('Bible Nudge is only for people outside your church'));
     });
 
+    test('member approval honors explicit approveMembers privilege', () {
+      final privilegeGateMigration = File(
+        'supabase/migrations/20260702170000_member_approval_privilege_gate.sql',
+      ).readAsStringSync();
+      final membershipReviewSource =
+          File('lib/screens/admin/membership_requests_screen.dart')
+              .readAsStringSync();
+
+      expect(
+          privilegeGateMigration, contains('public.can_manage_church_members'));
+      expect(privilegeGateMigration, contains('"appPrivileges"'));
+      expect(privilegeGateMigration, contains("'approveMembers'"));
+      expect(privilegeGateMigration, contains("'manageChurchSettings'"));
+      expect(privilegeGateMigration, contains('cm.membership_status ='));
+      expect(privilegeGateMigration, contains("c.church_status = 'approved'"));
+      expect(membershipReviewSource,
+          contains("approve ? 'approve_church_membership'"));
+      expect(membershipReviewSource,
+          contains("params: {'p_church_id': churchId}"));
+    });
+
     test('android release identity and permissions are beta-safe', () {
       final manifest =
           File('android/app/src/main/AndroidManifest.xml').readAsStringSync();

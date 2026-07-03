@@ -82,25 +82,44 @@ class _MembershipRequestsScreenState extends State<MembershipRequestsScreen> {
     final currentUser = context.read<UserRoleProvider>().userProfile;
     final rpc =
         approve ? 'approve_church_membership' : 'decline_church_membership';
-    await Supabase.instance.client.rpc(
-      rpc,
-      params: {
-        'membership_id': membershipId,
-        'decision_note': reason,
-      },
-    );
-    if (currentUser != null) {
-      await NotificationService().markEntityAsRead(
-        userId: currentUser.uid,
-        entityTable: 'church_memberships',
-        entityId: membershipId,
+    try {
+      await Supabase.instance.client.rpc(
+        rpc,
+        params: {
+          'membership_id': membershipId,
+          'decision_note': reason,
+        },
+      );
+      if (currentUser != null) {
+        await NotificationService().markEntityAsRead(
+          userId: currentUser.uid,
+          entityTable: 'church_memberships',
+          entityId: membershipId,
+        );
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _requestsFuture = _fetchRequests();
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(approve
+              ? 'Membership request approved.'
+              : 'Membership request declined.'),
+        ),
+      );
+    } on PostgrestException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not update request: ${error.message}')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not update request: $error')),
       );
     }
-
-    if (!mounted) return;
-    setState(() {
-      _requestsFuture = _fetchRequests();
-    });
   }
 
   Future<String?> _decisionReason({required bool approve}) {
