@@ -53,8 +53,14 @@ class NotificationService {
     'https://us-central1-graceconnect-9a97c.cloudfunctions.net/sendTopicNotification',
   );
   static const String churchWidePrefKey = 'notify_church_wide';
+  static const String appWideTopic = 'graceconnect_all';
   static const Duration unansweredReminderInterval = Duration(hours: 3);
   static const Duration _unansweredReminderPollInterval = Duration(minutes: 15);
+
+  static String userTopicFor(String userId) {
+    final cleanUserId = userId.trim();
+    return 'user_$cleanUserId';
+  }
 
   @visibleForTesting
   static const Set<String> publicBroadcastTypes = {
@@ -160,6 +166,7 @@ class NotificationService {
     } catch (_) {
       await Firebase.initializeApp();
     }
+    await _messaging.setAutoInitEnabled(true);
 
     const AndroidInitializationSettings androidInit =
         AndroidInitializationSettings('ic_stat_grace_connect');
@@ -381,6 +388,7 @@ class NotificationService {
 
     await syncSubscriptions(
       churchId,
+      userId: userId,
       roles: roles,
       privileges: privileges,
     );
@@ -477,6 +485,49 @@ class NotificationService {
       return;
     }
 
+    await _sendTopicNotification(
+      title,
+      body,
+      topic,
+      route: route,
+      type: normalizedType,
+    );
+  }
+
+  Future<void> sendDirectMessagePush({
+    required String recipientUserId,
+    required String senderName,
+    required String conversationId,
+    required String messageId,
+    required String preview,
+  }) async {
+    final cleanRecipientId = recipientUserId.trim();
+    if (kIsWeb || cleanRecipientId.isEmpty) return;
+
+    await _sendTopicNotification(
+      senderName.trim().isEmpty ? 'New message' : senderName.trim(),
+      preview.trim().isEmpty ? 'Sent you a message.' : preview.trim(),
+      userTopicFor(cleanRecipientId),
+      route: '/inbox',
+      type: 'direct_message',
+      extraData: {
+        'recipientUserId': cleanRecipientId,
+        'conversationId': conversationId,
+        'entityTable': 'direct_messages',
+        'entityId': messageId,
+      },
+    );
+  }
+
+  Future<void> _sendTopicNotification(
+    String title,
+    String body,
+    String topic, {
+    String? route,
+    required String type,
+    Map<String, String> extraData = const {},
+  }) async {
+    final normalizedType = normalizeNotificationType(type);
     final accessToken = _supabase.auth.currentSession?.accessToken;
     if (accessToken == null || accessToken.isEmpty) {
       debugPrint('Topic notification skipped: missing Supabase session.');
@@ -496,6 +547,7 @@ class NotificationService {
           'topic': topic,
           'route': route,
           'type': normalizedType,
+          'data': extraData,
         }),
       );
 
@@ -732,26 +784,40 @@ class NotificationService {
     }
   }
 
+  Future<void> unsubscribeAlwaysOnTopics({String? userId}) async {
+    if (kIsWeb) return;
+    await unsubscribeFromTopic(appWideTopic);
+    final cleanUserId = userId?.trim() ?? '';
+    if (cleanUserId.isNotEmpty) {
+      await unsubscribeFromTopic(userTopicFor(cleanUserId));
+    }
+  }
+
   /// Syncs user subscriptions based on SharedPreferences and Church ID
   Future<void> syncSubscriptions(
     String churchId, {
+    String? userId,
     Iterable<String> roles = const [],
     Iterable<String> privileges = const [],
   }) async {
-    if (kIsWeb || churchId.trim().isEmpty) return;
+    if (kIsWeb) return;
 
     final prefs = await SharedPreferences.getInstance();
     final canUsePush = await hasPushPermission();
+    await _syncAlwaysOnTopics(canUsePush: canUsePush, userId: userId);
+
+    final cleanChurchId = churchId.trim();
+    if (cleanChurchId.isEmpty) return;
 
     final shouldReceiveChurchWide =
         canUsePush && (prefs.getBool(churchWidePrefKey) ?? false);
     if (shouldReceiveChurchWide) {
-      await subscribeToTopic('church_$churchId');
+      await subscribeToTopic('church_$cleanChurchId');
     } else {
-      await unsubscribeFromTopic('church_$churchId');
+      await unsubscribeFromTopic('church_$cleanChurchId');
     }
 
-    final leaderTopic = 'church_${churchId}_leaders';
+    final leaderTopic = 'church_${cleanChurchId}_leaders';
     if (canUsePush &&
         canReceiveLeaderMembershipPush(
           roles: roles,
@@ -769,13 +835,33 @@ class NotificationService {
 
       bool shouldSubscribe = canUsePush && (prefs.getBool(prefKey) ?? false);
 
-      String fullTopic = 'church_${churchId}_$topicSuffix';
+      String fullTopic = 'church_${cleanChurchId}_$topicSuffix';
 
       if (shouldSubscribe) {
         await subscribeToTopic(fullTopic);
       } else {
         await unsubscribeFromTopic(fullTopic);
       }
+    }
+  }
+
+  Future<void> _syncAlwaysOnTopics({
+    required bool canUsePush,
+    String? userId,
+  }) async {
+    final cleanUserId = userId?.trim() ?? '';
+
+    if (canUsePush) {
+      await subscribeToTopic(appWideTopic);
+      if (cleanUserId.isNotEmpty) {
+        await subscribeToTopic(userTopicFor(cleanUserId));
+      }
+      return;
+    }
+
+    await unsubscribeFromTopic(appWideTopic);
+    if (cleanUserId.isNotEmpty) {
+      await unsubscribeFromTopic(userTopicFor(cleanUserId));
     }
   }
 

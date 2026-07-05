@@ -300,9 +300,36 @@ class _ConversationTile extends StatelessWidget {
                       const SizedBox(width: 8),
                       timestamp == null
                           ? const Icon(Icons.chevron_right)
-                          : Text(
-                              DateFormat.MMMd().format(timestamp),
-                              style: Theme.of(context).textTheme.bodySmall,
+                          : ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 88),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.end,
+                                children: [
+                                  Text(
+                                    DateFormat('MMM d, yyyy')
+                                        .format(timestamp.toLocal()),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    textAlign: TextAlign.right,
+                                    style:
+                                        Theme.of(context).textTheme.bodySmall,
+                                  ),
+                                  Text(
+                                    DateFormat('h:mm a')
+                                        .format(timestamp.toLocal()),
+                                    maxLines: 1,
+                                    textAlign: TextAlign.right,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .labelSmall
+                                        ?.copyWith(
+                                          color: theme
+                                              .colorScheme.onSurfaceVariant,
+                                        ),
+                                  ),
+                                ],
+                              ),
                             ),
                       PopupMenuButton<String>(
                         tooltip: 'Chat options',

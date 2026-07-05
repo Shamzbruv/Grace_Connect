@@ -1,9 +1,15 @@
 <en-US>
-Grace Connect 1.0.18-beta geofence and stability update:
+Grace Connect 1.0.19-beta messaging, media, livestream, and maps stability update:
+- Adds full inbox/message dates so conversations show when messages were sent.
+- Opens post photos and videos in a larger viewer from the post detail screen.
+- Strengthens background push delivery with app-wide and per-user FCM topics for live alerts and direct messages.
+- Sends Go Live alerts to the app-wide Grace Connect audience.
+- Adds live stream viewer counts for members and stream admins.
 - Blocks Android release builds when the final package ID or Android Maps key is missing.
 - Improves Church Geofence setup with real map error messaging, Retry Map, and manual coordinate/radius saving.
 - Keeps church admins able to save valid latitude, longitude, and radius even when map tiles cannot load.
 - Updates Grace Connect notification artwork in the Android notification shade.
+- Keeps member approval privilege fixes and Google Maps package/SHA checks in the release.
 - Fixes the direct-message/status-reply immutable map crash.
 - Allows same-church members to start messages even when cross-church messaging is restricted.
 - Lets pastors/admins view member profile details needed for care follow-up.
@@ -19,5 +25,5 @@ Grace Connect 1.0.18-beta geofence and stability update:
 - Improves feed/status video uploads, larger community media limits, inline playback, and story video preloading.
 - Sends branded password reset emails and wraps app emails in Grace Connect styling.
 - Adds localhost auth callback support for http://localhost:3000.
-- Bumps the Play version code to 20.
+- Bumps the Play version code to 21.
 </en-US>

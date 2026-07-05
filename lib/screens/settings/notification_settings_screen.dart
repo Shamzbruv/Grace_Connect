@@ -97,6 +97,7 @@ class _NotificationSettingsScreenState
       if (profile?.churchId != null) {
         await NotificationService().syncSubscriptions(
           profile!.churchId,
+          userId: profile.uid,
           roles: profile.roles,
           privileges: profile.appPrivileges,
         );

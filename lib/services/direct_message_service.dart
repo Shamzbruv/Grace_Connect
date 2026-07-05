@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
@@ -5,6 +7,7 @@ import 'package:uuid/uuid.dart';
 import '../models/direct_conversation.dart';
 import '../models/direct_message.dart';
 import '../models/user_profile.dart';
+import 'notification_service.dart';
 import 'user_service.dart';
 
 class DirectMessageService {
@@ -325,6 +328,7 @@ class DirectMessageService {
     String mediaType = 'text',
     int? durationSeconds,
     Map<String, dynamic>? replyContext,
+    String? recipientUserId,
   }) async {
     final uid = _currentUid;
     final cleanText = text.trim();
@@ -384,6 +388,19 @@ class DirectMessageService {
         'last_sender_id': uid,
         'last_message_at': now.toIso8601String(),
       }).eq('id', conversationId);
+    }
+
+    final cleanRecipientUserId = recipientUserId?.trim() ?? '';
+    if (cleanRecipientUserId.isNotEmpty && cleanRecipientUserId != uid) {
+      unawaited(
+        NotificationService().sendDirectMessagePush(
+          recipientUserId: cleanRecipientUserId,
+          senderName: _currentSenderDisplayName(),
+          conversationId: conversationId,
+          messageId: payload['id'].toString(),
+          preview: preview,
+        ),
+      );
     }
   }
 
@@ -575,6 +592,18 @@ class DirectMessageService {
       message.mediaType,
       replyContext: message.replyContext,
     );
+  }
+
+  String _currentSenderDisplayName() {
+    final user = _supabase.auth.currentUser;
+    final metadata = user?.userMetadata ?? const <String, dynamic>{};
+    for (final key in const ['full_name', 'fullName', 'name', 'display_name']) {
+      final value = metadata[key]?.toString().trim();
+      if (value != null && value.isNotEmpty) return value;
+    }
+    final email = user?.email?.trim();
+    if (email != null && email.isNotEmpty) return email;
+    return 'New message';
   }
 
   Future<void> _refreshConversationPreview(String conversationId) async {

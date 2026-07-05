@@ -42,8 +42,12 @@ class UserRoleProvider with ChangeNotifier {
         if (user != null) {
           fetchUserProfile();
         } else {
+          final previousProfile = _userProfile;
           _stopProfileSubscription();
           NotificationService().stopForegroundNotifications();
+          unawaited(NotificationService().unsubscribeAlwaysOnTopics(
+            userId: previousProfile?.uid,
+          ));
           _userProfile = null;
           _isLoading = false;
           notifyListeners();

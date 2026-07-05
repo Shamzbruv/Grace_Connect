@@ -276,4 +276,64 @@ class ChurchService {
       'isLive': isLive,
     }).eq('id', churchId);
   }
+
+  Future<void> recordLiveViewerHeartbeat(String churchId) async {
+    final cleanChurchId = churchId.trim();
+    final userId = _supabase.auth.currentUser?.id.trim() ?? '';
+    if (cleanChurchId.isEmpty || userId.isEmpty) return;
+
+    final now = DateTime.now().toUtc().toIso8601String();
+    await _supabase.from('live_stream_viewers').upsert(
+      {
+        'church_id': cleanChurchId,
+        'user_id': userId,
+        'last_seen_at': now,
+        'is_active': true,
+        'updated_at': now,
+      },
+      onConflict: 'church_id,user_id',
+    );
+  }
+
+  Future<void> clearLiveViewerHeartbeat(String churchId) async {
+    final cleanChurchId = churchId.trim();
+    final userId = _supabase.auth.currentUser?.id.trim() ?? '';
+    if (cleanChurchId.isEmpty || userId.isEmpty) return;
+
+    try {
+      await _supabase
+          .from('live_stream_viewers')
+          .update({
+            'is_active': false,
+            'updated_at': DateTime.now().toUtc().toIso8601String(),
+          })
+          .eq('church_id', cleanChurchId)
+          .eq('user_id', userId);
+    } catch (error) {
+      debugPrint('Could not clear live viewer heartbeat: $error');
+    }
+  }
+
+  Future<int> fetchLiveViewerCount(String churchId) async {
+    final cleanChurchId = churchId.trim();
+    if (cleanChurchId.isEmpty) return 0;
+
+    try {
+      final activeSince = DateTime.now()
+          .toUtc()
+          .subtract(const Duration(seconds: 90))
+          .toIso8601String();
+      final response = await _supabase
+          .from('live_stream_viewers')
+          .select('user_id')
+          .eq('church_id', cleanChurchId)
+          .eq('is_active', true)
+          .gte('last_seen_at', activeSince)
+          .count(CountOption.exact);
+      return response.count;
+    } catch (error) {
+      debugPrint('Could not fetch live viewer count: $error');
+      return 0;
+    }
+  }
 }

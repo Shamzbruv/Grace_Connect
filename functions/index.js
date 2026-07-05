@@ -70,6 +70,10 @@ function normalizeNotificationType(type) {
     .replace(/[^a-z0-9_]+/g, "_");
 }
 
+const SUPABASE_URL = "https://nimgsgnkcvddomrgkawb.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_-lsEclVqaNPAlO4h7z3vtw_Q8xZY3cN";
+const APP_WIDE_TOPIC = "graceconnect_all";
+
 const PUBLIC_BROADCAST_TYPES = new Set([
   "announcement",
   "live_stream",
@@ -136,11 +140,67 @@ function notificationSoundProfile(type) {
   return profiles[normalized] || profiles.general;
 }
 
+function userTopicFor(userId) {
+  return `user_${String(userId || "").trim()}`;
+}
+
+function defaultRouteForType(type) {
+  if (type === "direct_message") return "/inbox";
+  if (type === "live_stream") return "/live_streaming";
+  return "/announcements";
+}
+
+function stringMap(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([, entryValue]) => entryValue !== undefined && entryValue !== null)
+      .map(([key, entryValue]) => [String(key), String(entryValue)]),
+  );
+}
+
+function normalizeStringArray(value) {
+  if (Array.isArray(value)) return value.map((entry) => String(entry));
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) return parsed.map((entry) => String(entry));
+    } catch (_) {
+      return value.split(",").map((entry) => entry.trim());
+    }
+  }
+  return [];
+}
+
+async function canSendDirectMessagePush(supabaseToken, senderUid, payload) {
+  const recipientUserId = String(payload.recipientUserId || "").trim();
+  const conversationId = String(payload.conversationId || "").trim();
+  if (!recipientUserId || !conversationId || recipientUserId === senderUid) return false;
+
+  const conversationResponse = await fetch(
+    `${SUPABASE_URL}/rest/v1/direct_conversations?id=eq.${encodeURIComponent(conversationId)}&select=id,member_ids`,
+    {
+      method: "GET",
+      headers: {
+        "apikey": SUPABASE_ANON_KEY,
+        "Authorization": `Bearer ${supabaseToken}`,
+        "Accept": "application/json",
+      },
+    },
+  );
+
+  if (!conversationResponse.ok) return false;
+  const conversations = await conversationResponse.json();
+  const conversation = conversations && conversations[0];
+  const memberIds = normalizeStringArray(conversation?.member_ids);
+  return memberIds.includes(senderUid) && memberIds.includes(recipientUserId);
+}
+
 async function getSupabaseUserProfile(supabaseToken) {
-  const userResponse = await fetch("https://nimgsgnkcvddomrgkawb.supabase.co/auth/v1/user", {
+  const userResponse = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
     method: "GET",
     headers: {
-      "apikey": "sb_publishable_-lsEclVqaNPAlO4h7z3vtw_Q8xZY3cN",
+      "apikey": SUPABASE_ANON_KEY,
       "Authorization": `Bearer ${supabaseToken}`,
     },
   });
@@ -156,11 +216,11 @@ async function getSupabaseUserProfile(supabaseToken) {
   }
 
   const profileResponse = await fetch(
-    `https://nimgsgnkcvddomrgkawb.supabase.co/rest/v1/users?uid=eq.${uid}`,
+    `${SUPABASE_URL}/rest/v1/users?uid=eq.${uid}`,
     {
       method: "GET",
       headers: {
-        "apikey": "sb_publishable_-lsEclVqaNPAlO4h7z3vtw_Q8xZY3cN",
+        "apikey": SUPABASE_ANON_KEY,
         "Authorization": `Bearer ${supabaseToken}`,
         "Accept": "application/json",
       },
@@ -199,35 +259,54 @@ exports.sendTopicNotification = onRequest({ cors: true }, async (request, respon
       return;
     }
 
-    const { profile } = await getSupabaseUserProfile(supabaseToken);
-    const { title, body, topic, route, type } = request.body || {};
+    const { uid, profile } = await getSupabaseUserProfile(supabaseToken);
+    const { title, body, topic, route, type, data } = request.body || {};
     const normalizedType = normalizeNotificationType(type);
     const churchTopic = `church_${profile.placeId || ""}`;
+    const extraData = stringMap(data);
+    const cleanTopic = String(topic || "").trim();
+    const isAppWideLiveTopic =
+      normalizedType === "live_stream" && cleanTopic === APP_WIDE_TOPIC;
+    const isChurchTopic = cleanTopic === churchTopic;
+    const isDirectMessageTopic =
+      normalizedType === "direct_message" &&
+      cleanTopic === userTopicFor(extraData.recipientUserId);
 
-    if (!title || !body || !topic || topic !== churchTopic) {
+    if (!title || !body || !cleanTopic) {
       response.status(400).json({ error: "Invalid notification payload." });
       return;
     }
 
-    if (!PUBLIC_BROADCAST_TYPES.has(normalizedType)) {
+    if (normalizedType === "direct_message") {
+      if (!isDirectMessageTopic ||
+          !(await canSendDirectMessagePush(supabaseToken, uid, extraData))) {
+        response.status(403).json({ error: "User cannot send this direct message push." });
+        return;
+      }
+    } else if (!PUBLIC_BROADCAST_TYPES.has(normalizedType)) {
       response.status(400).json({ error: "Only public church-wide broadcasts can use topic push." });
       return;
-    }
-
-    if (!canSendChurchWidePush(profile, normalizedType)) {
+    } else if (!isChurchTopic && !isAppWideLiveTopic) {
+      response.status(400).json({ error: "Notification topic is not allowed for this broadcast." });
+      return;
+    } else if (!canSendChurchWidePush(profile, normalizedType)) {
       response.status(403).json({ error: "User cannot send church-wide push notifications." });
       return;
     }
 
     const soundProfile = notificationSoundProfile(normalizedType);
+    const cleanTitle = String(title).slice(0, 120);
+    const cleanBody = String(body).slice(0, 220);
+    const cleanRoute = String(route || defaultRouteForType(normalizedType));
     const messageId = await admin.messaging().send({
-      topic,
+      topic: cleanTopic,
       notification: {
-        title: String(title).slice(0, 120),
-        body: String(body).slice(0, 220),
+        title: cleanTitle,
+        body: cleanBody,
       },
       android: {
         priority: "high",
+        ttl: 24 * 60 * 60 * 1000,
         notification: {
           channelId: soundProfile.channelId,
           color: "#0B5C7D",
@@ -236,6 +315,9 @@ exports.sendTopicNotification = onRequest({ cors: true }, async (request, respon
         },
       },
       apns: {
+        headers: {
+          "apns-priority": "10",
+        },
         payload: {
           aps: {
             sound: soundProfile.sound,
@@ -243,8 +325,11 @@ exports.sendTopicNotification = onRequest({ cors: true }, async (request, respon
         },
       },
       data: {
+        ...extraData,
         type: normalizedType,
-        route: String(route || "/announcements"),
+        route: cleanRoute,
+        title: cleanTitle,
+        body: cleanBody,
         click_action: "FLUTTER_NOTIFICATION_CLICK",
       },
     });

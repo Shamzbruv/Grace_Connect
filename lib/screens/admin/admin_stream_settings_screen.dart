@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -21,11 +23,14 @@ class AdminStreamSettingsScreen extends StatefulWidget {
 class _AdminStreamSettingsScreenState extends State<AdminStreamSettingsScreen> {
   final _urlController = TextEditingController();
   final _formKey = GlobalKey<FormState>(); // Added form key
+  final ChurchService _churchService = ChurchService();
   bool _isLive = false;
   bool _isLoading = true;
   Church? _church;
   YoutubePlayerController? _previewController; // Added for preview
   bool _showPreview = false;
+  Timer? _viewerCountTimer;
+  int _activeViewerCount = 0;
 
   @override
   void initState() {
@@ -35,6 +40,7 @@ class _AdminStreamSettingsScreenState extends State<AdminStreamSettingsScreen> {
 
   @override
   void dispose() {
+    _viewerCountTimer?.cancel();
     _urlController.dispose(); // Always dispose controllers
     _previewController?.dispose();
     super.dispose();
@@ -45,7 +51,7 @@ class _AdminStreamSettingsScreenState extends State<AdminStreamSettingsScreen> {
         .userProfile
         ?.churchId;
     if (churchId != null) {
-      final church = await ChurchService().getChurch(churchId);
+      final church = await _churchService.getChurch(churchId);
       if (mounted && church != null) {
         setState(() {
           _church = church;
@@ -57,6 +63,11 @@ class _AdminStreamSettingsScreenState extends State<AdminStreamSettingsScreen> {
             _testLink(quiet: true);
           }
         });
+        if (church.isLive) {
+          _startViewerCountPolling();
+        } else {
+          _stopViewerCountPolling();
+        }
       }
     } else {
       if (mounted) {
@@ -138,7 +149,7 @@ class _AdminStreamSettingsScreenState extends State<AdminStreamSettingsScreen> {
 
     setState(() => _isLoading = true);
     try {
-      await ChurchService().updateStreamSettings(
+      await _churchService.updateStreamSettings(
         _church!.id,
         normalizedStreamUrl ?? '',
         _isLive,
@@ -191,19 +202,12 @@ class _AdminStreamSettingsScreenState extends State<AdminStreamSettingsScreen> {
   }
 
   Future<void> _notifyChurchLiveNow() async {
-    final adminProfile =
-        Provider.of<UserRoleProvider>(context, listen: false).userProfile;
-    final churchTopicId = adminProfile?.churchId.trim().isNotEmpty == true
-        ? adminProfile!.churchId.trim()
-        : _church!.placeId.trim();
-    if (churchTopicId.isEmpty) return;
-
     final churchName =
         _church!.name.trim().isEmpty ? 'Your church' : _church!.name.trim();
     await NotificationService().sendNotification(
       '$churchName is live now',
       'Tap to watch the live service inside Grace Connect.',
-      'church_$churchTopicId',
+      NotificationService.appWideTopic,
       route: '/live_streaming',
       type: 'live_stream',
     );
@@ -229,6 +233,48 @@ class _AdminStreamSettingsScreenState extends State<AdminStreamSettingsScreen> {
       liveStreamUrl: streamUrl.isEmpty ? null : streamUrl,
       isLive: _isLive,
     );
+    if (_isLive) {
+      _startViewerCountPolling();
+    } else {
+      _stopViewerCountPolling();
+    }
+  }
+
+  String get _viewerChurchId {
+    final profile =
+        Provider.of<UserRoleProvider>(context, listen: false).userProfile;
+    final profileChurchId = profile?.churchId.trim() ?? '';
+    if (profileChurchId.isNotEmpty) return profileChurchId;
+    final churchPlaceId = _church?.placeId.trim() ?? '';
+    if (churchPlaceId.isNotEmpty) return churchPlaceId;
+    return _church?.id.trim() ?? '';
+  }
+
+  void _startViewerCountPolling() {
+    _viewerCountTimer?.cancel();
+    unawaited(_refreshViewerCount());
+    _viewerCountTimer = Timer.periodic(
+      const Duration(seconds: 15),
+      (_) => unawaited(_refreshViewerCount()),
+    );
+  }
+
+  void _stopViewerCountPolling() {
+    _viewerCountTimer?.cancel();
+    _viewerCountTimer = null;
+    if (mounted && _activeViewerCount != 0) {
+      setState(() => _activeViewerCount = 0);
+    }
+  }
+
+  Future<void> _refreshViewerCount() async {
+    final churchId = _viewerChurchId;
+    if (!_isLive || churchId.isEmpty) return;
+
+    final count = await _churchService.fetchLiveViewerCount(churchId);
+    if (mounted) {
+      setState(() => _activeViewerCount = count);
+    }
   }
 
   @override
@@ -313,6 +359,22 @@ class _AdminStreamSettingsScreenState extends State<AdminStreamSettingsScreen> {
                 onChanged: _isLoading ? null : _handleLiveToggle,
                 secondary: Icon(Icons.live_tv,
                     color: _isLive ? Colors.red : Colors.grey),
+              ),
+              Card(
+                child: ListTile(
+                  leading: Icon(
+                    Icons.visibility_outlined,
+                    color: _isLive
+                        ? Theme.of(context).colorScheme.primary
+                        : Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                  title: const Text('Currently watching'),
+                  subtitle: Text(
+                    _isLive
+                        ? '$_activeViewerCount on app now'
+                        : 'Viewer count appears when the stream is live.',
+                  ),
+                ),
               ),
               const SizedBox(height: 32),
               SizedBox(

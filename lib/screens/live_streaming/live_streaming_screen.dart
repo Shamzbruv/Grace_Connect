@@ -22,6 +22,7 @@ class _LiveStreamingScreenState extends State<LiveStreamingScreen>
     with WidgetsBindingObserver {
   YoutubePlayerController? _controller;
   final AttendanceService _attendanceService = AttendanceService();
+  final ChurchService _churchService = ChurchService();
   bool _isLoading = true;
   String? _error;
   bool _isLive = false;
@@ -33,6 +34,9 @@ class _LiveStreamingScreenState extends State<LiveStreamingScreen>
   String? _churchId;
   String? _activeServiceName;
   Timer? _engagementTimer;
+  Timer? _viewerHeartbeatTimer;
+  Timer? _viewerCountTimer;
+  int _activeViewerCount = 0;
   int _engagedSeconds = 0;
   static const int _requiredEngagementSeconds = 60 * 60;
 
@@ -51,9 +55,16 @@ class _LiveStreamingScreenState extends State<LiveStreamingScreen>
         state == AppLifecycleState.detached) {
       _leftAppDuringService = true;
       _stopEngagementTimer();
+      _stopViewerPresence(markInactive: true);
       if (mounted) setState(() {});
-    } else if (state == AppLifecycleState.resumed && !_leftAppDuringService) {
-      _startEngagementTimer();
+    } else if (state == AppLifecycleState.resumed) {
+      if (!_leftAppDuringService) {
+        _startEngagementTimer();
+      }
+      final churchId = _churchId;
+      if (_isLive && churchId != null) {
+        _startViewerPresence(churchId);
+      }
     }
   }
 
@@ -62,6 +73,7 @@ class _LiveStreamingScreenState extends State<LiveStreamingScreen>
         .userProfile
         ?.churchId;
     if (churchId == null) {
+      _stopViewerPresence(markInactive: true);
       if (mounted) {
         setState(() {
           _isLoading = false;
@@ -95,9 +107,11 @@ class _LiveStreamingScreenState extends State<LiveStreamingScreen>
             _isLoading = false;
           });
           _startEngagementTimer();
+          _startViewerPresence(churchId);
           return;
         }
       }
+      _stopViewerPresence(markInactive: true);
       setState(() {
         _isLive = false;
         _hasActiveService = activeService != null;
@@ -125,6 +139,47 @@ class _LiveStreamingScreenState extends State<LiveStreamingScreen>
   void _stopEngagementTimer() {
     _engagementTimer?.cancel();
     _engagementTimer = null;
+  }
+
+  void _startViewerPresence(String churchId) {
+    _viewerHeartbeatTimer?.cancel();
+    _viewerCountTimer?.cancel();
+    unawaited(_sendViewerHeartbeat(churchId));
+    unawaited(_refreshViewerCount(churchId));
+    _viewerHeartbeatTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => unawaited(_sendViewerHeartbeat(churchId)),
+    );
+    _viewerCountTimer = Timer.periodic(
+      const Duration(seconds: 15),
+      (_) => unawaited(_refreshViewerCount(churchId)),
+    );
+  }
+
+  Future<void> _sendViewerHeartbeat(String churchId) async {
+    try {
+      await _churchService.recordLiveViewerHeartbeat(churchId);
+    } catch (error) {
+      debugPrint('Could not record live viewer heartbeat: $error');
+    }
+  }
+
+  Future<void> _refreshViewerCount(String churchId) async {
+    final count = await _churchService.fetchLiveViewerCount(churchId);
+    if (mounted) {
+      setState(() => _activeViewerCount = count);
+    }
+  }
+
+  void _stopViewerPresence({bool markInactive = false}) {
+    _viewerHeartbeatTimer?.cancel();
+    _viewerHeartbeatTimer = null;
+    _viewerCountTimer?.cancel();
+    _viewerCountTimer = null;
+    final churchId = _churchId;
+    if (markInactive && churchId != null) {
+      unawaited(_churchService.clearLiveViewerHeartbeat(churchId));
+    }
   }
 
   Future<void> _markRemotePresentFromLive() async {
@@ -447,6 +502,7 @@ class _LiveStreamingScreenState extends State<LiveStreamingScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _stopEngagementTimer();
+    _stopViewerPresence(markInactive: true);
     _controller?.dispose();
     super.dispose();
   }
@@ -480,6 +536,7 @@ class _LiveStreamingScreenState extends State<LiveStreamingScreen>
                 _controller?.dispose();
                 _controller = null;
               });
+              _stopViewerPresence(markInactive: true);
               _loadStream();
             },
           ),
@@ -511,6 +568,8 @@ class _LiveStreamingScreenState extends State<LiveStreamingScreen>
                                 fontWeight: FontWeight.bold,
                                 fontSize: 18),
                           ),
+                          const SizedBox(height: 12),
+                          _buildViewerCountBadge(context),
                           const SizedBox(height: 12),
                           _buildEngagementCard(context),
                         ],
@@ -671,6 +730,36 @@ class _LiveStreamingScreenState extends State<LiveStreamingScreen>
               ],
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildViewerCountBadge(BuildContext context) {
+    final theme = Theme.of(context);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.visibility_outlined,
+              size: 18,
+              color: theme.colorScheme.primary,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              '$_activeViewerCount watching',
+              style: theme.textTheme.labelLarge?.copyWith(
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
         ),
       ),
     );

@@ -3178,6 +3178,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
       await _messageService.sendMessage(
         conversationId: conversation.id,
         text: cleanText,
+        recipientUserId: story.authorId,
         replyContext: {
           'type': 'community_story',
           'story_id': story.id,

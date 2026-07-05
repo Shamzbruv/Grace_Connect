@@ -149,6 +149,21 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     }
   }
 
+  void _openPostMediaViewer(Post post) {
+    final mediaUrl = post.mediaUrl?.trim();
+    if (mediaUrl == null || mediaUrl.isEmpty) return;
+
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        fullscreenDialog: true,
+        builder: (_) => _PostMediaViewerScreen(
+          mediaUrl: mediaUrl,
+          mediaType: post.mediaType ?? 'image',
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return AppScaffold(
@@ -242,23 +257,26 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                   post.mediaAspectRatio,
                                   fallback: 4 / 3,
                                 ),
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(8),
-                                  child: ColoredBox(
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .surfaceContainerHighest,
-                                    child: CachedNetworkImage(
-                                      imageUrl: post.mediaUrl!,
-                                      placeholder: (context, url) =>
-                                          const Center(
-                                              child: Padding(
-                                        padding: EdgeInsets.all(16.0),
-                                        child: CircularProgressIndicator(),
-                                      )),
-                                      errorWidget: (context, url, error) =>
-                                          const Icon(Icons.error),
-                                      fit: boxFitForMedia(post.mediaFit),
+                                child: GestureDetector(
+                                  onTap: () => _openPostMediaViewer(post),
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(8),
+                                    child: ColoredBox(
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .surfaceContainerHighest,
+                                      child: CachedNetworkImage(
+                                        imageUrl: post.mediaUrl!,
+                                        placeholder: (context, url) =>
+                                            const Center(
+                                                child: Padding(
+                                          padding: EdgeInsets.all(16.0),
+                                          child: CircularProgressIndicator(),
+                                        )),
+                                        errorWidget: (context, url, error) =>
+                                            const Icon(Icons.error),
+                                        fit: boxFitForMedia(post.mediaFit),
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -272,11 +290,14 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                   post.mediaAspectRatio,
                                   fallback: 4 / 3,
                                 ),
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(8),
-                                  child: _InlinePostVideoPlayer(
-                                    mediaUrl: post.mediaUrl!,
-                                    fit: boxFitForMedia(post.mediaFit),
+                                child: GestureDetector(
+                                  onTap: () => _openPostMediaViewer(post),
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(8),
+                                    child: _InlinePostVideoPlayer(
+                                      mediaUrl: post.mediaUrl!,
+                                      fit: boxFitForMedia(post.mediaFit),
+                                    ),
                                   ),
                                 ),
                               )
@@ -442,6 +463,56 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       if (seen.add(key)) unique.add(comment);
     }
     return unique;
+  }
+}
+
+class _PostMediaViewerScreen extends StatelessWidget {
+  const _PostMediaViewerScreen({
+    required this.mediaUrl,
+    required this.mediaType,
+  });
+
+  final String mediaUrl;
+  final String mediaType;
+
+  @override
+  Widget build(BuildContext context) {
+    final isVideo = mediaType == 'video';
+
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        title: Text(isVideo ? 'Video' : 'Photo'),
+      ),
+      body: SafeArea(
+        child: Center(
+          child: isVideo
+              ? SizedBox.expand(
+                  child: _InlinePostVideoPlayer(
+                    mediaUrl: mediaUrl,
+                    fit: BoxFit.contain,
+                  ),
+                )
+              : InteractiveViewer(
+                  minScale: 1,
+                  maxScale: 4,
+                  child: CachedNetworkImage(
+                    imageUrl: mediaUrl,
+                    fit: BoxFit.contain,
+                    placeholder: (_, __) =>
+                        const Center(child: CircularProgressIndicator()),
+                    errorWidget: (_, __, ___) => const Icon(
+                      Icons.broken_image_outlined,
+                      color: Colors.white,
+                      size: 48,
+                    ),
+                  ),
+                ),
+        ),
+      ),
+    );
   }
 }
 

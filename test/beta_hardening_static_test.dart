@@ -314,8 +314,8 @@ void main() {
       ).readAsStringSync();
 
       expect(gradle, contains('"love.graceconnect"'));
-      expect(gradle, contains('versionCode 20'));
-      expect(gradle, contains('versionName "1.0.18-beta"'));
+      expect(gradle, contains('versionCode 21'));
+      expect(gradle, contains('versionName "1.0.19-beta"'));
       expect(activity, contains('package love.graceconnect'));
       expect(manifest, contains('love.graceconnect.MainActivity'));
       expect(manifest, contains('default_notification_icon'));
@@ -480,6 +480,39 @@ void main() {
       expect(notificationSource, contains("message.data['title']"));
       expect(messageSource, contains('sanitizeReplyContext'));
       expect(messageSource, contains('<String, dynamic>{}'));
+    });
+
+    test('app-wide live alerts and live viewer counts are wired', () {
+      final notificationSource =
+          File('lib/services/notification_service.dart').readAsStringSync();
+      final functionsSource = File('functions/index.js').readAsStringSync();
+      final adminLiveSource =
+          File('lib/screens/admin/admin_stream_settings_screen.dart')
+              .readAsStringSync();
+      final liveSource =
+          File('lib/screens/live_streaming/live_streaming_screen.dart')
+              .readAsStringSync();
+      final churchServiceSource =
+          File('lib/services/church_service.dart').readAsStringSync();
+      final migrationSource = File(
+        'supabase/migrations/20260704120000_live_stream_presence.sql',
+      ).readAsStringSync();
+
+      expect(notificationSource, contains("appWideTopic = 'graceconnect_all'"));
+      expect(notificationSource, contains('setAutoInitEnabled(true)'));
+      expect(notificationSource, contains('userTopicFor'));
+      expect(notificationSource, contains('sendDirectMessagePush'));
+      expect(functionsSource, contains('APP_WIDE_TOPIC'));
+      expect(functionsSource, contains('canSendDirectMessagePush'));
+      expect(functionsSource, contains('"direct_message"'));
+      expect(functionsSource, contains('"apns-priority"'));
+      expect(adminLiveSource, contains('NotificationService.appWideTopic'));
+      expect(adminLiveSource, contains('Currently watching'));
+      expect(liveSource, contains('recordLiveViewerHeartbeat'));
+      expect(liveSource, contains('_activeViewerCount'));
+      expect(churchServiceSource, contains('live_stream_viewers'));
+      expect(migrationSource, contains('live_stream_viewers'));
+      expect(migrationSource, contains('Live viewers insert own presence'));
     });
 
     test('status owner deletion and video playback are wired', () {

@@ -103,6 +103,7 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
         mediaPath: mediaPath,
         mediaType: mediaType,
         durationSeconds: _pendingDurationSeconds,
+        recipientUserId: widget.otherUser.uid,
       );
       _messageController.clear();
       _clearPendingMedia();
@@ -1042,7 +1043,8 @@ class _MessageBubble extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      DateFormat('h:mm a').format(message.createdAt),
+                      DateFormat('MMM d, yyyy, h:mm a')
+                          .format(message.createdAt.toLocal()),
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: textColor.withValues(alpha: 0.72),
                         fontSize: 10,

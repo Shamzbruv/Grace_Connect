@@ -538,6 +538,7 @@ class _BibleReaderScreenState extends State<BibleReaderScreen> {
                 await DirectMessageService().sendMessage(
                   conversationId: conversation.id,
                   text: text,
+                  recipientUserId: recipient.uid,
                 );
                 if (!sheetContext.mounted) return;
                 Navigator.pop(sheetContext);
