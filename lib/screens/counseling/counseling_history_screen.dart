@@ -10,6 +10,43 @@ import '../../widgets/ui/app_loader.dart';
 class CounselingHistoryScreen extends StatelessWidget {
   const CounselingHistoryScreen({super.key});
 
+  Future<void> _confirmDelete(
+    BuildContext context,
+    CounselingRequest request,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete request?'),
+        content: const Text('This removes the counseling request permanently.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      await CounselingService().deleteRequest(request.id);
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Counseling request deleted.')),
+      );
+    } catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not delete request: $error')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final userIdx = Provider.of<UserRoleProvider>(context).user?.uid;
@@ -119,9 +156,19 @@ class CounselingHistoryScreen extends StatelessWidget {
                     ),
                   ),
                 ),
-                Text(
-                  DateFormat('MMM d, yyyy').format(req.createdAt),
-                  style: Theme.of(context).textTheme.bodySmall,
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      DateFormat('MMM d, yyyy').format(req.createdAt),
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    IconButton(
+                      tooltip: 'Delete request',
+                      icon: const Icon(Icons.delete_outline),
+                      onPressed: () => _confirmDelete(context, req),
+                    ),
+                  ],
                 ),
               ],
             ),

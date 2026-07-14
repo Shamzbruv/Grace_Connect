@@ -83,9 +83,24 @@ class _InboxScreenState extends State<InboxScreen> {
           onPressed: _openMemberPicker,
         ),
       ],
-      floatingActionButton: FloatingActionButton(
-        onPressed: _openMemberPicker,
-        child: const Icon(Icons.edit_outlined),
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          FloatingActionButton.small(
+            heroTag: 'grace_rooms_fab',
+            tooltip: 'Grace Rooms',
+            onPressed: () => Navigator.of(context).pushNamed('/grace_rooms'),
+            child: const Icon(Icons.forum_outlined),
+          ),
+          const SizedBox(height: 10),
+          FloatingActionButton(
+            heroTag: 'new_message_fab',
+            tooltip: 'New message',
+            onPressed: _openMemberPicker,
+            child: const Icon(Icons.edit_outlined),
+          ),
+        ],
       ),
       body: currentUser == null
           ? const Center(child: AppLoader())
@@ -129,6 +144,13 @@ class _InboxScreenState extends State<InboxScreen> {
                             onPressed: _openMemberPicker,
                             icon: const Icon(Icons.edit_outlined),
                             label: const Text('Start a Message'),
+                          ),
+                          const SizedBox(height: 10),
+                          OutlinedButton.icon(
+                            onPressed: () =>
+                                Navigator.of(context).pushNamed('/grace_rooms'),
+                            icon: const Icon(Icons.forum_outlined),
+                            label: const Text('Open Grace Rooms'),
                           ),
                         ],
                       ),

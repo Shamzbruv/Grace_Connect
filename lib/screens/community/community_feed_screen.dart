@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../widgets/ui/app_scaffold.dart';
 import '../../widgets/ui/app_card.dart';
 import '../../widgets/ui/app_feedback.dart';
@@ -16,7 +17,9 @@ import '../../services/bible_nudge_service.dart';
 import '../../services/direct_message_service.dart';
 import '../../services/feed_scroll_service.dart';
 import '../../services/moderation_service.dart';
+import '../../services/saved_items_service.dart';
 import '../../services/user_service.dart';
+import '../../models/community_feed_mode.dart';
 import '../../models/church_model.dart';
 import '../../models/community_story.dart';
 import '../../models/post.dart';
@@ -29,6 +32,7 @@ import '../messages/message_thread_screen.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:video_player/video_player.dart';
 import '../../widgets/inbox_icon_button.dart';
 
@@ -58,6 +62,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
   final DirectMessageService _messageService = DirectMessageService();
   final BibleNudgeService _bibleNudgeService = BibleNudgeService();
   final ModerationService _moderationService = ModerationService();
+  final SavedItemsService _savedItemsService = SavedItemsService();
   final UserService _userService = UserService();
   final ChurchService _churchService = ChurchService();
   final GoTrueClient _auth = Supabase.instance.client.auth;
@@ -91,7 +96,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
   bool get _hasLimitedAccess =>
       widget.limitedAccessMessage?.trim().isNotEmpty == true;
 
-  bool _isBrowseOnly(String churchId) => _hasLimitedAccess || churchId.isEmpty;
+  bool _isBrowseOnly(String churchId) => _hasLimitedAccess;
 
   @override
   void initState() {
@@ -128,17 +133,20 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
     final savedChurchIds =
         prefs.getStringList('community_feed_church_ids_$uid');
     final savedLabel = prefs.getString('community_feed_label_$uid');
-    final validScope =
-        savedScope == 'all' || savedScope == 'custom' || savedScope == 'church'
-            ? savedScope
-            : 'church';
+    final normalizedScope = savedScope == 'all' ? 'discover' : savedScope;
+    final validScope = normalizedScope == 'discover' ||
+            normalizedScope == 'following' ||
+            normalizedScope == 'custom' ||
+            normalizedScope == 'church'
+        ? normalizedScope
+        : 'church';
     setState(() {
       _showMediaPreviews =
           !dataSaver && (prefs.getBool('community_show_media') ?? true);
       _confirmBeforePosting =
           prefs.getBool('community_confirm_before_posting') ?? false;
       final nextScope = _hasLimitedAccess
-          ? 'all'
+          ? 'discover'
           : validScope == 'custom' &&
                   (savedChurchIds == null || savedChurchIds.isEmpty)
               ? 'church'
@@ -583,8 +591,11 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
     }
 
     if (_confirmBeforePosting) {
-      final audience =
-          _postVisibleToAllChurches ? 'all churches' : 'your church feed';
+      final profile = context.read<UserRoleProvider>().userProfile;
+      final hasChurch = profile?.placeId.trim().isNotEmpty == true;
+      final audience = _postVisibleToAllChurches || !hasChurch
+          ? 'Discover'
+          : 'your church feed';
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
@@ -615,18 +626,8 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
       final userProvider =
           Provider.of<UserRoleProvider>(context, listen: false);
       final profile = userProvider.userProfile;
-      final churchId = profile?.placeId;
-
-      if (churchId == null || churchId.isEmpty) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-                content:
-                    Text('Error: No church affiliation found. Cannot post.')),
-          );
-        }
-        return false;
-      }
+      final churchId = profile?.placeId.trim() ?? '';
+      final postsToDiscover = churchId.isEmpty || _postVisibleToAllChurches;
 
       String? mediaUrl;
       String? mediaPath;
@@ -637,8 +638,9 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
           mimeType,
           fallbackMediaType: _mediaType,
         );
+        final mediaScope = churchId.isEmpty ? 'global' : churchId;
         final fileName =
-            '$churchId/${DateTime.now().millisecondsSinceEpoch}_${user.id}.$extension';
+            '$mediaScope/${DateTime.now().millisecondsSinceEpoch}_${user.id}.$extension';
         mediaPath = fileName;
         mediaUrl = await uploadCommunityMediaXFile(
           service: _communityService,
@@ -665,13 +667,18 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
         likes: [],
         commentsCount: 0,
         placeId: churchId,
+        originChurchId: churchId.isEmpty ? null : churchId,
         mediaUrl: mediaUrl,
         mediaPath: mediaPath,
         mediaType: _mediaType,
         mediaFit: _postMediaFormat.mediaFit,
         mediaAspectRatio: _postMediaFormat.aspectRatio ?? _postMediaAspectRatio,
-        expiresAt: DateTime.now().add(const Duration(days: 30)),
-        visibleToAllChurches: _postVisibleToAllChurches,
+        expiresAt: postsToDiscover
+            ? null
+            : DateTime.now().add(const Duration(days: 30)),
+        visibleToAllChurches: postsToDiscover,
+        scope: postsToDiscover ? 'global' : 'church',
+        postType: postsToDiscover ? 'social_post' : 'post',
       );
 
       await _communityService.addPost(newPost);
@@ -847,6 +854,112 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
         type: AppFeedbackType.warning,
       );
     }
+  }
+
+  void _openPublicProfile(String userId) {
+    final cleanUserId = userId.trim();
+    if (cleanUserId.isEmpty) return;
+    Navigator.of(context).pushNamed(
+      '/public_profile?id=${Uri.encodeComponent(cleanUserId)}',
+    );
+  }
+
+  Future<void> _savePost(Post post) async {
+    try {
+      await _savedItemsService.save(
+        entityType: 'community_post',
+        entityId: post.id,
+        title: post.authorName,
+        subtitle: post.content,
+        mediaUrl: post.mediaUrl?.trim() ?? '',
+        mediaType: post.mediaType?.trim() ?? '',
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Saved post.')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not save post: $error')),
+      );
+    }
+  }
+
+  Future<void> _showSavePostOptions(Post post) async {
+    final hasMedia = post.mediaUrl?.trim().isNotEmpty == true;
+    final hasText = post.content.trim().isNotEmpty;
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 18),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.bookmark_add_outlined),
+                  title: const Text('Save to Saved'),
+                  onTap: () {
+                    Navigator.of(sheetContext).pop();
+                    _savePost(post);
+                  },
+                ),
+                if (hasMedia)
+                  ListTile(
+                    leading: const Icon(Icons.download_outlined),
+                    title: const Text('Download media'),
+                    onTap: () {
+                      Navigator.of(sheetContext).pop();
+                      _downloadPostMedia(post);
+                    },
+                  ),
+                if (hasText)
+                  ListTile(
+                    leading: const Icon(Icons.content_copy_outlined),
+                    title: const Text('Copy post text'),
+                    onTap: () {
+                      Navigator.of(sheetContext).pop();
+                      _copyPostText(post);
+                    },
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _downloadPostMedia(Post post) async {
+    final rawUrl = post.mediaUrl?.trim() ?? '';
+    final uri = Uri.tryParse(rawUrl);
+    if (rawUrl.isEmpty || uri == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('This post has no downloadable media.')),
+      );
+      return;
+    }
+
+    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!opened && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not open the media link.')),
+      );
+    }
+  }
+
+  Future<void> _copyPostText(Post post) async {
+    final text = post.content.trim();
+    if (text.isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Post text copied.')),
+    );
   }
 
   Future<void> _openPostAuthorProfile(Post post) async {
@@ -1252,7 +1365,13 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
     final churchId = userProvider.userProfile?.placeId ?? "";
     final browseOnly = _isBrowseOnly(churchId);
     final feedChurchIds = churchId.isEmpty ? null : _feedChurchIds(churchId);
-    final includeShared = browseOnly || _feedScope != 'church';
+    final effectiveScope = _effectiveFeedScope(churchId);
+    final includeShared = browseOnly || effectiveScope != 'church';
+    final postStream = _postStreamForScope(
+      churchId: churchId,
+      feedChurchIds: feedChurchIds,
+      includeShared: includeShared,
+    );
 
     return AppScaffold(
       title: 'Community Feed',
@@ -1268,16 +1387,14 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
           builder: (actionContext) => IconButton(
             tooltip: 'Feed settings',
             icon: const Icon(Icons.tune_outlined),
-            onPressed: churchId.isEmpty || browseOnly
+            onPressed: browseOnly
                 ? null
                 : () => Scaffold.maybeOf(actionContext)?.openDrawer(),
           ),
         ),
         if (!browseOnly) const InboxIconButton(),
       ],
-      drawer: churchId.isEmpty || browseOnly
-          ? null
-          : _buildFeedSettingsDrawer(context, churchId),
+      drawer: browseOnly ? null : _buildFeedSettingsDrawer(context, churchId),
       showBottomMenu: widget.showBottomMenu,
       appBarHeight: 48,
       appBarTitleStyle: theme.textTheme.titleMedium?.copyWith(
@@ -1288,13 +1405,9 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
         children: [
           StreamBuilder<List<Post>>(
             key: ValueKey(
-              'feed-${churchId.isEmpty ? 'public' : churchId}-$_feedScope-${_selectedFeedChurchIds?.join('|')}-$_feedRefreshToken',
+              'feed-${churchId.isEmpty ? 'public' : churchId}-$effectiveScope-${_selectedFeedChurchIds?.join('|')}-$_feedRefreshToken',
             ),
-            stream: _communityService.getPostsForChurches(
-              churchId,
-              feedChurchIds,
-              includeShared: includeShared,
-            ),
+            stream: postStream,
             builder: (context, snapshot) {
               final posts = (snapshot.data ?? [])
                   .where(
@@ -1428,19 +1541,50 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
 
   List<String>? _feedChurchIds(String ownChurchId) {
     if (ownChurchId.trim().isEmpty) return null;
-    if (_feedScope == 'all') return null;
+    if (_feedScope == 'all' || _feedScope == 'discover') return null;
+    if (_feedScope == 'following') return null;
     if (_feedScope == 'custom') return _selectedFeedChurchIds;
     return [ownChurchId];
+  }
+
+  String _effectiveFeedScope(String churchId) {
+    final scope = _feedScope == 'all' ? 'discover' : _feedScope;
+    if (churchId.trim().isEmpty && scope == 'church') return 'discover';
+    return scope;
+  }
+
+  Stream<List<Post>> _postStreamForScope({
+    required String churchId,
+    required List<String>? feedChurchIds,
+    required bool includeShared,
+  }) {
+    final effectiveScope = _effectiveFeedScope(churchId);
+    if (effectiveScope == 'discover' || effectiveScope == 'following') {
+      return _communityService.getCommunityFeed(
+        mode: effectiveScope == 'following'
+            ? CommunityFeedMode.following
+            : CommunityFeedMode.discover,
+        viewerChurchId: churchId,
+      );
+    }
+
+    return _communityService.getPostsForChurches(
+      churchId,
+      feedChurchIds,
+      includeShared: includeShared,
+    );
   }
 
   Widget _buildFeedScopeSummary(BuildContext context) {
     final theme = Theme.of(context);
     final profileChurchId =
         context.read<UserRoleProvider>().userProfile?.placeId ?? '';
+    final effectiveScope = _effectiveFeedScope(profileChurchId);
     final subtitle = _isBrowseOnly(profileChurchId)
         ? 'Showing public posts shared across Grace Connect'
-        : switch (_feedScope) {
-            'all' => 'Showing shared posts from all churches',
+        : switch (effectiveScope) {
+            'discover' => 'Showing public posts across Grace Connect',
+            'following' => 'Showing posts from people and circles you follow',
             'custom' =>
               _selectedFeedLabel ?? 'Shared posts from selected churches',
             _ => 'Showing your church',
@@ -1453,11 +1597,13 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
       child: Row(
         children: [
           Icon(
-            _feedScope == 'all'
+            effectiveScope == 'discover'
                 ? Icons.public_outlined
-                : _feedScope == 'custom'
-                    ? Icons.filter_alt_outlined
-                    : Icons.church_outlined,
+                : effectiveScope == 'following'
+                    ? Icons.people_alt_outlined
+                    : effectiveScope == 'custom'
+                        ? Icons.filter_alt_outlined
+                        : Icons.church_outlined,
             size: 18,
             color: theme.colorScheme.primary,
           ),
@@ -1545,6 +1691,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
       List<String>? churchIds,
       String? label,
     }) {
+      final navigator = Navigator.of(context);
       setState(() {
         _feedScope = scope;
         _selectedFeedChurchIds = churchIds;
@@ -1552,7 +1699,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
         _feedRefreshToken++;
       });
       unawaited(_saveFeedScopePreferences());
-      Navigator.maybePop(context);
+      navigator.maybePop();
     }
 
     return Drawer(
@@ -1571,27 +1718,38 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
               label: 'My Church',
               selected: _feedScope == 'church',
               icon: Icons.church_outlined,
-              onSelected: () => applyScope(scope: 'church'),
+              onSelected: ownChurchId.trim().isEmpty
+                  ? null
+                  : () => applyScope(scope: 'church'),
             ),
             const SizedBox(height: 10),
             _FeedScopeChip(
-              label: 'All Churches',
-              selected: _feedScope == 'all',
+              label: 'Following',
+              selected: _feedScope == 'following',
+              icon: Icons.people_alt_outlined,
+              onSelected: () => applyScope(scope: 'following'),
+            ),
+            const SizedBox(height: 10),
+            _FeedScopeChip(
+              label: 'Discover',
+              selected: _feedScope == 'discover' || _feedScope == 'all',
               icon: Icons.public_outlined,
-              onSelected: () => applyScope(scope: 'all'),
+              onSelected: () => applyScope(scope: 'discover'),
             ),
-            const SizedBox(height: 10),
-            _FeedScopeChip(
-              label: _feedScope == 'custom'
-                  ? (_selectedFeedLabel ?? 'Filtered feed')
-                  : 'Filter churches',
-              selected: _feedScope == 'custom',
-              icon: Icons.filter_alt_outlined,
-              onSelected: () {
-                Navigator.maybePop(context);
-                _showFeedSearchSheet(ownChurchId);
-              },
-            ),
+            if (ownChurchId.trim().isNotEmpty) ...[
+              const SizedBox(height: 10),
+              _FeedScopeChip(
+                label: _feedScope == 'custom'
+                    ? (_selectedFeedLabel ?? 'Filtered feed')
+                    : 'Filter churches',
+                selected: _feedScope == 'custom',
+                icon: Icons.filter_alt_outlined,
+                onSelected: () {
+                  Navigator.maybePop(context);
+                  _showFeedSearchSheet(ownChurchId);
+                },
+              ),
+            ],
           ],
         ),
       ),
@@ -2505,9 +2663,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
               children: [
                 InkWell(
                   customBorder: const CircleBorder(),
-                  onTap: browseOnly
-                      ? _showLimitedFeedNotice
-                      : () => _openPostAuthorProfile(post),
+                  onTap: () => _openPublicProfile(post.authorId),
                   child: CircleAvatar(
                     backgroundImage: post.authorPhoto != null
                         ? NetworkImage(post.authorPhoto!)
@@ -2520,9 +2676,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                 const SizedBox(width: 12),
                 Expanded(
                   child: InkWell(
-                    onTap: browseOnly
-                        ? _showLimitedFeedNotice
-                        : () => _openPostAuthorProfile(post),
+                    onTap: () => _openPublicProfile(post.authorId),
                     borderRadius: BorderRadius.circular(8),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(vertical: 2),
@@ -2605,6 +2759,11 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                   icon: const Icon(Icons.more_horiz),
                   onSelected: (value) {
                     if (value == 'delete') _confirmDeletePost(post);
+                    if (value == 'save') _showSavePostOptions(post);
+                    if (value == 'profile') _openPublicProfile(post.authorId);
+                    if (value == 'member_profile') {
+                      _openPostAuthorProfile(post);
+                    }
                     if (value == 'report') {
                       _showReportContentSheet(
                         churchId: post.placeId,
@@ -2623,6 +2782,37 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                     }
                   },
                   itemBuilder: (context) => [
+                    const PopupMenuItem(
+                      value: 'save',
+                      child: Row(
+                        children: [
+                          Icon(Icons.bookmark_add_outlined),
+                          SizedBox(width: 8),
+                          Text('Save'),
+                        ],
+                      ),
+                    ),
+                    const PopupMenuItem(
+                      value: 'profile',
+                      child: Row(
+                        children: [
+                          Icon(Icons.person_pin_circle_outlined),
+                          SizedBox(width: 8),
+                          Text('Public profile'),
+                        ],
+                      ),
+                    ),
+                    if (!browseOnly)
+                      const PopupMenuItem(
+                        value: 'member_profile',
+                        child: Row(
+                          children: [
+                            Icon(Icons.badge_outlined),
+                            SizedBox(width: 8),
+                            Text('Member profile'),
+                          ],
+                        ),
+                      ),
                     if (canDelete)
                       const PopupMenuItem(
                         value: 'delete',
@@ -2767,6 +2957,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
     final currentUser = context.watch<UserRoleProvider>().userProfile;
     final currentUid = _auth.currentUser?.id;
     final browseOnly = _isBrowseOnly(churchId);
+    final effectiveScope = _effectiveFeedScope(churchId);
     final canCreateStory = !browseOnly && churchId.isNotEmpty;
 
     return Container(
@@ -2809,7 +3000,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
               stream: _communityService.getActiveStories(
                 churchId,
                 churchIds: churchId.isEmpty ? null : _feedChurchIds(churchId),
-                includeShared: browseOnly || _feedScope != 'church',
+                includeShared: browseOnly || effectiveScope != 'church',
               ),
               builder: (context, snapshot) {
                 final stories = (snapshot.data ?? [])
@@ -2950,6 +3141,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
   }) {
     final theme = Theme.of(context);
     final profile = context.watch<UserRoleProvider>().userProfile;
+    final hasChurch = profile?.placeId.trim().isNotEmpty == true;
 
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
@@ -3043,8 +3235,8 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                   minLines: 1,
                   maxLines: 2,
                   decoration: InputDecoration(
-                    hintText: _postVisibleToAllChurches
-                        ? 'Share with all churches...'
+                    hintText: !hasChurch || _postVisibleToAllChurches
+                        ? 'Share with Discover...'
                         : 'Share with your church...',
                     filled: true,
                     fillColor: theme.colorScheme.surfaceContainerHighest,
@@ -3108,14 +3300,16 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
               ),
             ],
           ),
-          const SizedBox(height: 10),
-          _AudienceSelector(
-            visibleToAllChurches: _postVisibleToAllChurches,
-            onChanged: (value) {
-              setState(() => _postVisibleToAllChurches = value);
-              onMediaChanged?.call();
-            },
-          ),
+          if (hasChurch) ...[
+            const SizedBox(height: 10),
+            _AudienceSelector(
+              visibleToAllChurches: _postVisibleToAllChurches,
+              onChanged: (value) {
+                setState(() => _postVisibleToAllChurches = value);
+                onMediaChanged?.call();
+              },
+            ),
+          ],
         ],
       ),
     );
@@ -4291,7 +4485,7 @@ class _AudienceSelector extends StatelessWidget {
             Expanded(
               child: Text(
                 visibleToAllChurches
-                    ? 'Audience: all churches'
+                    ? 'Audience: Discover'
                     : 'Audience: my church',
                 style: theme.textTheme.labelLarge?.copyWith(
                   fontWeight: FontWeight.w800,
@@ -4319,7 +4513,7 @@ class _FeedScopeChip extends StatelessWidget {
 
   final String label;
   final bool selected;
-  final VoidCallback onSelected;
+  final VoidCallback? onSelected;
   final IconData? icon;
 
   @override
@@ -4328,7 +4522,7 @@ class _FeedScopeChip extends StatelessWidget {
       selected: selected,
       avatar: icon == null ? null : Icon(icon, size: 16),
       label: Text(label),
-      onSelected: (_) => onSelected(),
+      onSelected: onSelected == null ? null : (_) => onSelected!(),
     );
   }
 }

@@ -188,6 +188,7 @@ class _PrayersScreenState extends State<PrayersScreen> {
                             (request) => _PrayerRequestCard(
                               request: request,
                               showActions: false,
+                              canDelete: true,
                             ),
                           )
                           .toList(),
@@ -265,6 +266,7 @@ class _PrayerAdminView extends StatelessWidget {
             itemBuilder: (context, index) => _PrayerRequestCard(
               request: requests[index],
               showActions: true,
+              canDelete: canManageAssignments,
               canManageAssignments: canManageAssignments,
             ),
           );
@@ -278,12 +280,48 @@ class _PrayerRequestCard extends StatelessWidget {
   const _PrayerRequestCard({
     required this.request,
     required this.showActions,
+    required this.canDelete,
     this.canManageAssignments = false,
   });
 
   final PrayerRequest request;
   final bool showActions;
+  final bool canDelete;
   final bool canManageAssignments;
+
+  Future<void> _confirmDelete(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete prayer request?'),
+        content: const Text('This removes the prayer request permanently.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      await PrayerService().deleteRequest(request.id);
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Prayer request deleted.')),
+      );
+    } catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not delete prayer request: $error')),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -321,7 +359,19 @@ class _PrayerRequestCard extends StatelessWidget {
                   ],
                 ),
               ),
-              if (showActions) _PrayerStatusMenu(request: request),
+              if (showActions || canDelete)
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (showActions) _PrayerStatusMenu(request: request),
+                    if (canDelete)
+                      IconButton(
+                        tooltip: 'Delete prayer request',
+                        icon: const Icon(Icons.delete_outline),
+                        onPressed: () => _confirmDelete(context),
+                      ),
+                  ],
+                ),
             ],
           ),
           const SizedBox(height: 12),

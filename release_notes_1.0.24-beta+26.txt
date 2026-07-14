@@ -1,0 +1,17 @@
+Grace Connect 1.0.24-beta+26
+
+- Made Grace Rooms easier to find with a stronger heart/support icon treatment.
+- Grace Room messages now vanish from the room after 24 hours, with database expiry support added.
+- Fixed member access to the Members area so care check-in markers can be seen by active church members.
+- Improved Attendance Alerts and care check-in visibility for members who cross the missed-service threshold.
+- Fixed Church Overview member details loading when the database uses roles instead of role.
+- Added save options for feed posts, including Saved tab storage, media download/open, text copy, previews, and removal.
+- Public profile follower counts now update immediately after follow/unfollow.
+- Added a clearer account setup path for people who are not part of a church yet.
+- Added a clear in-app explanation for Grace Circles so members understand how they differ from anonymous Grace Rooms.
+- Rebuilt Study Groups as Bible Study Groups with My Studies, Discover, Invitations, and Managed tabs.
+- Added richer Bible Study Group cards, group profile fields, structured Overview/Read/Discuss/Members/More tabs, and a multi-step create flow.
+- Added central Study Group permissions for pastors, church administrators, group leaders/admins, and explicit Study Group privileges.
+- Replaced one-tap group deletion with secure archive confirmation and Supabase RPC support.
+- Added Supabase foundations for group memberships, invitations, reading plans, assignments, progress, announcements, resources, meetings, check-ins, and moderation.
+- Included the latest Grace Rooms, saved posts, social, attendance, and Study Groups fixes.

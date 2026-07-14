@@ -57,6 +57,36 @@ class EventService {
     );
   }
 
+  Stream<List<EventModel>> getPublicEvents() async* {
+    unawaited(cleanupPastEvents());
+    await for (final events
+        in SupabaseResilience.guardedStream<List<EventModel>>(
+      debugLabel: 'Public events',
+      emptyValue: const <EventModel>[],
+      yieldEmptyOnInitialFailure: true,
+      fetchInitial: fetchPublicEvents,
+      subscribe: () => _supabase
+          .from(_collection)
+          .stream(primaryKey: ['id'])
+          .order('date', ascending: true)
+          .limit(200)
+          .map((docs) => _normalizePublicEvents(docs)),
+    )) {
+      yield events;
+    }
+  }
+
+  Future<List<EventModel>> fetchPublicEvents() async {
+    final data = await _supabase
+        .from(_collection)
+        .select()
+        .eq('visible_to_all_churches', true)
+        .order('date', ascending: true)
+        .limit(200);
+
+    return _normalizePublicEvents(data);
+  }
+
   Future<void> updateEvent(EventModel event) async {
     await _supabase.from(_collection).update({
       'title': event.title,
@@ -180,6 +210,15 @@ class EventService {
           : isOwnChurch;
       return canShow && !_isPastEvent(event);
     }).toList()
+      ..sort((a, b) => a.date.compareTo(b.date));
+    return events;
+  }
+
+  List<EventModel> _normalizePublicEvents(List<dynamic> data) {
+    final events = data
+        .map((doc) => EventModel.fromMap(Map<String, dynamic>.from(doc)))
+        .where((event) => event.visibleToAllChurches && !_isPastEvent(event))
+        .toList()
       ..sort((a, b) => a.date.compareTo(b.date));
     return events;
   }

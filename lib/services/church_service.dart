@@ -282,6 +282,16 @@ class ChurchService {
     final userId = _supabase.auth.currentUser?.id.trim() ?? '';
     if (cleanChurchId.isEmpty || userId.isEmpty) return;
 
+    try {
+      await _supabase.rpc(
+        'record_live_stream_viewer_heartbeat',
+        params: {'p_church_id': cleanChurchId},
+      );
+      return;
+    } catch (error) {
+      debugPrint('Live viewer heartbeat RPC unavailable: $error');
+    }
+
     final now = DateTime.now().toUtc().toIso8601String();
     await _supabase.from('live_stream_viewers').upsert(
       {
@@ -299,6 +309,16 @@ class ChurchService {
     final cleanChurchId = churchId.trim();
     final userId = _supabase.auth.currentUser?.id.trim() ?? '';
     if (cleanChurchId.isEmpty || userId.isEmpty) return;
+
+    try {
+      await _supabase.rpc(
+        'clear_live_stream_viewer_heartbeat',
+        params: {'p_church_id': cleanChurchId},
+      );
+      return;
+    } catch (error) {
+      debugPrint('Live viewer clear RPC unavailable: $error');
+    }
 
     try {
       await _supabase
@@ -319,13 +339,25 @@ class ChurchService {
     if (cleanChurchId.isEmpty) return 0;
 
     try {
+      final response = await _supabase.rpc(
+        'get_live_stream_viewer_count',
+        params: {'p_church_id': cleanChurchId},
+      );
+      if (response is int) return response;
+      if (response is num) return response.toInt();
+      return int.tryParse(response?.toString() ?? '') ?? 0;
+    } catch (error) {
+      debugPrint('Live viewer count RPC unavailable: $error');
+    }
+
+    try {
       final activeSince = DateTime.now()
           .toUtc()
           .subtract(const Duration(seconds: 90))
           .toIso8601String();
       final response = await _supabase
           .from('live_stream_viewers')
-          .select('user_id')
+          .select('id')
           .eq('church_id', cleanChurchId)
           .eq('is_active', true)
           .gte('last_seen_at', activeSince)

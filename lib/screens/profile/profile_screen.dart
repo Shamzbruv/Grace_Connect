@@ -358,6 +358,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  ListTile(
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 6,
+                    ),
+                    leading: const Icon(Icons.person_pin_circle_outlined),
+                    title: const Text('Public Profile'),
+                    subtitle: const Text('Manage how you appear in Discover.'),
+                    trailing: const Icon(Icons.chevron_right),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      side: BorderSide(
+                        color:
+                            colorScheme.outlineVariant.withValues(alpha: 0.45),
+                      ),
+                    ),
+                    onTap: () => Navigator.of(context).pushNamed(
+                      '/public_profile?id=${Uri.encodeComponent(userProfile.uid)}',
+                    ),
+                  ),
+                  const SizedBox(height: 24),
                   Text('CONTACT INFO',
                       style: theme.textTheme.labelSmall?.copyWith(
                           fontWeight: FontWeight.bold,

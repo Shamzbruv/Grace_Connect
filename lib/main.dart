@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'access/app_feature.dart';
 import 'providers/user_role_provider.dart';
 import 'services/attendance_service.dart';
 import 'services/auth_flow_service.dart';
@@ -42,6 +43,9 @@ import 'screens/prayers/prayers_screen.dart';
 import 'screens/analytics/analytics_screen.dart';
 import 'screens/announcements/announcements_screen.dart';
 import 'screens/counseling/counseling_intro_screen.dart';
+import 'screens/community/community_notification_route_screen.dart';
+import 'screens/community/saved_items_screen.dart';
+import 'screens/dashboard/church_overview_detail_screen.dart';
 import 'screens/daily_word/daily_word_screen.dart';
 import 'screens/bible/bible_quiz_screen.dart';
 import 'screens/live_streaming/live_streaming_screen.dart';
@@ -63,6 +67,8 @@ import 'screens/settings/legal_document_screen.dart';
 import 'screens/developer/developer_console_screen.dart';
 import 'screens/splash_screen.dart';
 import 'screens/profile/profile_screen.dart';
+import 'screens/profile/public_profile_screen.dart';
+import 'screens/profile/edit_public_profile_screen.dart';
 import 'screens/profile/support_screen.dart';
 import 'screens/notifications/notifications_screen.dart';
 import 'screens/study_groups/study_group_list_screen.dart';
@@ -70,7 +76,12 @@ import 'screens/messages/inbox_screen.dart';
 import 'screens/testimonies/testimonies_screen.dart';
 import 'screens/ministries/ministries_screen.dart';
 import 'screens/transfer/church_transfer_screen.dart';
+import 'screens/grace_circles/grace_circles_screen.dart';
+import 'screens/grace_circles/grace_circle_detail_screen.dart';
+import 'screens/grace_rooms/grace_rooms_home_screen.dart';
+import 'screens/grace_rooms/grace_room_chat_screen.dart';
 import 'widgets/auth_required.dart';
+import 'widgets/live_mini_player_overlay.dart';
 
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -166,7 +177,11 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
-  Widget _protected(Widget child) => AuthRequired(child: child);
+  Widget _protected(
+    Widget child, {
+    AppFeature feature = AppFeature.appShell,
+  }) =>
+      AuthRequired(requiredFeature: feature, child: child);
 
   @override
   void initState() {
@@ -237,6 +252,9 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
             title: 'Grace Connect',
             debugShowCheckedModeBanner: false,
             navigatorKey: NotificationService.navigatorKey,
+            builder: (context, child) => LiveMiniPlayerOverlay(
+              child: child ?? const SizedBox.shrink(),
+            ),
             theme: AppTheme.lightTheme,
             darkTheme: AppTheme.darkTheme,
             themeMode: themeProvider.themeMode,
@@ -248,57 +266,99 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
               '/reset_password': (context) => const ResetPasswordScreen(),
               '/signup': (context) => const SignupScreen(),
               '/church_signup': (context) => const ChurchSignupScreen(),
-              '/find_church': (context) => _protected(const FindChurchScreen()),
+              '/find_church': (context) => _protected(
+                    const FindChurchScreen(),
+                    feature: AppFeature.publicChurchDirectory,
+                  ),
               '/complete_profile': (context) =>
                   _protected(const CompleteProfileScreen()),
-              '/members': (context) => _protected(const MembersListScreen()),
-              '/membership_requests': (context) =>
-                  _protected(const MembershipRequestsScreen()),
-              '/church_applications': (context) =>
-                  _protected(const ChurchApplicationsScreen()),
-              '/attendance': (context) => _protected(const AttendanceScreen()),
-              '/attendance_insights': (context) =>
-                  _protected(const AttendanceInsightsScreen()),
-              '/attendance_location': (context) =>
-                  _protected(const ChurchLocationPickerScreen()),
-              '/donations': (context) => _protected(const DonationsScreen()),
-              '/events': (context) =>
-                  _protected(const MainTabsScreen(initialIndex: 1)),
-              '/prayers': (context) => _protected(const PrayersScreen()),
-              '/analytics': (context) => _protected(const AnalyticsScreen()),
-              '/announcements': (context) =>
-                  _protected(const AnnouncementsScreen()),
-              '/counseling': (context) =>
-                  _protected(const CounselingIntroScreen()),
-              '/live_streaming': (context) =>
-                  _protected(const LiveStreamingScreen()),
-              '/admin/live_stream': (context) =>
-                  _protected(const AdminStreamSettingsScreen()),
-              '/daily_word': (context) => _protected(const DailyWordScreen()),
-              '/daily_bible_quiz': (context) =>
-                  _protected(const BibleQuizScreen()),
-              '/community': (context) =>
-                  _protected(const MainTabsScreen(initialIndex: 0)),
-              '/bible': (context) =>
-                  _protected(const MainTabsScreen(initialIndex: 3)),
+              '/members': (context) => _protected(
+                    const MembersListScreen(),
+                    feature: AppFeature.memberDirectory,
+                  ),
+              '/membership_requests': (context) => _protected(
+                  const MembershipRequestsScreen(),
+                  feature: AppFeature.roleManagement),
+              '/church_applications': (context) => _protected(
+                  const ChurchApplicationsScreen(),
+                  feature: AppFeature.roleManagement),
+              '/attendance': (context) => _protected(
+                    const AttendanceScreen(),
+                    feature: AppFeature.attendance,
+                  ),
+              '/attendance_insights': (context) => _protected(
+                  const AttendanceInsightsScreen(),
+                  feature: AppFeature.churchAnalytics),
+              '/attendance_location': (context) => _protected(
+                  const ChurchLocationPickerScreen(),
+                  feature: AppFeature.attendance),
+              '/donations': (context) => _protected(
+                    const DonationsScreen(),
+                    feature: AppFeature.churchFinance,
+                  ),
+              '/events': (context) => _protected(
+                    const MainTabsScreen(initialIndex: 1),
+                    feature: AppFeature.publicEvents,
+                  ),
+              '/prayers': (context) => _protected(
+                    const PrayersScreen(),
+                    feature: AppFeature.privatePrayerCare,
+                  ),
+              '/analytics': (context) => _protected(
+                    const AnalyticsScreen(),
+                    feature: AppFeature.churchAnalytics,
+                  ),
+              '/announcements': (context) => _protected(
+                  const AnnouncementsScreen(),
+                  feature: AppFeature.announcements),
+              '/counseling': (context) => _protected(
+                  const CounselingIntroScreen(),
+                  feature: AppFeature.counseling),
+              '/live_streaming': (context) => _protected(
+                  const LiveStreamingScreen(),
+                  feature: AppFeature.communityRead),
+              '/admin/live_stream': (context) => _protected(
+                  const AdminStreamSettingsScreen(),
+                  feature: AppFeature.liveManagement),
+              '/daily_word': (context) => _protected(
+                    const DailyWordScreen(),
+                    feature: AppFeature.dailyWord,
+                  ),
+              '/daily_bible_quiz': (context) => _protected(
+                  const BibleQuizScreen(),
+                  feature: AppFeature.bibleReading),
+              '/community': (context) => _protected(
+                  const MainTabsScreen(initialIndex: 0),
+                  feature: AppFeature.communityRead),
+              '/bible': (context) => _protected(
+                  const MainTabsScreen(initialIndex: 3),
+                  feature: AppFeature.bibleReading),
               '/dashboard': (context) =>
                   _protected(const MainTabsScreen(initialIndex: 2)),
-              '/admin_dashboard': (context) =>
-                  _protected(const AdminDashboard()),
-              '/role_management': (context) =>
-                  _protected(const RoleManagementScreen()),
-              '/schedule_management': (context) =>
-                  _protected(const ScheduleManagementScreen()),
-              '/admin/daily_word': (context) =>
-                  _protected(const DailyMotivationAdminScreen()),
-              '/admin/daily_quiz': (context) =>
-                  _protected(const DailyBibleQuizAdminScreen()),
-              '/finance': (context) =>
-                  _protected(const FinanceDashboardScreen()),
-              '/member_dashboard': (context) =>
-                  _protected(const MemberDashboardScreen()),
-              '/member_view': (context) =>
-                  _protected(const dashboard_variant.MemberDashboard()),
+              '/admin_dashboard': (context) => _protected(
+                  const AdminDashboard(),
+                  feature: AppFeature.churchHome),
+              '/role_management': (context) => _protected(
+                  const RoleManagementScreen(),
+                  feature: AppFeature.roleManagement),
+              '/schedule_management': (context) => _protected(
+                  const ScheduleManagementScreen(),
+                  feature: AppFeature.scheduling),
+              '/admin/daily_word': (context) => _protected(
+                  const DailyMotivationAdminScreen(),
+                  feature: AppFeature.announcements),
+              '/admin/daily_quiz': (context) => _protected(
+                  const DailyBibleQuizAdminScreen(),
+                  feature: AppFeature.announcements),
+              '/finance': (context) => _protected(
+                  const FinanceDashboardScreen(),
+                  feature: AppFeature.churchFinance),
+              '/member_dashboard': (context) => _protected(
+                  const MemberDashboardScreen(),
+                  feature: AppFeature.churchHome),
+              '/member_view': (context) => _protected(
+                  const dashboard_variant.MemberDashboard(),
+                  feature: AppFeature.churchHome),
               '/settings': (context) => _protected(const SettingsHomeScreen()),
               '/settings/account': (context) =>
                   _protected(const AccountSettingsScreen()),
@@ -306,19 +366,27 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
                   _protected(const PrivacySettingsScreen()),
               '/settings/notifications': (context) =>
                   _protected(const NotificationSettingsScreen()),
-              '/notifications': (context) =>
-                  _protected(const NotificationsScreen()),
-              '/inbox': (context) => _protected(const InboxScreen()),
-              '/settings/attendance': (context) =>
-                  _protected(const AttendanceSettingsScreen()),
+              '/notifications': (context) => _protected(
+                    const NotificationsScreen(),
+                    feature: AppFeature.notifications,
+                  ),
+              '/inbox': (context) => _protected(
+                    const InboxScreen(),
+                    feature: AppFeature.directMessages,
+                  ),
+              '/settings/attendance': (context) => _protected(
+                  const AttendanceSettingsScreen(),
+                  feature: AppFeature.attendance),
               '/settings/community': (context) =>
                   _protected(const CommunitySettingsScreen()),
               '/settings/bible': (context) =>
                   _protected(const BibleSettingsScreen()),
-              '/settings/church_admin': (context) =>
-                  _protected(const ChurchAdminSettingsScreen()),
-              '/settings/finance': (context) =>
-                  _protected(const FinanceSettingsScreen()),
+              '/settings/church_admin': (context) => _protected(
+                  const ChurchAdminSettingsScreen(),
+                  feature: AppFeature.roleManagement),
+              '/settings/finance': (context) => _protected(
+                  const FinanceSettingsScreen(),
+                  feature: AppFeature.churchFinance),
               '/settings/app_config': (context) =>
                   _protected(const AppSettingsScreen()),
               '/settings/feedback': (context) =>
@@ -347,13 +415,38 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
               '/developer_console': (context) =>
                   _protected(const DeveloperConsoleScreen()),
               '/profile': (context) => _protected(const ProfileScreen()),
-              '/study_groups': (context) =>
-                  _protected(const StudyGroupListScreen()),
-              '/testimonies': (context) =>
-                  _protected(const TestimoniesScreen()),
-              '/ministries': (context) => _protected(const MinistriesScreen()),
-              '/church_transfer': (context) =>
-                  _protected(const ChurchTransferScreen()),
+              '/public_profile': (context) => _protected(
+                    const PublicProfileScreen(),
+                    feature: AppFeature.socialProfile,
+                  ),
+              '/edit_public_profile': (context) => _protected(
+                    const EditPublicProfileScreen(),
+                    feature: AppFeature.socialProfile,
+                  ),
+              '/saved': (context) => _protected(
+                    const SavedItemsScreen(),
+                    feature: AppFeature.savedItems,
+                  ),
+              '/grace_circles': (context) => _protected(
+                    const GraceCirclesScreen(),
+                    feature: AppFeature.graceCircles,
+                  ),
+              '/grace_rooms': (context) => _protected(
+                    const GraceRoomsHomeScreen(),
+                    feature: AppFeature.graceRooms,
+                  ),
+              '/study_groups': (context) => _protected(
+                  const StudyGroupListScreen(),
+                  feature: AppFeature.studyGroups),
+              '/testimonies': (context) => _protected(const TestimoniesScreen(),
+                  feature: AppFeature.churchTestimonies),
+              '/ministries': (context) => _protected(
+                    const MinistriesScreen(),
+                    feature: AppFeature.ministryManagement,
+                  ),
+              '/church_transfer': (context) => _protected(
+                  const ChurchTransferScreen(),
+                  feature: AppFeature.churchTransfer),
             },
             onGenerateRoute: (settings) {
               final uri = Uri.tryParse(settings.name ?? '');
@@ -363,6 +456,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
                     DailyWordScreen(
                       motivationId: uri?.queryParameters['id'],
                     ),
+                    feature: AppFeature.dailyWord,
                   ),
                 );
               }
@@ -371,7 +465,58 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
                   builder: (_) => _protected(
                     BibleQuizScreen(
                       initialMonth: uri?.queryParameters['month'],
+                      initialQuizId: uri?.queryParameters['quizId'],
                     ),
+                    feature: AppFeature.bibleReading,
+                  ),
+                );
+              }
+              if (uri?.path == '/community_post') {
+                return MaterialPageRoute(
+                  builder: (_) => _protected(
+                    CommunityNotificationRouteScreen(
+                      entityTable: uri?.queryParameters['entityTable'] ?? '',
+                      entityId: uri?.queryParameters['entityId'] ?? '',
+                    ),
+                    feature: AppFeature.communityRead,
+                  ),
+                );
+              }
+              if (uri?.path == '/church_overview_detail') {
+                return MaterialPageRoute(
+                  builder: (_) => _protected(
+                    ChurchOverviewDetailScreen(
+                      metric: uri?.queryParameters['metric'] ?? 'members',
+                    ),
+                    feature: AppFeature.churchHome,
+                  ),
+                );
+              }
+              if (uri?.path == '/public_profile') {
+                return MaterialPageRoute(
+                  builder: (_) => _protected(
+                    PublicProfileScreen(userId: uri?.queryParameters['id']),
+                    feature: AppFeature.socialProfile,
+                  ),
+                );
+              }
+              if (uri?.path == '/grace_circles/circle') {
+                return MaterialPageRoute(
+                  builder: (_) => _protected(
+                    GraceCircleDetailScreen(
+                      circleId: uri?.queryParameters['id'] ?? '',
+                    ),
+                    feature: AppFeature.graceCircles,
+                  ),
+                );
+              }
+              if (uri?.path == '/grace_rooms/room') {
+                return MaterialPageRoute(
+                  builder: (_) => _protected(
+                    GraceRoomChatScreen(
+                      roomId: uri?.queryParameters['id'] ?? '',
+                    ),
+                    feature: AppFeature.graceRooms,
                   ),
                 );
               }

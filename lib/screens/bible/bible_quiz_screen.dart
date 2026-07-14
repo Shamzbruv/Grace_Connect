@@ -2,17 +2,20 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../services/daily_bible_quiz_service.dart';
+import '../../services/notification_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/quiz/monthly_quiz_leaderboard_panel.dart';
 import '../../widgets/ui/app_feedback.dart';
 import '../../widgets/ui/app_loader.dart';
 
 class BibleQuizScreen extends StatefulWidget {
-  const BibleQuizScreen({super.key, this.initialMonth});
+  const BibleQuizScreen({super.key, this.initialMonth, this.initialQuizId});
 
   final String? initialMonth;
+  final String? initialQuizId;
 
   @override
   State<BibleQuizScreen> createState() => _BibleQuizScreenState();
@@ -38,12 +41,17 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
   int _secondsLeft = 30;
   bool _submitting = false;
   bool _active = false;
+  String? _activeQuizId;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _selectedQuizMonth = widget.initialMonth;
+    if (widget.initialQuizId?.trim().isNotEmpty == true) {
+      _activeQuizId = widget.initialQuizId!.trim();
+      unawaited(_clearQuizNotification(_activeQuizId!));
+    }
     _loadStatus();
     unawaited(_loadLeaderboard(quizMonth: _selectedQuizMonth));
     _countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -109,7 +117,9 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
   Future<void> _startQuiz() async {
     try {
       final data = await _service.start();
+      final quizId = data['quiz_id']?.toString();
       setState(() {
+        _activeQuizId = quizId ?? _activeQuizId;
         _attempt = Map<String, dynamic>.from(data['attempt'] as Map);
         _question = Map<String, dynamic>.from(data['question'] as Map);
         _nextRefreshAt =
@@ -178,6 +188,10 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
         _active = !completed;
       });
       if (completed) {
+        final quizId = _activeQuizId;
+        if (quizId != null && quizId.isNotEmpty) {
+          unawaited(_clearQuizNotification(quizId));
+        }
         _stopQuizTimers();
         await _loadLeaderboard();
       }
@@ -351,6 +365,15 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
           );
         }
         final data = snapshot.data ?? const {};
+        final quiz = data['quiz'];
+        if (quiz is Map && quiz['id'] != null) {
+          final quizId = quiz['id'].toString();
+          _activeQuizId = quizId;
+          final attempt = data['attempt'];
+          if (attempt is Map && attempt.isNotEmpty) {
+            unawaited(_clearQuizNotification(quizId));
+          }
+        }
         _nextRefreshAt =
             DateTime.tryParse(data['next_refresh_at']?.toString() ?? '');
         final attempt = data['attempt'];
@@ -378,6 +401,24 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
           onMonthChanged: (month) => _loadLeaderboard(quizMonth: month),
         );
       },
+    );
+  }
+
+  Future<void> _clearQuizNotification(String quizId) async {
+    final cleanQuizId = quizId.trim();
+    if (cleanQuizId.isEmpty) return;
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId != null) {
+      await NotificationService().markEntityAsRead(
+        userId: userId,
+        entityTable: 'daily_bible_quizzes',
+        entityId: cleanQuizId,
+      );
+      return;
+    }
+    await NotificationService().clearEntityNotifications(
+      entityTable: 'daily_bible_quizzes',
+      entityId: cleanQuizId,
     );
   }
 }

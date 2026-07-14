@@ -47,6 +47,7 @@ class _ChurchLocationPickerScreenState
   bool _isCheckingMap = false;
   bool _mapLoadFailed = false;
   bool? _androidMapsApiKeyPresent;
+  String? _mapFailureDetail;
   int _mapRetryToken = 0;
   List<GooglePlaceResult> _searchResults = const [];
 
@@ -142,6 +143,7 @@ class _ChurchLocationPickerScreenState
     setState(() {
       _isCheckingMap = true;
       _mapLoadFailed = false;
+      _mapFailureDetail = null;
     });
 
     try {
@@ -152,6 +154,8 @@ class _ChurchLocationPickerScreenState
         if (!mounted) return;
         setState(() {
           _mapLoadFailed = true;
+          _mapFailureDetail =
+              'Device is offline. Manual coordinates can still be saved.';
           _androidMapsApiKeyPresent =
               _isAndroidMapBuild ? (_androidMapsApiKeyPresent ?? true) : true;
         });
@@ -159,13 +163,16 @@ class _ChurchLocationPickerScreenState
       }
 
       if (_isAndroidMapBuild) {
-        final hasKey = await _configChannel
-                .invokeMethod<bool>('isAndroidMapsApiKeyPresent') ??
-            false;
+        final status = await _configChannel
+            .invokeMapMethod<String, dynamic>('getAndroidMapsConfigStatus');
+        final hasKey = status?['hasKey'] == true;
         if (!mounted) return;
         setState(() {
           _androidMapsApiKeyPresent = hasKey;
           _mapLoadFailed = !hasKey;
+          _mapFailureDetail = hasKey
+              ? null
+              : 'Android Maps API key is missing from this build.';
         });
       } else if (mounted) {
         setState(() => _androidMapsApiKeyPresent = true);
@@ -173,7 +180,10 @@ class _ChurchLocationPickerScreenState
     } catch (error) {
       debugPrint('Map availability check skipped: $error');
       if (mounted) {
-        setState(() => _androidMapsApiKeyPresent = true);
+        setState(() {
+          _androidMapsApiKeyPresent = true;
+          _mapFailureDetail = error.toString();
+        });
       }
     } finally {
       if (mounted) setState(() => _isCheckingMap = false);
@@ -548,6 +558,7 @@ class _ChurchLocationPickerScreenState
                   : _MapFailureCard(
                       onRetry: _retryMap,
                       unsupportedPlatform: !_supportsInteractiveMap,
+                      detail: _mapFailureDetail,
                     ),
           if (_supportsInteractiveMap) ...[
             const SizedBox(height: 12),
@@ -672,10 +683,12 @@ class _MapFailureCard extends StatelessWidget {
   const _MapFailureCard({
     required this.onRetry,
     required this.unsupportedPlatform,
+    this.detail,
   });
 
   final VoidCallback onRetry;
   final bool unsupportedPlatform;
+  final String? detail;
 
   @override
   Widget build(BuildContext context) {
@@ -707,6 +720,15 @@ class _MapFailureCard extends StatelessWidget {
             ],
           ),
           if (!unsupportedPlatform) ...[
+            if (detail?.trim().isNotEmpty == true) ...[
+              const SizedBox(height: 8),
+              Text(
+                detail!.trim(),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onErrorContainer,
+                ),
+              ),
+            ],
             const SizedBox(height: 12),
             OutlinedButton.icon(
               onPressed: onRetry,

@@ -25,11 +25,13 @@ class _NotificationSettingsScreenState
   bool _dailyDevotionals = false;
   bool _dailyQuiz = false;
   bool _isLoading = true;
+  bool? _batteryOptimizationIgnored;
 
   @override
   void initState() {
     super.initState();
     _loadSettings();
+    _loadBatteryOptimizationStatus();
   }
 
   Future<void> _loadSettings() async {
@@ -44,6 +46,18 @@ class _NotificationSettingsScreenState
       _dailyQuiz = prefs.getBool('notify_daily_quiz') ?? false;
       _isLoading = false;
     });
+  }
+
+  Future<void> _loadBatteryOptimizationStatus() async {
+    final ignored = await NotificationService().isIgnoringBatteryOptimizations();
+    if (!mounted) return;
+    setState(() => _batteryOptimizationIgnored = ignored);
+  }
+
+  Future<void> _openBatterySettings() async {
+    await NotificationService().openBatteryOptimizationSettings();
+    await Future<void>.delayed(const Duration(milliseconds: 600));
+    if (mounted) await _loadBatteryOptimizationStatus();
   }
 
   Future<void> _toggleSetting(String key, bool value) async {
@@ -123,6 +137,10 @@ class _NotificationSettingsScreenState
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => Navigator.pushNamed(context, '/notifications'),
                 ),
+                if (_batteryOptimizationIgnored != null) ...[
+                  const SizedBox(height: 12),
+                  _buildBatteryTile(),
+                ],
                 const SizedBox(height: 12),
                 _buildSwitchTile(
                   'Church Announcements',
@@ -210,6 +228,50 @@ class _NotificationSettingsScreenState
         value: value,
         onChanged: onChanged,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    );
+  }
+
+  Widget _buildBatteryTile() {
+    final theme = Theme.of(context);
+    final unrestricted = _batteryOptimizationIgnored == true;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: theme.cardTheme.color,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: ListTile(
+        leading: Icon(
+          unrestricted
+              ? Icons.battery_charging_full_outlined
+              : Icons.battery_alert_outlined,
+          color: unrestricted ? Colors.green : Colors.orange,
+        ),
+        title: const Text(
+          'Background Delivery',
+          style: TextStyle(fontWeight: FontWeight.w600),
+        ),
+        subtitle: Text(
+          unrestricted
+              ? 'Battery optimization is not restricting Grace Connect.'
+              : 'Allow unrestricted battery use so daily and live alerts arrive while the app is closed.',
+          style: TextStyle(
+            fontSize: 12,
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        trailing: TextButton(
+          onPressed: _openBatterySettings,
+          child: Text(unrestricted ? 'Check' : 'Open'),
+        ),
       ),
     );
   }

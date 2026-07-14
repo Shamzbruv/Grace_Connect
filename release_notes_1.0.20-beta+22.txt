@@ -1,0 +1,9 @@
+Grace Connect 1.0.20-beta+22
+
+- Notification taps now open the related post, Daily Word, or Bible Quiz.
+- Completed Daily Word and Bible Quiz alerts now clear automatically.
+- Improved background notification setup and Android battery guidance.
+- Added Maps diagnostics for API key, package, and signing SHA-1.
+- Fixed livestream attendance timing and mini-player after remote attendance.
+- Fixed attendance times, late status, and service-day checks.
+- Bible streaks now count after 1 minute.

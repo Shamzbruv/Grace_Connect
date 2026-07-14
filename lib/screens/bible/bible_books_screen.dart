@@ -226,7 +226,7 @@ class _BibleBooksScreenState extends State<BibleBooksScreen> {
                   const Padding(
                     padding: EdgeInsets.symmetric(vertical: 18),
                     child: Text(
-                      'No streaks have been recorded yet. Read for 5 minutes to appear here.',
+                      'No streaks have been recorded yet. Read for 1 minute to appear here.',
                     ),
                   )
                 else

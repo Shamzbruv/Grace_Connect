@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -44,6 +45,8 @@ class NotificationService {
       FlutterLocalNotificationsPlugin();
   final FirebaseMessaging _messaging = FirebaseMessaging.instance;
   final SupabaseClient _supabase = Supabase.instance.client;
+  static const MethodChannel _configChannel =
+      MethodChannel('love.graceconnect/config');
   StreamSubscription<List<AppNotification>>? _foregroundSubscription;
   Timer? _unansweredReminderTimer;
   DateTime _foregroundStartedAt = DateTime.now();
@@ -85,6 +88,15 @@ class NotificationService {
     'community': _defaultSound,
     'like': _defaultSound,
     'comment': _defaultSound,
+    'community_reaction': _defaultSound,
+    'community_reply': _defaultSound,
+    'community_mention': _defaultSound,
+    'social_follow': _defaultSound,
+    'social_follow_request': _defaultSound,
+    'social_follow_accepted': _defaultSound,
+    'circle_invitation': _defaultSound,
+    'circle_post': _defaultSound,
+    'event_invitation': _defaultSound,
     'message': _NotificationSoundProfile(
       channelId: 'grace_messages_channel_v1',
       channelName: 'Grace Connect Messages',
@@ -92,6 +104,24 @@ class NotificationService {
       soundName: 'grace_message',
     ),
     'direct_message': _NotificationSoundProfile(
+      channelId: 'grace_messages_channel_v1',
+      channelName: 'Grace Connect Messages',
+      description: 'Direct message notifications',
+      soundName: 'grace_message',
+    ),
+    'grace_support_offer': _NotificationSoundProfile(
+      channelId: 'grace_messages_channel_v1',
+      channelName: 'Grace Connect Messages',
+      description: 'Direct message notifications',
+      soundName: 'grace_message',
+    ),
+    'grace_support_response': _NotificationSoundProfile(
+      channelId: 'grace_messages_channel_v1',
+      channelName: 'Grace Connect Messages',
+      description: 'Direct message notifications',
+      soundName: 'grace_message',
+    ),
+    'anonymous_private_message': _NotificationSoundProfile(
       channelId: 'grace_messages_channel_v1',
       channelName: 'Grace Connect Messages',
       description: 'Direct message notifications',
@@ -182,10 +212,20 @@ class NotificationService {
     await _localNotifications.initialize(
       initSettings,
       onDidReceiveNotificationResponse: (response) {
-        _navigateToRoute(response.payload);
+        unawaited(_handleNotificationTapPayload(response.payload));
       },
     );
     await _createAndroidNotificationChannels();
+    final launchDetails =
+        await _localNotifications.getNotificationAppLaunchDetails();
+    final launchResponse = launchDetails?.notificationResponse;
+    if (launchDetails?.didNotificationLaunchApp == true &&
+        launchResponse?.payload != null) {
+      unawaited(Future<void>.delayed(
+        const Duration(milliseconds: 500),
+        () => _handleNotificationTapPayload(launchResponse!.payload),
+      ));
+    }
 
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       final title =
@@ -199,11 +239,17 @@ class NotificationService {
           body,
           route: message.data['route'],
           type: message.data['type'],
+          entityTable: _dataValue(message.data, 'entity_table') ??
+              _dataValue(message.data, 'entityTable'),
+          entityId: _dataValue(message.data, 'entity_id') ??
+              _dataValue(message.data, 'entityId'),
         );
       }
     });
 
-    FirebaseMessaging.onMessageOpenedApp.listen(_openRouteFromMessage);
+    FirebaseMessaging.onMessageOpenedApp.listen(
+      (message) => unawaited(_openRouteFromMessage(message)),
+    );
     final initialMessage = await _messaging.getInitialMessage();
     if (initialMessage != null) {
       unawaited(Future<void>.delayed(
@@ -239,6 +285,10 @@ class NotificationService {
       body,
       route: message.data['route'],
       type: message.data['type'],
+      entityTable: _dataValue(message.data, 'entity_table') ??
+          _dataValue(message.data, 'entityTable'),
+      entityId: _dataValue(message.data, 'entity_id') ??
+          _dataValue(message.data, 'entityId'),
     );
   }
 
@@ -247,10 +297,25 @@ class NotificationService {
     String? body, {
     String? route,
     String? type,
+    String? entityTable,
+    String? entityId,
+    String? notificationId,
   }) async {
     if (kIsWeb) return;
 
     final profile = _profileForType(type);
+    final effectiveRoute = _routeForNotification(
+      route: route,
+      type: type,
+      entityTable: entityTable,
+      entityId: entityId,
+    );
+    final notificationTag = _notificationTag(
+      type: type,
+      route: effectiveRoute,
+      entityTable: entityTable,
+      entityId: entityId,
+    );
     final AndroidNotificationDetails androidDetails =
         AndroidNotificationDetails(
       profile.channelId,
@@ -263,6 +328,7 @@ class NotificationService {
       color: const Color(0xFF0B5C7D),
       playSound: true,
       sound: profile.androidSound,
+      tag: notificationTag,
     );
     final DarwinNotificationDetails iosDetails = DarwinNotificationDetails(
       presentAlert: true,
@@ -278,13 +344,21 @@ class NotificationService {
       _notificationId(
         title: title ?? '',
         body: body ?? '',
-        route: route,
+        route: effectiveRoute,
         type: type,
+        entityTable: entityTable,
+        entityId: entityId,
       ),
       title,
       body,
       details,
-      payload: route,
+      payload: _notificationPayload(
+        route: effectiveRoute,
+        type: type,
+        entityTable: entityTable,
+        entityId: entityId,
+        notificationId: notificationId,
+      ),
     );
   }
 
@@ -293,8 +367,24 @@ class NotificationService {
     required String body,
     required String? route,
     required String? type,
+    required String? entityTable,
+    required String? entityId,
   }) {
+    final cleanEntityTable = entityTable?.trim();
+    final cleanEntityId = entityId?.trim();
+    if (cleanEntityTable?.isNotEmpty == true &&
+        cleanEntityId?.isNotEmpty == true) {
+      return _stableNotificationId('entity|$cleanEntityTable|$cleanEntityId');
+    }
+    final cleanRoute = normalizeRoute(route);
+    if (cleanRoute?.isNotEmpty == true) {
+      return _stableNotificationId('route|$cleanRoute');
+    }
     final seed = '${type ?? 'general'}|${route ?? ''}|$title|$body';
+    return _stableNotificationId(seed);
+  }
+
+  int _stableNotificationId(String seed) {
     var hash = 0;
     for (final unit in seed.codeUnits) {
       hash = 0x1fffffff & (hash + unit);
@@ -374,6 +464,9 @@ class NotificationService {
     required String churchId,
     Iterable<String> roles = const [],
     Iterable<String> privileges = const [],
+    bool notifyAttendance = true,
+    bool notifyDailyMotivation = true,
+    bool notifyDailyQuiz = true,
   }) async {
     if (kIsWeb) return;
 
@@ -386,6 +479,11 @@ class NotificationService {
       await _ensureLocationPermissionPrompt();
     }
 
+    await _seedStartupNotificationPreferences(
+      notifyAttendance: notifyAttendance,
+      notifyDailyMotivation: notifyDailyMotivation,
+      notifyDailyQuiz: notifyDailyQuiz,
+    );
     await syncSubscriptions(
       churchId,
       userId: userId,
@@ -426,8 +524,18 @@ class NotificationService {
     }
   }
 
-  void _openRouteFromMessage(RemoteMessage message) {
-    _navigateToRoute(message.data['route']);
+  Future<void> _openRouteFromMessage(RemoteMessage message) async {
+    final payload = _payloadFromMessageData(message.data);
+    await _markNotificationPayloadHandled(payload);
+    await _cancelNotificationForPayload(payload);
+    _navigateToRoute(payload['route']);
+  }
+
+  Future<void> _handleNotificationTapPayload(String? rawPayload) async {
+    final payload = _decodeNotificationPayload(rawPayload);
+    await _markNotificationPayloadHandled(payload);
+    await _cancelNotificationForPayload(payload);
+    _navigateToRoute(payload['route']);
   }
 
   void _navigateToRoute(String? route) {
@@ -470,6 +578,211 @@ class NotificationService {
     }
     if (!uri.path.startsWith('/')) return null;
     return uri.toString();
+  }
+
+  Map<String, String?> _payloadFromMessageData(Map<String, dynamic> data) {
+    final type = _dataValue(data, 'type');
+    final entityTable =
+        _dataValue(data, 'entity_table') ?? _dataValue(data, 'entityTable');
+    final entityId =
+        _dataValue(data, 'entity_id') ?? _dataValue(data, 'entityId');
+    final route = _routeForNotification(
+      route: _dataValue(data, 'route'),
+      type: type,
+      entityTable: entityTable,
+      entityId: entityId,
+    );
+    return {
+      'route': route,
+      'type': type,
+      'entity_table': entityTable,
+      'entity_id': entityId,
+      'notification_id': _dataValue(data, 'notification_id') ??
+          _dataValue(data, 'notificationId'),
+    };
+  }
+
+  Map<String, String?> _decodeNotificationPayload(String? rawPayload) {
+    if (rawPayload == null || rawPayload.trim().isEmpty) {
+      return const {};
+    }
+    try {
+      final decoded = jsonDecode(rawPayload);
+      if (decoded is Map) {
+        return {
+          'route': decoded['route']?.toString(),
+          'type': decoded['type']?.toString(),
+          'entity_table': decoded['entity_table']?.toString(),
+          'entity_id': decoded['entity_id']?.toString(),
+          'notification_id': decoded['notification_id']?.toString(),
+        };
+      }
+    } catch (_) {
+      // Older notifications used the route itself as the payload.
+    }
+    return {'route': rawPayload};
+  }
+
+  String _notificationPayload({
+    required String? route,
+    required String? type,
+    required String? entityTable,
+    required String? entityId,
+    required String? notificationId,
+  }) {
+    return jsonEncode({
+      if (route?.trim().isNotEmpty == true) 'route': route!.trim(),
+      if (type?.trim().isNotEmpty == true) 'type': type!.trim(),
+      if (entityTable?.trim().isNotEmpty == true)
+        'entity_table': entityTable!.trim(),
+      if (entityId?.trim().isNotEmpty == true) 'entity_id': entityId!.trim(),
+      if (notificationId?.trim().isNotEmpty == true)
+        'notification_id': notificationId!.trim(),
+    });
+  }
+
+  String? _routeForNotification({
+    required String? route,
+    required String? type,
+    required String? entityTable,
+    required String? entityId,
+  }) {
+    final cleanEntityTable = entityTable?.trim() ?? '';
+    final cleanEntityId = entityId?.trim() ?? '';
+    final normalizedType = normalizeNotificationType(type ?? '');
+
+    if (cleanEntityTable == 'community_posts' ||
+        cleanEntityTable == 'community_comments' ||
+        normalizedType == 'community_reaction' ||
+        normalizedType == 'community_reply' ||
+        normalizedType == 'community_mention' ||
+        normalizedType == 'like' ||
+        normalizedType == 'comment') {
+      if (cleanEntityTable.isNotEmpty && cleanEntityId.isNotEmpty) {
+        return Uri(
+          path: '/community_post',
+          queryParameters: {
+            'entityTable': cleanEntityTable,
+            'entityId': cleanEntityId,
+          },
+        ).toString();
+      }
+    }
+
+    if ((cleanEntityTable == 'social_profiles' ||
+            cleanEntityTable == 'users' ||
+            normalizedType == 'social_follow' ||
+            normalizedType == 'social_follow_request' ||
+            normalizedType == 'social_follow_accepted') &&
+        cleanEntityId.isNotEmpty) {
+      return Uri(
+        path: '/public_profile',
+        queryParameters: {'id': cleanEntityId},
+      ).toString();
+    }
+
+    if ((cleanEntityTable == 'grace_circles' ||
+            cleanEntityTable == 'grace_circle_posts' ||
+            normalizedType == 'circle_invitation' ||
+            normalizedType == 'circle_post') &&
+        cleanEntityId.isNotEmpty) {
+      return Uri(
+        path: '/grace_circles/circle',
+        queryParameters: {'id': cleanEntityId},
+      ).toString();
+    }
+
+    if ((cleanEntityTable == 'grace_rooms' ||
+            cleanEntityTable == 'grace_room_messages' ||
+            normalizedType == 'grace_support_offer' ||
+            normalizedType == 'grace_support_response') &&
+        cleanEntityId.isNotEmpty) {
+      return Uri(
+        path: '/grace_rooms/room',
+        queryParameters: {'id': cleanEntityId},
+      ).toString();
+    }
+
+    if (cleanEntityTable == 'events' || normalizedType == 'event_invitation') {
+      return '/events';
+    }
+
+    if (cleanEntityTable == 'social_saved_items') {
+      return '/saved';
+    }
+
+    if (normalizedType == 'message' ||
+        normalizedType == 'direct_message' ||
+        normalizedType == 'anonymous_private_message') {
+      return route?.trim().isNotEmpty == true ? route : '/inbox';
+    }
+
+    if (cleanEntityTable == 'daily_motivations' && cleanEntityId.isNotEmpty) {
+      return Uri(
+        path: '/daily_word',
+        queryParameters: {'id': cleanEntityId},
+      ).toString();
+    }
+
+    if (cleanEntityTable == 'daily_bible_quizzes' && cleanEntityId.isNotEmpty) {
+      return Uri(
+        path: '/daily_bible_quiz',
+        queryParameters: {'quizId': cleanEntityId},
+      ).toString();
+    }
+
+    return route;
+  }
+
+  static String? _dataValue(Map<String, dynamic> data, String key) {
+    final text = data[key]?.toString().trim();
+    return text == null || text.isEmpty ? null : text;
+  }
+
+  Future<void> _markNotificationPayloadHandled(
+      Map<String, String?> payload) async {
+    final notificationId = payload['notification_id']?.trim();
+    if (notificationId?.isNotEmpty == true) {
+      await markAsRead(notificationId!);
+      return;
+    }
+
+    final userId = _supabase.auth.currentUser?.id;
+    final entityTable = payload['entity_table']?.trim();
+    final entityId = payload['entity_id']?.trim();
+    if (userId != null &&
+        entityTable?.isNotEmpty == true &&
+        entityId?.isNotEmpty == true) {
+      await markEntityAsRead(
+        userId: userId,
+        entityTable: entityTable!,
+        entityId: entityId!,
+      );
+      return;
+    }
+
+    final route = payload['route']?.trim();
+    if (userId != null && route?.isNotEmpty == true) {
+      await markRouteAsRead(userId, route!);
+    }
+  }
+
+  Future<void> _cancelNotificationForPayload(
+      Map<String, String?> payload) async {
+    final entityTable = payload['entity_table']?.trim();
+    final entityId = payload['entity_id']?.trim();
+    if (entityTable?.isNotEmpty == true && entityId?.isNotEmpty == true) {
+      await clearEntityNotifications(
+        entityTable: entityTable!,
+        entityId: entityId!,
+      );
+      return;
+    }
+
+    final route = payload['route']?.trim();
+    if (route?.isNotEmpty == true) {
+      await clearRouteNotifications(route!);
+    }
   }
 
   Future<void> sendNotification(
@@ -632,6 +945,7 @@ class NotificationService {
         .eq('user_id', userId)
         .eq('route', route)
         .eq('is_read', false);
+    await clearRouteNotifications(route);
   }
 
   Future<void> markEntityAsRead({
@@ -646,6 +960,29 @@ class NotificationService {
         .eq('entity_table', entityTable)
         .eq('entity_id', entityId)
         .eq('is_read', false);
+    await clearEntityNotifications(
+      entityTable: entityTable,
+      entityId: entityId,
+    );
+  }
+
+  Future<void> clearEntityNotifications({
+    required String entityTable,
+    required String entityId,
+  }) async {
+    if (kIsWeb) return;
+    final tag = _entityNotificationTag(entityTable, entityId);
+    final id = _stableNotificationId('entity|$entityTable|$entityId');
+    await _localNotifications.cancel(id, tag: tag);
+  }
+
+  Future<void> clearRouteNotifications(String route) async {
+    if (kIsWeb) return;
+    final cleanRoute = normalizeRoute(route);
+    if (cleanRoute == null) return;
+    final tag = _routeNotificationTag(cleanRoute);
+    final id = _stableNotificationId('route|$cleanRoute');
+    await _localNotifications.cancel(id, tag: tag);
   }
 
   void watchForegroundNotifications(String userId) {
@@ -742,6 +1079,9 @@ class NotificationService {
       notification.body,
       route: notification.route,
       type: notification.type,
+      entityTable: notification.entityTable,
+      entityId: notification.entityId,
+      notificationId: notification.id,
     );
     await _recordNotificationReminderShown(notification.id);
   }
@@ -863,6 +1203,78 @@ class NotificationService {
     if (cleanUserId.isNotEmpty) {
       await unsubscribeFromTopic(userTopicFor(cleanUserId));
     }
+  }
+
+  Future<void> _seedStartupNotificationPreferences({
+    required bool notifyAttendance,
+    required bool notifyDailyMotivation,
+    required bool notifyDailyQuiz,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+
+    Future<void> seed(String key, bool value) async {
+      if (!prefs.containsKey(key)) await prefs.setBool(key, value);
+    }
+
+    await seed(churchWidePrefKey, true);
+    await seed('notify_service', notifyAttendance);
+    await seed('notify_devotionals', notifyDailyMotivation);
+    await seed('notify_daily_quiz', notifyDailyQuiz);
+    await seed('notify_community', true);
+    await seed('notify_prayer', true);
+    await seed('notify_updates', true);
+  }
+
+  Future<bool?> isIgnoringBatteryOptimizations() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return null;
+    try {
+      return await _configChannel.invokeMethod<bool>(
+        'isIgnoringBatteryOptimizations',
+      );
+    } catch (error) {
+      debugPrint('Battery optimization check skipped: $error');
+      return null;
+    }
+  }
+
+  Future<void> openBatteryOptimizationSettings() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+    try {
+      await _configChannel.invokeMethod<void>(
+        'openBatteryOptimizationSettings',
+      );
+    } catch (error) {
+      debugPrint('Battery optimization settings failed: $error');
+    }
+  }
+
+  String? _notificationTag({
+    required String? type,
+    required String? route,
+    required String? entityTable,
+    required String? entityId,
+  }) {
+    final cleanEntityTable = entityTable?.trim();
+    final cleanEntityId = entityId?.trim();
+    if (cleanEntityTable?.isNotEmpty == true &&
+        cleanEntityId?.isNotEmpty == true) {
+      return _entityNotificationTag(cleanEntityTable!, cleanEntityId!);
+    }
+
+    final cleanRoute = normalizeRoute(route);
+    if (cleanRoute?.isNotEmpty == true) {
+      return _routeNotificationTag(cleanRoute!);
+    }
+
+    return 'type:${normalizeNotificationType(type ?? 'general')}';
+  }
+
+  String _entityNotificationTag(String entityTable, String entityId) {
+    return 'entity:${entityTable.trim()}:${entityId.trim()}';
+  }
+
+  String _routeNotificationTag(String route) {
+    return 'route:${route.trim()}';
   }
 
   @visibleForTesting

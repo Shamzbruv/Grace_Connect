@@ -343,11 +343,12 @@ class AttendanceService {
   /// Returns the currently active recurring service for the given church.
   Future<Map<String, dynamic>?> getActiveService(String churchId) async {
     final now = DateTime.now();
+    final jamaicaNow = _jamaicaWallClock(now);
     final servicesSnapshot = await _supabase
         .from('service_schedules')
         .select()
         .eq('churchId', churchId)
-        .eq('dayOfWeek', now.weekday)
+        .eq('dayOfWeek', jamaicaNow.weekday)
         .eq('attendanceEnabled', true);
 
     for (var doc in servicesSnapshot) {
@@ -394,9 +395,13 @@ class AttendanceService {
       if (dwellDuration.inMinutes >= requiredDwellMinutes) {
         // 5. Mark Present
         _updateDebugStatus('Marking present...');
-        await _markPresent(userId, churchId, activeServiceId,
-            activeServiceStartTime, activeServiceName,
-            detectedAt: _entryTime);
+        await _markPresent(
+          userId,
+          churchId,
+          activeServiceId,
+          activeServiceStartTime,
+          activeServiceName,
+        );
       }
     } else {
       // Service changed while inside? Reset
@@ -408,6 +413,7 @@ class AttendanceService {
   }
 
   bool _isTimeWithinSchedule(DateTime now, ServiceSchedule schedule) {
+    final jamaicaNow = _jamaicaWallClock(now);
     final startParts = _parseTimeParts(schedule.startTime);
     final endParts = _parseTimeParts(schedule.endTime);
     if (startParts == null || endParts == null) {
@@ -415,10 +421,10 @@ class AttendanceService {
       return false;
     }
 
-    final startTime =
-        DateTime(now.year, now.month, now.day, startParts[0], startParts[1]);
-    final endTime =
-        DateTime(now.year, now.month, now.day, endParts[0], endParts[1]);
+    final startTime = DateTime(jamaicaNow.year, jamaicaNow.month,
+        jamaicaNow.day, startParts[0], startParts[1]);
+    final endTime = DateTime(jamaicaNow.year, jamaicaNow.month, jamaicaNow.day,
+        endParts[0], endParts[1]);
 
     final validStart = startTime.subtract(
       Duration(minutes: schedule.checkInOpensMinutesBefore),
@@ -427,7 +433,33 @@ class AttendanceService {
       Duration(minutes: schedule.checkInClosesMinutesAfter),
     );
 
-    return now.isAfter(validStart) && now.isBefore(validEnd);
+    return jamaicaNow.isAfter(validStart) && jamaicaNow.isBefore(validEnd);
+  }
+
+  DateTime _jamaicaWallClock(DateTime instant) {
+    final jamaica = instant.toUtc().subtract(const Duration(hours: 5));
+    return DateTime(
+      jamaica.year,
+      jamaica.month,
+      jamaica.day,
+      jamaica.hour,
+      jamaica.minute,
+      jamaica.second,
+      jamaica.millisecond,
+      jamaica.microsecond,
+    );
+  }
+
+  DateTime _jamaicaDayStartUtc(DateTime instant) {
+    final jamaica = _jamaicaWallClock(instant);
+    return DateTime.utc(jamaica.year, jamaica.month, jamaica.day, 5);
+  }
+
+  String _jamaicaDateKey(DateTime instant) {
+    final jamaica = _jamaicaWallClock(instant);
+    return '${jamaica.year.toString().padLeft(4, '0')}-'
+        '${jamaica.month.toString().padLeft(2, '0')}-'
+        '${jamaica.day.toString().padLeft(2, '0')}';
   }
 
   List<int>? _parseTimeParts(String value) {
@@ -453,11 +485,10 @@ class AttendanceService {
     String? serviceStartTime,
     String? serviceName, {
     String method = 'auto_geofence',
-    DateTime? detectedAt,
   }) async {
     // Check duplication
-    final todayStart =
-        DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day);
+    final todayStart = _jamaicaDayStartUtc(DateTime.now());
+    final tomorrowStart = todayStart.add(const Duration(days: 1));
 
     final existingQuery = await _supabase
         .from('attendance')
@@ -465,6 +496,7 @@ class AttendanceService {
         .eq('user_id', userId)
         .eq('service_id', serviceId)
         .gte('timestamp', todayStart.toIso8601String())
+        .lt('timestamp', tomorrowStart.toIso8601String())
         .limit(1);
 
     if ((existingQuery as List).isNotEmpty) {
@@ -476,8 +508,10 @@ class AttendanceService {
     String status = 'on_time';
     int? minutesLate;
 
+    final checkedInAt = DateTime.now();
+
     if (serviceStartTime != null) {
-      final now = detectedAt ?? DateTime.now();
+      final now = _jamaicaWallClock(checkedInAt);
       final startParts = _parseTimeParts(serviceStartTime);
       if (startParts != null) {
         final scheduleTime = DateTime(
@@ -498,7 +532,7 @@ class AttendanceService {
       userId: userId,
       churchId: churchId,
       serviceId: serviceId,
-      timestamp: DateTime.now(),
+      timestamp: checkedInAt,
       method: method,
       present: true,
       status: status,
@@ -654,7 +688,6 @@ class AttendanceService {
     }
 
     final activeService = await getActiveService(churchId);
-    final detectedAt = await _readDwellEntry(user.id, prompt.serviceId!);
     await _markPresent(
       user.id,
       churchId,
@@ -662,7 +695,6 @@ class AttendanceService {
       activeService?['startTime'] as String?,
       prompt.serviceName,
       method: 'manual_geofence',
-      detectedAt: detectedAt,
     );
   }
 
@@ -783,7 +815,6 @@ class AttendanceService {
     }
 
     final activeService = await getActiveService(churchId);
-    final detectedAt = await _readDwellEntry(user.id, prompt.serviceId!);
     await _markPresent(
       user.id,
       churchId,
@@ -791,7 +822,6 @@ class AttendanceService {
       activeService?['startTime'] as String?,
       prompt.serviceName,
       method: 'manual_geofence',
-      detectedAt: detectedAt,
     );
   }
 
@@ -810,8 +840,8 @@ class AttendanceService {
     final finalServiceName = activeService['name']! as String;
 
     // 2. Check if already marked present for this service (or today broadly if ad-hoc)
-    final todayStart =
-        DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day);
+    final todayStart = _jamaicaDayStartUtc(DateTime.now());
+    final tomorrowStart = todayStart.add(const Duration(days: 1));
 
     final existingQuery = await _supabase
         .from('attendance')
@@ -819,6 +849,7 @@ class AttendanceService {
         .eq('user_id', userId)
         .eq('service_id', finalServiceId)
         .gte('timestamp', todayStart.toIso8601String())
+        .lt('timestamp', tomorrowStart.toIso8601String())
         .limit(1);
 
     if ((existingQuery as List).isNotEmpty) {
@@ -918,13 +949,15 @@ class AttendanceService {
     final timestamp = DateTime.tryParse(record['timestamp']?.toString() ?? '');
     if (userId.isEmpty || serviceId.isEmpty || timestamp == null) return false;
 
-    final dayStart = DateTime(timestamp.year, timestamp.month, timestamp.day);
+    final dayStart = _jamaicaDayStartUtc(timestamp);
+    final nextDayStart = dayStart.add(const Duration(days: 1));
     final rows = await _supabase
         .from('attendance')
         .select('id')
         .eq('user_id', userId)
         .eq('service_id', serviceId)
         .gte('timestamp', dayStart.toIso8601String())
+        .lt('timestamp', nextDayStart.toIso8601String())
         .limit(1);
     return rows.isNotEmpty;
   }
@@ -932,8 +965,8 @@ class AttendanceService {
   String _attendanceDedupeKey(Map<dynamic, dynamic> record) {
     final timestamp = DateTime.tryParse(record['timestamp']?.toString() ?? '');
     final dateKey = timestamp == null
-        ? DateTime.now().toIso8601String().substring(0, 10)
-        : timestamp.toIso8601String().substring(0, 10);
+        ? _jamaicaDateKey(DateTime.now())
+        : _jamaicaDateKey(timestamp);
     return [
       record['user_id'] ?? '',
       record['service_id'] ?? '',
@@ -1020,8 +1053,8 @@ class AttendanceService {
   }
 
   Future<bool> _hasAttendanceForToday(String userId, String serviceId) async {
-    final todayStart =
-        DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day);
+    final todayStart = _jamaicaDayStartUtc(DateTime.now());
+    final tomorrowStart = todayStart.add(const Duration(days: 1));
 
     final existingQuery = await _supabase
         .from('attendance')
@@ -1029,9 +1062,26 @@ class AttendanceService {
         .eq('user_id', userId)
         .eq('service_id', serviceId)
         .gte('timestamp', todayStart.toIso8601String())
+        .lt('timestamp', tomorrowStart.toIso8601String())
         .limit(1);
 
     return (existingQuery as List).isNotEmpty;
+  }
+
+  Future<bool> hasAttendanceForActiveService(
+    String churchId, {
+    String? userId,
+  }) async {
+    final activeService = await getActiveService(churchId);
+    final serviceId = activeService?['id']?.toString();
+    final effectiveUserId = userId ?? _supabase.auth.currentUser?.id;
+    if (serviceId == null ||
+        serviceId.isEmpty ||
+        effectiveUserId == null ||
+        effectiveUserId.isEmpty) {
+      return false;
+    }
+    return _hasAttendanceForToday(effectiveUserId, serviceId);
   }
 
   Future<DateTime> _readOrStartDwellEntry(
@@ -1047,12 +1097,6 @@ class AttendanceService {
     _entryTime = now;
     _currentServiceId = serviceId;
     return now;
-  }
-
-  Future<DateTime?> _readDwellEntry(String userId, String serviceId) async {
-    final prefs = await SharedPreferences.getInstance();
-    final stored = prefs.getString(_dwellKey(userId, serviceId));
-    return stored == null ? null : DateTime.tryParse(stored);
   }
 
   Future<void> _saveDwellEntry(

@@ -159,6 +159,7 @@ class _PastorDashboardState extends State<PastorDashboard> {
                   '${data.stats.activeMembers}',
                   'Profiles linked to this church',
                   Icons.people_outline,
+                  'members',
                 ),
                 _buildMiniCard(
                   context,
@@ -166,6 +167,7 @@ class _PastorDashboardState extends State<PastorDashboard> {
                   '${data.stats.attendanceThisWeek}',
                   'Check-ins recorded this week',
                   Icons.event_available_outlined,
+                  'attendance',
                 ),
                 _buildMiniCard(
                   context,
@@ -173,6 +175,7 @@ class _PastorDashboardState extends State<PastorDashboard> {
                   '${data.upcomingEvents}',
                   'Events still ahead',
                   Icons.calendar_month_outlined,
+                  'events',
                 ),
                 _buildMiniCard(
                   context,
@@ -180,6 +183,7 @@ class _PastorDashboardState extends State<PastorDashboard> {
                   '${data.activePrayerRequests + data.openCareCases}',
                   'Open prayer and counseling items',
                   Icons.favorite_border,
+                  'care',
                 ),
               ],
             );
@@ -195,67 +199,78 @@ class _PastorDashboardState extends State<PastorDashboard> {
     String value,
     String description,
     IconData icon,
+    String metric,
   ) {
     final theme = Theme.of(context);
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: theme.cardTheme.color,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
         borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: theme.brightness == Brightness.dark
-                ? Colors.black26
-                : Colors.black12,
-            blurRadius: 4,
-            offset: const Offset(0, 2),
-          )
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Icon(icon, color: theme.colorScheme.primary),
-          const SizedBox(height: 6),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                FittedBox(
-                  fit: BoxFit.scaleDown,
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    value,
-                    style: theme.textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
-                Text(
-                  title,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    height: 1.05,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  description,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                    height: 1.05,
-                  ),
-                ),
-              ],
-            ),
+        onTap: () => Navigator.pushNamed(
+          context,
+          '/church_overview_detail?metric=$metric',
+        ),
+        child: Ink(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: theme.cardTheme.color,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: theme.brightness == Brightness.dark
+                    ? Colors.black26
+                    : Colors.black12,
+                blurRadius: 4,
+                offset: const Offset(0, 2),
+              )
+            ],
           ),
-        ],
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Icon(icon, color: theme.colorScheme.primary),
+              const SizedBox(height: 6),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        value,
+                        style: theme.textTheme.headlineSmall?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    Text(
+                      title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        height: 1.05,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      description,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                        height: 1.05,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

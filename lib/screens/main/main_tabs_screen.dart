@@ -2,15 +2,17 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../access/app_access_context.dart';
+import '../../access/app_feature.dart';
 import '../../models/user_profile.dart';
 import '../../providers/user_role_provider.dart';
-import '../../services/church_subscription_service.dart';
 import '../../services/feed_scroll_service.dart';
 import '../../widgets/app_bottom_menu.dart';
 import '../../widgets/main_tab_scope.dart';
 import '../bible/bible_home_screen.dart';
 import '../community/community_feed_screen.dart';
 import '../dashboard/dashboard_screen.dart';
+import '../dashboard/variants/unconnected_dashboard.dart';
 import '../events/events_screen.dart';
 
 class MainTabsScreen extends StatefulWidget {
@@ -34,39 +36,22 @@ class MainTabsScreen extends StatefulWidget {
 }
 
 class _MainTabsScreenState extends State<MainTabsScreen> {
+  static const List<AppFeature> _primaryFeatures = [
+    AppFeature.communityRead,
+    AppFeature.publicEvents,
+    AppFeature.appShell,
+    AppFeature.bibleReading,
+    AppFeature.appShell,
+  ];
+
   late final PageController _pageController;
   late int _currentIndex;
-  bool _subscriptionLimited = false;
-
-  bool get _hasLimitedAccess =>
-      widget.membershipLimited || _subscriptionLimited;
-
-  Set<int> get _allowedPrimaryIndexes {
-    if (widget.membershipLimited) return const {0};
-    if (_subscriptionLimited) return const {3};
-    return const {0, 1, 2, 3, 4};
-  }
-
-  Set<String> get _allowedRoutes {
-    if (widget.membershipLimited) return const {'/community'};
-    if (_subscriptionLimited) return const {'/bible', '/daily_word'};
-    return const {};
-  }
-
-  String get _limitedNotice {
-    if (widget.membershipLimited) {
-      return widget.limitedMessage ??
-          'Your church access is not active yet. You can browse the public feed, but member tools unlock after church approval.';
-    }
-    return 'This church subscription is not active. Bible reading and Daily Word are available, but church tools are paused. Please contact your church admin about subscription options.';
-  }
 
   @override
   void initState() {
     super.initState();
     _currentIndex = widget.initialIndex.clamp(0, 4);
     _pageController = PageController(initialPage: _currentIndex);
-    _loadSubscriptionState();
   }
 
   @override
@@ -76,14 +61,18 @@ class _MainTabsScreenState extends State<MainTabsScreen> {
   }
 
   void _setTab(int index) {
+    final access = _readAccess();
+    final feature = _primaryFeatures[index];
+    if (access != null && !access.canUse(feature)) {
+      _showUnavailableNotice(access, feature);
+      return;
+    }
+
     if (index == _currentIndex) {
       if (index == 0) FeedScrollService.requestScrollToTop();
       return;
     }
-    if (_hasLimitedAccess && !_allowedPrimaryIndexes.contains(index)) {
-      _showLimitedNotice();
-      return;
-    }
+
     setState(() => _currentIndex = index);
     _pageController.animateToPage(
       index,
@@ -92,63 +81,48 @@ class _MainTabsScreenState extends State<MainTabsScreen> {
     );
   }
 
-  Future<void> _loadSubscriptionState() async {
-    if (widget.membershipLimited) {
-      if (!mounted) return;
-      setState(() {
-        _subscriptionLimited = false;
-        _currentIndex = 0;
-      });
-      if (_pageController.hasClients) {
-        _pageController.jumpToPage(0);
-      }
-      return;
-    }
-
-    final contextResult =
-        await ChurchSubscriptionService().getCurrentChurchSubscription();
-    if (!mounted) return;
-
-    final limited = !contextResult.isActive;
-    setState(() {
-      _subscriptionLimited = limited;
-      if (limited) _currentIndex = 3;
-    });
-
-    if (limited && _pageController.hasClients) {
-      _pageController.jumpToPage(3);
+  AppAccessContext? _readAccess() {
+    try {
+      return context.read<AppAccessContext>();
+    } catch (_) {
+      return null;
     }
   }
 
-  void _showLimitedNotice() {
+  void _showUnavailableNotice(AppAccessContext access, AppFeature feature) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(_limitedNotice),
+        content: Text(access.unavailableMessageFor(feature)),
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    AppAccessContext? access;
+    try {
+      access = context.watch<AppAccessContext>();
+    } catch (_) {
+      access = null;
+    }
+
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
-        final fallbackIndex = _allowedPrimaryIndexes.first;
-        if (didPop || _currentIndex == fallbackIndex) return;
-        _setTab(fallbackIndex);
+        if (didPop || _currentIndex == 0) return;
+        _setTab(0);
       },
       child: Scaffold(
         body: MainTabScope(
           inTabShell: true,
           child: PageView(
             controller: _pageController,
-            physics:
-                _hasLimitedAccess ? const NeverScrollableScrollPhysics() : null,
             onPageChanged: (index) {
-              if (_hasLimitedAccess &&
-                  !_allowedPrimaryIndexes.contains(index)) {
-                _pageController.jumpToPage(_allowedPrimaryIndexes.first);
-                _showLimitedNotice();
+              final currentAccess = _readAccess();
+              final feature = _primaryFeatures[index];
+              if (currentAccess != null && !currentAccess.canUse(feature)) {
+                _pageController.jumpToPage(_currentIndex);
+                _showUnavailableNotice(currentAccess, feature);
                 return;
               }
               setState(() => _currentIndex = index);
@@ -156,20 +130,18 @@ class _MainTabsScreenState extends State<MainTabsScreen> {
             children: [
               CommunityFeedScreen(
                 showBottomMenu: false,
-                limitedAccessTitle: widget.limitedTitle,
-                limitedAccessMessage: widget.limitedMessage,
                 showFindChurchAction: widget.showFindChurchAction,
               ),
               const EventsScreen(showBottomMenu: false),
-              const DashboardScreen(),
+              access == null || access.hasActiveChurchSubscription
+                  ? const DashboardScreen()
+                  : UnconnectedDashboard(access: access),
               BibleHomeScreen(
                 showBottomNavigation: false,
-                allowDailyQuiz: !_subscriptionLimited,
+                allowDailyQuiz: access?.hasActiveChurchSubscription ?? true,
               ),
               _MoreTabScreen(
-                subscriptionLimited: _hasLimitedAccess,
-                limitedAllowedRoutes: _allowedRoutes,
-                limitedNotice: _limitedNotice,
+                access: access,
               ),
             ],
           ),
@@ -177,10 +149,7 @@ class _MainTabsScreenState extends State<MainTabsScreen> {
         bottomNavigationBar: AppBottomMenu(
           selectedIndex: _currentIndex,
           onDestinationSelected: _setTab,
-          subscriptionLimited: _hasLimitedAccess,
-          limitedAllowedIndexes: _allowedPrimaryIndexes,
-          limitedAllowedRoutes: _allowedRoutes,
-          limitedNotice: _limitedNotice,
+          access: access,
         ),
       ),
     );
@@ -189,14 +158,10 @@ class _MainTabsScreenState extends State<MainTabsScreen> {
 
 class _MoreTabScreen extends StatelessWidget {
   const _MoreTabScreen({
-    required this.subscriptionLimited,
-    required this.limitedAllowedRoutes,
-    required this.limitedNotice,
+    required this.access,
   });
 
-  final bool subscriptionLimited;
-  final Set<String> limitedAllowedRoutes;
-  final String limitedNotice;
+  final AppAccessContext? access;
 
   @override
   Widget build(BuildContext context) {
@@ -220,54 +185,154 @@ class _MoreTabScreen extends StatelessWidget {
 
     final actions = [
       if (!isPlainMember)
-        const _MoreAction('Member View', '/member_view', Icons.home_outlined),
-      const _MoreAction('Members', '/members', Icons.people_outline),
-      const _MoreAction('Inbox', '/inbox', Icons.inbox_outlined),
+        const _MoreAction(
+          'Member View',
+          '/member_view',
+          Icons.home_outlined,
+          AppFeature.churchHome,
+        ),
       const _MoreAction(
-          'Attendance', '/attendance', Icons.checklist_rtl_outlined),
+        'Members',
+        '/members',
+        Icons.people_outline,
+        AppFeature.memberDirectory,
+      ),
       const _MoreAction(
-          'Transfer', '/church_transfer', Icons.compare_arrows_outlined),
+        'Inbox',
+        '/inbox',
+        Icons.inbox_outlined,
+        AppFeature.directMessages,
+      ),
       const _MoreAction(
-          'Announcements', '/announcements', Icons.campaign_outlined),
+        'Attendance',
+        '/attendance',
+        Icons.checklist_rtl_outlined,
+        AppFeature.attendance,
+      ),
+      const _MoreAction(
+        'Transfer',
+        '/church_transfer',
+        Icons.compare_arrows_outlined,
+        AppFeature.churchTransfer,
+      ),
+      const _MoreAction(
+        'Announcements',
+        '/announcements',
+        Icons.campaign_outlined,
+        AppFeature.announcements,
+      ),
       if (canManageSchedules)
         const _MoreAction(
           'Schedules',
           '/schedule_management',
           Icons.event_available_outlined,
+          AppFeature.scheduling,
         ),
       const _MoreAction(
-          'Testimonies', '/testimonies', Icons.auto_awesome_outlined),
-      const _MoreAction('Ministries', '/ministries', Icons.groups_outlined),
+        'Testimonies',
+        '/testimonies',
+        Icons.auto_awesome_outlined,
+        AppFeature.churchTestimonies,
+      ),
+      const _MoreAction(
+        'Ministries',
+        '/ministries',
+        Icons.groups_outlined,
+        AppFeature.ministryManagement,
+      ),
       _MoreAction(
         canManagePrayers ? 'Prayer Requests' : 'Prayers',
         '/prayers',
         Icons.volunteer_activism_outlined,
+        AppFeature.privatePrayerCare,
       ),
       _MoreAction(
         canAccessCareCases ? 'Care Cases' : 'Counseling',
         '/counseling',
         Icons.favorite_outline,
+        AppFeature.counseling,
       ),
-      const _MoreAction('Live', '/live_streaming', Icons.live_tv_outlined),
+      const _MoreAction(
+        'Live',
+        '/live_streaming',
+        Icons.live_tv_outlined,
+        AppFeature.communityRead,
+      ),
       if (canManageLive)
         const _MoreAction(
           'Manage Live',
           '/admin/live_stream',
           Icons.settings_input_antenna_outlined,
+          AppFeature.liveManagement,
         ),
       if (canViewAnalytics)
-        const _MoreAction('Analytics', '/analytics', Icons.analytics_outlined),
+        const _MoreAction(
+          'Analytics',
+          '/analytics',
+          Icons.analytics_outlined,
+          AppFeature.churchAnalytics,
+        ),
       if (canManageRoles)
-        const _MoreAction('Roles', '/role_management', Icons.security_outlined),
-      const _MoreAction('Giving', '/donations', Icons.favorite_outline),
+        const _MoreAction(
+          'Roles',
+          '/role_management',
+          Icons.security_outlined,
+          AppFeature.roleManagement,
+        ),
+      const _MoreAction(
+        'Giving',
+        '/donations',
+        Icons.favorite_outline,
+        AppFeature.churchFinance,
+      ),
       const _MoreAction(
         'Notifications',
         '/notifications',
         Icons.notifications_outlined,
+        AppFeature.notifications,
       ),
-      const _MoreAction('Settings', '/settings', Icons.settings_outlined),
-      const _MoreAction('Profile', '/profile', Icons.person_outline),
-      const _MoreAction('Support', '/support', Icons.support_agent_outlined),
+      const _MoreAction(
+        'Grace Rooms',
+        '/grace_rooms',
+        Icons.volunteer_activism_outlined,
+        AppFeature.graceRooms,
+      ),
+      const _MoreAction(
+        'Grace Circles',
+        '/grace_circles',
+        Icons.diversity_3_outlined,
+        AppFeature.graceCircles,
+      ),
+      const _MoreAction(
+        'Saved',
+        '/saved',
+        Icons.bookmarks_outlined,
+        AppFeature.savedItems,
+      ),
+      const _MoreAction(
+        'Public Profile',
+        '/public_profile',
+        Icons.person_pin_circle_outlined,
+        AppFeature.socialProfile,
+      ),
+      const _MoreAction(
+        'Settings',
+        '/settings',
+        Icons.settings_outlined,
+        AppFeature.appShell,
+      ),
+      const _MoreAction(
+        'Profile',
+        '/profile',
+        Icons.person_outline,
+        AppFeature.appShell,
+      ),
+      const _MoreAction(
+        'Support',
+        '/support',
+        Icons.support_agent_outlined,
+        AppFeature.appShell,
+      ),
     ];
 
     return SafeArea(
@@ -283,9 +348,8 @@ class _MoreTabScreen extends StatelessWidget {
           for (final action in actions) ...[
             _MoreActionTile(
               action: action,
-              subscriptionLimited: subscriptionLimited &&
-                  !limitedAllowedRoutes.contains(action.route),
-              limitedNotice: limitedNotice,
+              locked: access != null && !access!.canUse(action.feature),
+              lockedMessage: access?.unavailableMessageFor(action.feature),
             ),
             const SizedBox(height: 8),
           ],
@@ -346,39 +410,60 @@ class _MoreTabScreen extends StatelessWidget {
 }
 
 class _MoreAction {
-  const _MoreAction(this.label, this.route, this.icon);
+  const _MoreAction(this.label, this.route, this.icon, this.feature);
 
   final String label;
   final String route;
   final IconData icon;
+  final AppFeature feature;
 }
 
 class _MoreActionTile extends StatelessWidget {
   const _MoreActionTile({
     required this.action,
-    required this.subscriptionLimited,
-    required this.limitedNotice,
+    required this.locked,
+    this.lockedMessage,
   });
 
   final _MoreAction action;
-  final bool subscriptionLimited;
-  final String limitedNotice;
+  final bool locked;
+  final String? lockedMessage;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final disabled = subscriptionLimited;
+    final disabled = locked;
+    final isGraceRooms = action.route == '/grace_rooms';
     final foreground = disabled
         ? theme.colorScheme.onSurface.withValues(alpha: 0.38)
-        : theme.colorScheme.primary;
+        : isGraceRooms
+            ? theme.colorScheme.secondary
+            : theme.colorScheme.primary;
 
     return ListTile(
-      leading: Icon(action.icon, color: foreground),
+      leading: isGraceRooms
+          ? Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: disabled
+                    ? theme.colorScheme.surfaceContainerHighest
+                    : foreground.withValues(alpha: 0.18),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: disabled
+                      ? theme.dividerColor.withValues(alpha: 0.12)
+                      : foreground.withValues(alpha: 0.32),
+                ),
+              ),
+              child: Icon(action.icon, color: foreground),
+            )
+          : Icon(action.icon, color: foreground),
       title: Text(
         action.label,
         style: theme.textTheme.titleMedium?.copyWith(
           color: disabled ? foreground : null,
-          fontWeight: FontWeight.w700,
+          fontWeight: isGraceRooms ? FontWeight.w900 : FontWeight.w700,
         ),
       ),
       trailing: Icon(
@@ -394,7 +479,11 @@ class _MoreActionTile extends StatelessWidget {
       onTap: disabled
           ? () {
               ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text(limitedNotice)),
+                SnackBar(
+                  content: Text(
+                    lockedMessage ?? '${action.label} is not available yet.',
+                  ),
+                ),
               );
             }
           : () => Navigator.of(context).pushNamed(action.route),

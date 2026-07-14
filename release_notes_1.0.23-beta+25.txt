@@ -1,0 +1,10 @@
+Grace Connect 1.0.23-beta+25
+
+- Rebuilt Grace Rooms as permanent platform-defined 24/7 support rooms with no in-app room creation.
+- Added rotating Scripture greetings for Grace Rooms and fallback permanent rooms when the database seed is unavailable.
+- Added delete options for study groups, testimonies, prayer requests, and counseling requests where the user has permission.
+- Fixed Following feed behavior, public profile follower/following visibility, public profile posts, and saved-post fallback behavior.
+- Added developer review for reported users and their posts.
+- Added Church Overview detail pages for members, attendance, events, and care needs.
+- Updated Daily Word archive behavior to group current-year entries by month.
+- Added Supabase migration for missing social tables, Grace Rooms seed/lockdown, report review, and delete policies.

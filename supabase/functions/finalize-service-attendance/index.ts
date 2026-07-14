@@ -18,6 +18,9 @@ type ServiceScheduleRow = {
 type MemberRow = {
   id?: string;
   uid?: string;
+  fullName?: string;
+  photoUrl?: string;
+  joinDate?: string;
   roles?: string[];
   appPrivileges?: string[];
 };
@@ -27,6 +30,7 @@ type AttendanceRow = {
   present?: boolean;
   status?: string;
   method?: string;
+  timestamp?: string;
 };
 
 const leaderRoles = new Set([
@@ -137,6 +141,20 @@ function memberUserId(member: MemberRow): string {
   return String(member.uid ?? member.id ?? "").trim();
 }
 
+function memberDisplayName(member: MemberRow): string {
+  const name = String(member.fullName ?? "").trim();
+  return name || "Member";
+}
+
+function memberPhotoUrl(member: MemberRow): string {
+  return String(member.photoUrl ?? "").trim();
+}
+
+function memberJoinDate(member: MemberRow): Date | null {
+  const parsed = new Date(String(member.joinDate ?? ""));
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
 function isSundaySchool(schedule: ServiceScheduleRow): boolean {
   return String(schedule.name ?? "").toLowerCase().includes("sunday school");
 }
@@ -146,6 +164,111 @@ function isLeader(member: MemberRow): boolean {
   const privileges = Array.isArray(member.appPrivileges) ? member.appPrivileges : [];
   return roles.some((role) => leaderRoles.has(normalizeRole(String(role)))) ||
     privileges.some((privilege) => leaderPrivileges.has(String(privilege)));
+}
+
+async function fetchAbsenceThresholdWeeks(client: ReturnType<typeof serviceClient>, churchId: string) {
+  const { data } = await client
+    .from("church_attendance_alert_settings")
+    .select("absence_threshold_weeks")
+    .eq("church_id", churchId)
+    .maybeSingle();
+  const raw = Number(data?.absence_threshold_weeks ?? 2);
+  if (!Number.isFinite(raw)) return 2;
+  return Math.max(1, Math.min(26, Math.trunc(raw)));
+}
+
+async function latestPresentAttendanceDate(
+  client: ReturnType<typeof serviceClient>,
+  churchId: string,
+  primaryUserId: string,
+  alternateUserId?: string,
+) {
+  const userIds = Array.from(
+    new Set([primaryUserId, alternateUserId].map((id) => String(id ?? "").trim()).filter(Boolean)),
+  );
+  if (userIds.length === 0) return null;
+
+  const { data } = await client
+    .from("attendance")
+    .select("timestamp")
+    .eq("church_id", churchId)
+    .eq("present", true)
+    .in("user_id", userIds)
+    .order("timestamp", { ascending: false })
+    .limit(1);
+
+  const timestamp = String(data?.[0]?.timestamp ?? "");
+  const parsed = new Date(timestamp);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+async function syncCareAlertForMember(params: {
+  client: ReturnType<typeof serviceClient>;
+  churchId: string;
+  member: MemberRow;
+  thresholdWeeks: number;
+  asOf: Date;
+}) {
+  const { client, churchId, member, thresholdWeeks, asOf } = params;
+  const primaryUserId = memberUserId(member);
+  if (!primaryUserId) return false;
+
+  const lastPresentDate = await latestPresentAttendanceDate(
+    client,
+    churchId,
+    primaryUserId,
+    String(member.id ?? "").trim(),
+  );
+  const baseline = lastPresentDate ?? memberJoinDate(member) ?? asOf;
+  const daysAbsent = Math.max(
+    0,
+    Math.floor((asOf.getTime() - baseline.getTime()) / (24 * 60 * 60 * 1000)),
+  );
+  const weeksAbsent = daysAbsent <= 0 ? 0 : Math.floor(daysAbsent / 7);
+
+  const { data: existingRows } = await client
+    .from("priority_follow_ups")
+    .select("id")
+    .eq("churchId", churchId)
+    .eq("userId", primaryUserId)
+    .eq("status", "open")
+    .limit(1);
+  const existingId = String(existingRows?.[0]?.id ?? "").trim();
+
+  if (weeksAbsent >= thresholdWeeks) {
+    const payload = {
+      userId: primaryUserId,
+      userName: memberDisplayName(member),
+      userPhotoUrl: memberPhotoUrl(member),
+      churchId,
+      absenceStreakWeeks: weeksAbsent,
+      lastAttendedDate: lastPresentDate?.toISOString() ?? null,
+      status: "open",
+      updatedAt: new Date().toISOString(),
+    };
+    if (existingId) {
+      await client.from("priority_follow_ups").update(payload).eq("id", existingId);
+    } else {
+      await client.from("priority_follow_ups").insert({
+        ...payload,
+        flaggedAt: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+      });
+    }
+    return true;
+  }
+
+  if (existingId) {
+    await client.from("priority_follow_ups").update({
+      status: "resolved",
+      resolvedAt: new Date().toISOString(),
+      resolvedBy: null,
+      updatedAt: new Date().toISOString(),
+    }).eq("id", existingId);
+    return true;
+  }
+
+  return false;
 }
 
 Deno.serve(async (request) => {
@@ -178,6 +301,7 @@ Deno.serve(async (request) => {
   let servicesFinalized = 0;
   let absencesCreated = 0;
   let reportsCreated = 0;
+  let careAlertsUpdated = 0;
 
   for (const churchId of churchIds) {
     const { data: membershipRows, error: membershipError } = await client
@@ -194,12 +318,13 @@ Deno.serve(async (request) => {
 
     const { data: members, error: memberError } = await client
       .from("users")
-      .select("id, uid, roles, appPrivileges")
+      .select("id, uid, fullName, photoUrl, joinDate, roles, appPrivileges")
       .in("id", memberIds);
     if (memberError) continue;
 
     const churchMembers = (members ?? []) as MemberRow[];
     if (churchMembers.length === 0) continue;
+    const absenceThresholdWeeks = await fetchAbsenceThresholdWeeks(client, churchId);
 
     for (const info of targetDates) {
       const { data: schedules, error: scheduleError } = await client
@@ -299,6 +424,17 @@ Deno.serve(async (request) => {
         }, { onConflict: "church_id,service_id,service_date" });
         servicesFinalized++;
 
+        for (const member of churchMembers) {
+          const changed = await syncCareAlertForMember({
+            client,
+            churchId,
+            member,
+            thresholdWeeks: absenceThresholdWeeks,
+            asOf: info.endUtc,
+          });
+          if (changed) careAlertsUpdated++;
+        }
+
         if (isSundaySchool(schedule)) {
           const leaders = churchMembers.filter(isLeader);
           const notificationRows = leaders
@@ -343,5 +479,6 @@ Deno.serve(async (request) => {
     services_finalized: servicesFinalized,
     absences_created: absencesCreated,
     reports_created: reportsCreated,
+    care_alerts_updated: careAlertsUpdated,
   });
 });

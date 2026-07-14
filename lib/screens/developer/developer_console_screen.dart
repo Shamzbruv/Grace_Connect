@@ -20,7 +20,7 @@ class _DeveloperConsoleScreenState extends State<DeveloperConsoleScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
     _verifyAccess();
   }
 
@@ -79,6 +79,7 @@ class _DeveloperConsoleScreenState extends State<DeveloperConsoleScreen>
           tabs: const [
             Tab(icon: Icon(Icons.dashboard), text: 'Overview'),
             Tab(icon: Icon(Icons.church), text: 'Churches'),
+            Tab(icon: Icon(Icons.report_outlined), text: 'Reports'),
             Tab(icon: Icon(Icons.dns), text: 'System'),
           ],
         ),
@@ -88,6 +89,7 @@ class _DeveloperConsoleScreenState extends State<DeveloperConsoleScreen>
         children: [
           _buildOverviewTab(),
           _buildChurchesTab(),
+          _buildReportsTab(),
           _buildSystemTab(context),
         ],
       ),
@@ -218,6 +220,110 @@ class _DeveloperConsoleScreenState extends State<DeveloperConsoleScreen>
     );
   }
 
+  Widget _buildReportsTab() {
+    return FutureBuilder<List<Map<String, dynamic>>>(
+      future: _devService.getReportedUsers(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (snapshot.hasError) {
+          return Center(
+              child: Text('Could not load reports: ${snapshot.error}'));
+        }
+
+        final users = snapshot.data ?? const [];
+        if (users.isEmpty) {
+          return const Center(child: Text('No reported users.'));
+        }
+
+        return ListView.separated(
+          padding: const EdgeInsets.all(12),
+          itemCount: users.length,
+          separatorBuilder: (_, __) => const SizedBox(height: 8),
+          itemBuilder: (context, index) {
+            final user = users[index];
+            final reports = _mapList(user['reports']);
+            final posts = _mapList(user['posts']);
+            final displayName =
+                user['reported_name']?.toString().trim().isNotEmpty == true
+                    ? user['reported_name'].toString()
+                    : user['reported_user_id']?.toString() ?? 'Unknown user';
+
+            return Card(
+              child: ExpansionTile(
+                leading: const Icon(Icons.person_search_outlined),
+                title: Text(displayName),
+                subtitle: Text(
+                  '${user['report_count'] ?? reports.length} report(s) • latest ${_formatDate(user['latest_reported_at'])}',
+                ),
+                childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                children: [
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Reports',
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w800,
+                          ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  for (final report in reports)
+                    _ReportTile(
+                      report: report,
+                      onStatusChanged: (status) async {
+                        await _devService.updateContentReportStatus(
+                          reportId: report['id']?.toString() ?? '',
+                          status: status,
+                        );
+                        if (!mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Report marked $status.')),
+                        );
+                        setState(() {});
+                      },
+                    ),
+                  const SizedBox(height: 12),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Posts by this user',
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w800,
+                          ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  if (posts.isEmpty)
+                    const Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text('No posts found for this user.'),
+                    )
+                  else
+                    for (final post in posts)
+                      ListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.article_outlined),
+                        title: Text(
+                          post['content']?.toString().trim().isEmpty == false
+                              ? post['content'].toString()
+                              : 'Post',
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        subtitle: Text(_formatDate(post['created_at'])),
+                      ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   Widget _buildSystemTab(BuildContext context) {
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -293,6 +399,63 @@ class _DeveloperConsoleScreenState extends State<DeveloperConsoleScreen>
     if (date == null) return 'not set';
     return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
   }
+}
+
+class _ReportTile extends StatelessWidget {
+  const _ReportTile({
+    required this.report,
+    required this.onStatusChanged,
+  });
+
+  final Map<String, dynamic> report;
+  final Future<void> Function(String status) onStatusChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final status = report['status']?.toString() ?? 'pending';
+    return ListTile(
+      dense: true,
+      contentPadding: EdgeInsets.zero,
+      leading: const Icon(Icons.flag_outlined),
+      title: Text('${report['reason'] ?? 'Report'} • $status'),
+      subtitle: Text(
+        [
+          report['content_type']?.toString() ?? 'content',
+          _formatReportDate(report['created_at']),
+          if (report['description']?.toString().trim().isNotEmpty == true)
+            report['description'].toString(),
+        ].join('\n'),
+        maxLines: 4,
+        overflow: TextOverflow.ellipsis,
+      ),
+      trailing: PopupMenuButton<String>(
+        tooltip: 'Set report status',
+        onSelected: onStatusChanged,
+        itemBuilder: (context) => const [
+          PopupMenuItem(value: 'reviewed', child: Text('Reviewed')),
+          PopupMenuItem(value: 'dismissed', child: Text('Dismissed')),
+          PopupMenuItem(value: 'action_taken', child: Text('Action taken')),
+        ],
+      ),
+    );
+  }
+}
+
+List<Map<String, dynamic>> _mapList(dynamic value) {
+  if (value is List) {
+    return value
+        .whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
+        .toList();
+  }
+  return const [];
+}
+
+String _formatReportDate(dynamic value) {
+  if (value == null) return 'not set';
+  final date = DateTime.tryParse(value.toString());
+  if (date == null) return 'not set';
+  return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
 }
 
 class _StatCard extends StatelessWidget {

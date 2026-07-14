@@ -150,6 +150,12 @@ function defaultRouteForType(type) {
   return "/announcements";
 }
 
+function notificationTag({ type, route, entityTable, entityId }) {
+  if (entityTable && entityId) return `entity:${entityTable}:${entityId}`;
+  if (route) return `route:${route}`;
+  return `type:${type || "general"}`;
+}
+
 function stringMap(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return Object.fromEntries(
@@ -298,6 +304,14 @@ exports.sendTopicNotification = onRequest({ cors: true }, async (request, respon
     const cleanTitle = String(title).slice(0, 120);
     const cleanBody = String(body).slice(0, 220);
     const cleanRoute = String(route || defaultRouteForType(normalizedType));
+    const cleanEntityTable = extraData.entityTable || extraData.entity_table || "";
+    const cleanEntityId = extraData.entityId || extraData.entity_id || "";
+    const tag = notificationTag({
+      type: normalizedType,
+      route: cleanRoute,
+      entityTable: cleanEntityTable,
+      entityId: cleanEntityId,
+    });
     const messageId = await admin.messaging().send({
       topic: cleanTopic,
       notification: {
@@ -312,6 +326,7 @@ exports.sendTopicNotification = onRequest({ cors: true }, async (request, respon
           color: "#0B5C7D",
           icon: "ic_stat_grace_connect",
           sound: soundProfile.sound.replace(".wav", ""),
+          tag,
         },
       },
       apns: {
@@ -328,6 +343,9 @@ exports.sendTopicNotification = onRequest({ cors: true }, async (request, respon
         ...extraData,
         type: normalizedType,
         route: cleanRoute,
+        entity_table: cleanEntityTable,
+        entity_id: cleanEntityId,
+        notification_tag: tag,
         title: cleanTitle,
         body: cleanBody,
         click_action: "FLUTTER_NOTIFICATION_CLICK",

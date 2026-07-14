@@ -518,7 +518,16 @@ class _EventsScreenState extends State<EventsScreen> {
   @override
   Widget build(BuildContext context) {
     final roleProvider = Provider.of<UserRoleProvider>(context);
-    final canAddEvent = roleProvider.canManageEvents || _canAddMinistryEvent;
+    final hasChurch = _churchId?.trim().isNotEmpty == true;
+    final showDiscoverEvents = !hasChurch || _showSharedEvents;
+    final canAddEvent =
+        hasChurch && (roleProvider.canManageEvents || _canAddMinistryEvent);
+    final eventsStream = showDiscoverEvents
+        ? _eventService.getPublicEvents()
+        : _eventService.getEvents(
+            _churchId!,
+            includeSharedEvents: false,
+          );
 
     return AppScaffold(
       title: 'Events',
@@ -533,90 +542,84 @@ class _EventsScreenState extends State<EventsScreen> {
           : null,
       body: _isLoading
           ? const Center(child: AppLoader())
-          : _churchId == null
-              ? const Center(child: Text('Please join a church to see events.'))
-              : Column(
-                  children: [
-                    _EventScopeSelector(
-                      showSharedEvents: _showSharedEvents,
-                      onChanged: (value) {
-                        setState(() => _showSharedEvents = value);
-                      },
-                    ),
-                    Expanded(
-                      child: StreamBuilder<List<EventModel>>(
-                        stream: _eventService.getEvents(
-                          _churchId!,
-                          includeSharedEvents: _showSharedEvents,
-                        ),
-                        builder: (context, snapshot) {
-                          if (snapshot.connectionState ==
-                              ConnectionState.waiting) {
-                            return ListView.builder(
-                              padding: const EdgeInsets.all(16),
-                              itemCount: 3,
-                              itemBuilder: (_, __) =>
-                                  const AppSkeletonListItem(),
-                            );
-                          }
+          : Column(
+              children: [
+                _EventScopeSelector(
+                  showSharedEvents: showDiscoverEvents,
+                  hasChurch: hasChurch,
+                  onChanged: (value) {
+                    setState(() => _showSharedEvents = value);
+                  },
+                ),
+                Expanded(
+                  child: StreamBuilder<List<EventModel>>(
+                    stream: eventsStream,
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return ListView.builder(
+                          padding: const EdgeInsets.all(16),
+                          itemCount: 3,
+                          itemBuilder: (_, __) => const AppSkeletonListItem(),
+                        );
+                      }
 
-                          if (snapshot.hasError) {
-                            return Center(
-                              child: Text('Error: ${snapshot.error}'),
-                            );
-                          }
+                      if (snapshot.hasError) {
+                        return Center(
+                          child: Text('Error: ${snapshot.error}'),
+                        );
+                      }
 
-                          final events = snapshot.data ?? [];
-                          _queueChurchNameLoads(events);
+                      final events = snapshot.data ?? [];
+                      _queueChurchNameLoads(events);
 
-                          if (events.isEmpty) {
-                            return Center(
-                              child: Text(
-                                _showSharedEvents
-                                    ? 'No shared upcoming events.'
-                                    : 'No upcoming events.',
-                                style: TextStyle(color: Colors.grey[600]),
-                              ),
-                            );
-                          }
+                      if (events.isEmpty) {
+                        return Center(
+                          child: Text(
+                            showDiscoverEvents
+                                ? 'No public upcoming events.'
+                                : 'No upcoming events.',
+                            style: TextStyle(color: Colors.grey[600]),
+                          ),
+                        );
+                      }
 
-                          return ListView.builder(
-                            padding: const EdgeInsets.all(16.0),
-                            itemCount: events.length,
-                            itemBuilder: (context, index) {
-                              final event = events[index];
-                              final isRsvped = _currentUser != null &&
-                                  event.attendees.contains(_currentUser!.id);
-                              final canViewRsvps =
-                                  _canViewRsvpDetails(event, roleProvider);
-                              final canManageEvent =
-                                  _canManageEvent(event, roleProvider);
+                      return ListView.builder(
+                        padding: const EdgeInsets.all(16.0),
+                        itemCount: events.length,
+                        itemBuilder: (context, index) {
+                          final event = events[index];
+                          final isRsvped = _currentUser != null &&
+                              event.attendees.contains(_currentUser!.id);
+                          final canViewRsvps =
+                              _canViewRsvpDetails(event, roleProvider);
+                          final canManageEvent =
+                              _canManageEvent(event, roleProvider);
 
-                              return _EventCard(
-                                event: event,
-                                viewerChurchId: _churchId!,
-                                churchName: _churchNamesById[event.churchId],
-                                isRsvped: isRsvped,
-                                canViewRsvps: canViewRsvps,
-                                canManageEvent: canManageEvent,
-                                onRsvp: () => _handleRSVP(event),
-                                onViewRsvps: canViewRsvps
-                                    ? () => _showRsvpDetails(event)
-                                    : null,
-                                onEdit: canManageEvent
-                                    ? () => _showEditEventDialog(event)
-                                    : null,
-                                onDelete: canManageEvent
-                                    ? () => _deleteEvent(event)
-                                    : null,
-                              );
-                            },
+                          return _EventCard(
+                            event: event,
+                            viewerChurchId: _churchId ?? '',
+                            churchName: _churchNamesById[event.churchId],
+                            isRsvped: isRsvped,
+                            canViewRsvps: canViewRsvps,
+                            canManageEvent: canManageEvent,
+                            onRsvp: () => _handleRSVP(event),
+                            onViewRsvps: canViewRsvps
+                                ? () => _showRsvpDetails(event)
+                                : null,
+                            onEdit: canManageEvent
+                                ? () => _showEditEventDialog(event)
+                                : null,
+                            onDelete: canManageEvent
+                                ? () => _deleteEvent(event)
+                                : null,
                           );
                         },
-                      ),
-                    ),
-                  ],
+                      );
+                    },
+                  ),
                 ),
+              ],
+            ),
     );
   }
 
@@ -730,7 +733,6 @@ class _EventsScreenState extends State<EventsScreen> {
 
   void _queueChurchNameLoads(List<EventModel> events) {
     final ownChurchId = _churchId;
-    if (ownChurchId == null) return;
 
     for (final event in events) {
       final eventChurchId = event.churchId.trim();
@@ -759,10 +761,12 @@ class _EventsScreenState extends State<EventsScreen> {
 class _EventScopeSelector extends StatelessWidget {
   const _EventScopeSelector({
     required this.showSharedEvents,
+    required this.hasChurch,
     required this.onChanged,
   });
 
   final bool showSharedEvents;
+  final bool hasChurch;
   final ValueChanged<bool> onChanged;
 
   @override
@@ -783,11 +787,12 @@ class _EventScopeSelector extends StatelessWidget {
           ButtonSegment(
             value: true,
             icon: Icon(Icons.public_outlined),
-            label: Text('Shared'),
+            label: Text('Discover'),
           ),
         ],
         selected: {showSharedEvents},
-        onSelectionChanged: (values) => onChanged(values.first),
+        onSelectionChanged:
+            hasChurch ? (values) => onChanged(values.first) : null,
       ),
     );
   }

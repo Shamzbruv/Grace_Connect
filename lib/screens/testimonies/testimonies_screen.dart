@@ -114,6 +114,40 @@ class _TestimoniesScreenState extends State<TestimoniesScreen> {
     );
   }
 
+  Future<void> _confirmDeleteTestimony(Testimony testimony) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete testimony?'),
+        content: const Text('This removes the testimony from the church feed.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      await _service.deleteTestimony(testimony.id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Testimony deleted.')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not delete testimony: $error')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = context.watch<UserRoleProvider>().userProfile;
@@ -185,9 +219,14 @@ class _TestimoniesScreenState extends State<TestimoniesScreen> {
                     return _TestimonyCard(
                       testimony: testimonies[index],
                       currentUserId: user.uid,
+                      canDelete: testimonies[index].authorId == user.uid ||
+                          user.isPastor ||
+                          user.isAdmin,
                       reactions: _reactionOptions,
                       onReact: (emoji) =>
                           _service.toggleReaction(testimonies[index].id, emoji),
+                      onDelete: () =>
+                          _confirmDeleteTestimony(testimonies[index]),
                     );
                   },
                 );
@@ -201,14 +240,18 @@ class _TestimonyCard extends StatelessWidget {
   const _TestimonyCard({
     required this.testimony,
     required this.currentUserId,
+    required this.canDelete,
     required this.reactions,
     required this.onReact,
+    required this.onDelete,
   });
 
   final Testimony testimony;
   final String currentUserId;
+  final bool canDelete;
   final List<String> reactions;
   final Future<void> Function(String emoji) onReact;
+  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -253,6 +296,25 @@ class _TestimonyCard extends StatelessWidget {
                   ],
                 ),
               ),
+              if (canDelete)
+                PopupMenuButton<String>(
+                  tooltip: 'Testimony options',
+                  onSelected: (value) {
+                    if (value == 'delete') onDelete();
+                  },
+                  itemBuilder: (context) => const [
+                    PopupMenuItem(
+                      value: 'delete',
+                      child: Row(
+                        children: [
+                          Icon(Icons.delete_outline),
+                          SizedBox(width: 8),
+                          Text('Delete testimony'),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
             ],
           ),
           const SizedBox(height: 14),

@@ -74,6 +74,7 @@ class CounselingRequestsScreen extends StatelessWidget {
                 request: requests[index],
                 canManageAssignments: canManageAllCases,
                 canUpdateStatus: canManageAllCases || canViewAssignedCases,
+                canDelete: canManageAllCases,
               );
             },
           );
@@ -88,11 +89,47 @@ class _CounselingRequestCard extends StatelessWidget {
     required this.request,
     required this.canManageAssignments,
     required this.canUpdateStatus,
+    required this.canDelete,
   });
 
   final CounselingRequest request;
   final bool canManageAssignments;
   final bool canUpdateStatus;
+  final bool canDelete;
+
+  Future<void> _confirmDelete(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete counseling request?'),
+        content: const Text('This removes the counseling request permanently.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      await CounselingService().deleteRequest(request.id);
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Counseling request deleted.')),
+      );
+    } catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not delete counseling request: $error')),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -128,10 +165,22 @@ class _CounselingRequestCard extends StatelessWidget {
                   ],
                 ),
               ),
-              if (canUpdateStatus)
-                _StatusMenu(
-                  requestId: request.id,
-                  currentStatus: request.status,
+              if (canUpdateStatus || canDelete)
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (canUpdateStatus)
+                      _StatusMenu(
+                        requestId: request.id,
+                        currentStatus: request.status,
+                      ),
+                    if (canDelete)
+                      IconButton(
+                        tooltip: 'Delete counseling request',
+                        icon: const Icon(Icons.delete_outline),
+                        onPressed: () => _confirmDelete(context),
+                      ),
+                  ],
                 ),
             ],
           ),

@@ -40,11 +40,11 @@ class BibleStreakStatus {
   final DateTime? lastReadDate;
 
   String get requirementText =>
-      'Open any Bible chapter and spend at least 5 minutes reading. Keep Grace Connect open on the Bible reader until the streak confirmation appears.';
+      'Open any Bible chapter and spend at least 1 minute reading. Keep Grace Connect open on the Bible reader until the streak confirmation appears.';
 
   String get keepGoingText => completedToday
-      ? 'Today is already counted. Come back tomorrow and read for 5 minutes to keep your streak going.'
-      : 'Read for 5 minutes today to add 1 day to your streak. Missing a full day resets the count.';
+      ? 'Today is already counted. Come back tomorrow and read for 1 minute to keep your streak going.'
+      : 'Read for 1 minute today to add 1 day to your streak. Missing a full day resets the count.';
 }
 
 class BibleStreakService {
@@ -90,7 +90,7 @@ class BibleStreakService {
     );
   }
 
-  Future<int> recordFiveMinuteRead() async {
+  Future<int> recordQualifiedRead() async {
     final prefs = await SharedPreferences.getInstance();
     final today = _dateOnly(DateTime.now());
     final lastReadDate = _parseDate(prefs.getString(_lastReadDateKey));

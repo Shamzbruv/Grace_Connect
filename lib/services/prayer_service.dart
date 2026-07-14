@@ -66,6 +66,11 @@ class PrayerService {
         .update({'status': status}).eq('id', requestId);
   }
 
+  Future<void> deleteRequest(String requestId) async {
+    if (requestId.trim().isEmpty) return;
+    await _supabase.from(_collection).delete().eq('id', requestId.trim());
+  }
+
   Future<void> assignHelper(String requestId, String? helperId) async {
     await _supabase.rpc('assign_prayer_helper', params: {
       'request_id': requestId,

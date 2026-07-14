@@ -1,9 +1,12 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../models/community_feed_mode.dart';
 import '../models/community_story.dart';
 import '../models/post.dart';
+import 'social_profile_service.dart';
 
 class CommunityService {
   final _supabase = Supabase.instance.client;
@@ -156,12 +159,13 @@ class CommunityService {
 
   Future<List<Post>> fetchPosts(String churchId) async {
     late final List<dynamic> data;
+    final now = DateTime.now().toUtc().toIso8601String();
     try {
       data = await _supabase
           .from(_postsTable)
           .select()
           .eq('place_id', churchId)
-          .gt('expires_at', DateTime.now().toUtc().toIso8601String())
+          .or('expires_at.is.null,expires_at.gt.$now')
           .order('created_at', ascending: false)
           .limit(50);
     } catch (_) {
@@ -190,7 +194,10 @@ class CommunityService {
     late final List<dynamic> data;
     final now = DateTime.now().toUtc().toIso8601String();
     try {
-      var query = _supabase.from(_postsTable).select().gt('expires_at', now);
+      var query = _supabase
+          .from(_postsTable)
+          .select()
+          .or('expires_at.is.null,expires_at.gt.$now');
       if (queryChurchIds != null && queryChurchIds.isNotEmpty) {
         query = query.inFilter('place_id', queryChurchIds);
       }
@@ -209,6 +216,193 @@ class CommunityService {
       churchIds: queryChurchIds,
       includeShared: includeShared,
     );
+  }
+
+  Future<List<Post>> fetchCommunityFeed({
+    required CommunityFeedMode mode,
+    String? viewerChurchId,
+    String? circleId,
+    int limit = 75,
+  }) async {
+    if (mode == CommunityFeedMode.church &&
+        viewerChurchId?.trim().isNotEmpty == true) {
+      return fetchPostsForChurches(
+        viewerChurchId!.trim(),
+        [viewerChurchId.trim()],
+      );
+    }
+
+    try {
+      final rows = await _supabase.rpc(
+        'get_community_feed',
+        params: {
+          'feed_mode': mode.storageValue,
+          'viewer_church_id': viewerChurchId?.trim().isEmpty == true
+              ? null
+              : viewerChurchId?.trim(),
+          'target_circle_id':
+              circleId?.trim().isEmpty == true ? null : circleId?.trim(),
+          'result_limit': limit,
+        },
+      );
+      if (rows is List) {
+        final normalized = _normalizePosts(
+          rows,
+          viewerChurchId: viewerChurchId,
+          includeShared: true,
+        );
+        if (mode == CommunityFeedMode.following) {
+          final followingUserIds = await _acceptedFollowingIds();
+          final followingCircleIds = await _activeCircleIds();
+          return normalized
+              .where((post) => _matchesFeedMode(
+                    post,
+                    mode,
+                    circleId,
+                    followingUserIds: followingUserIds,
+                    followingCircleIds: followingCircleIds,
+                  ))
+              .take(limit)
+              .toList();
+        }
+        return normalized.take(limit).toList();
+      }
+    } catch (error) {
+      debugPrint('Community feed RPC unavailable, using fallback: $error');
+    }
+
+    return _fetchCommunityFeedFallback(
+      mode: mode,
+      viewerChurchId: viewerChurchId,
+      circleId: circleId,
+      limit: limit,
+    );
+  }
+
+  Stream<List<Post>> getCommunityFeed({
+    required CommunityFeedMode mode,
+    String? viewerChurchId,
+    String? circleId,
+    int limit = 75,
+  }) async* {
+    var lastKnown = <Post>[];
+    var followingUserIds = const <String>{};
+    var followingCircleIds = const <String>{};
+
+    if (mode == CommunityFeedMode.following) {
+      followingUserIds = await _acceptedFollowingIds();
+      followingCircleIds = await _activeCircleIds();
+    }
+
+    try {
+      lastKnown = await fetchCommunityFeed(
+        mode: mode,
+        viewerChurchId: viewerChurchId,
+        circleId: circleId,
+        limit: limit,
+      );
+      yield lastKnown;
+    } catch (error) {
+      debugPrint('Could not load community feed before realtime: $error');
+    }
+
+    try {
+      await for (final posts in _supabase
+          .from(_postsTable)
+          .stream(primaryKey: ['id'])
+          .order('created_at', ascending: false)
+          .limit(limit)
+          .map(
+            (rows) => _normalizePosts(
+              rows,
+              viewerChurchId: viewerChurchId,
+              includeShared: true,
+            )
+                .where((post) => _matchesFeedMode(
+                      post,
+                      mode,
+                      circleId,
+                      followingUserIds: followingUserIds,
+                      followingCircleIds: followingCircleIds,
+                    ))
+                .toList(),
+          )
+          .timeout(
+            _realtimeQuietTimeout,
+            onTimeout: (sink) {
+              sink.add(lastKnown);
+            },
+          )) {
+        lastKnown = posts;
+        yield posts;
+      }
+    } catch (error) {
+      debugPrint('Community feed realtime unavailable: $error');
+      if (lastKnown.isNotEmpty) yield lastKnown;
+    }
+  }
+
+  Future<List<Post>> _fetchCommunityFeedFallback({
+    required CommunityFeedMode mode,
+    String? viewerChurchId,
+    String? circleId,
+    required int limit,
+  }) async {
+    final followingUserIds = mode == CommunityFeedMode.following
+        ? await _acceptedFollowingIds()
+        : const <String>{};
+    final followingCircleIds = mode == CommunityFeedMode.following
+        ? await _activeCircleIds()
+        : const <String>{};
+    if (mode == CommunityFeedMode.following &&
+        followingUserIds.isEmpty &&
+        followingCircleIds.isEmpty) {
+      return const [];
+    }
+
+    final now = DateTime.now().toUtc().toIso8601String();
+    List<dynamic> data;
+    try {
+      var query = _supabase
+          .from(_postsTable)
+          .select()
+          .or('expires_at.is.null,expires_at.gt.$now');
+      if (mode == CommunityFeedMode.circle &&
+          circleId?.trim().isNotEmpty == true) {
+        query = query.eq('circle_id', circleId!.trim());
+      } else if (mode == CommunityFeedMode.discover) {
+        query = query.or('scope.eq.global,visible_to_all_churches.eq.true');
+      }
+      data = await query
+          .order('created_at', ascending: false)
+          .limit(mode == CommunityFeedMode.following ? 200 : limit);
+    } on PostgrestException {
+      var query = _supabase
+          .from(_postsTable)
+          .select()
+          .or('expires_at.is.null,expires_at.gt.$now');
+      if (mode == CommunityFeedMode.discover) {
+        query = query.eq('visible_to_all_churches', true);
+      }
+      data = await query
+          .order('created_at', ascending: false)
+          .limit(mode == CommunityFeedMode.following ? 200 : limit);
+    }
+
+    return _normalizePosts(
+      data,
+      viewerChurchId: viewerChurchId,
+      includeShared: true,
+    )
+        .where((post) => _matchesFeedMode(
+              post,
+              mode,
+              circleId,
+              followingUserIds: followingUserIds,
+              followingCircleIds: followingCircleIds,
+            ))
+        .take(limit)
+        .toList();
   }
 
   // Get stream of posts for a specific church. The feed is REST-first so
@@ -344,6 +538,42 @@ class CommunityService {
     return post;
   }
 
+  Future<List<Post>> fetchPublicPostsByAuthor(
+    String authorId, {
+    int limit = 30,
+  }) async {
+    final cleanAuthorId = authorId.trim();
+    if (cleanAuthorId.isEmpty) return const [];
+
+    final now = DateTime.now().toUtc().toIso8601String();
+    List<dynamic> rows;
+    try {
+      rows = await _supabase
+          .from(_postsTable)
+          .select()
+          .eq('author_id', cleanAuthorId)
+          .or('expires_at.is.null,expires_at.gt.$now')
+          .order('created_at', ascending: false)
+          .limit(limit);
+    } on PostgrestException {
+      rows = await _supabase
+          .from(_postsTable)
+          .select()
+          .eq('author_id', cleanAuthorId)
+          .order('created_at', ascending: false)
+          .limit(limit);
+    }
+
+    return _normalizePosts(rows, includeShared: true)
+        .where((post) =>
+            post.visibleToAllChurches ||
+            post.scope == 'global' ||
+            post.scope == 'discover' ||
+            post.scope == 'public')
+        .take(limit)
+        .toList();
+  }
+
   Future<Post?> fetchPostForNotification({
     required String? entityTable,
     required String? entityId,
@@ -373,10 +603,8 @@ class CommunityService {
     try {
       await _supabase.from(_postsTable).insert(data);
     } on PostgrestException catch (error) {
-      if (!_isMissingMediaDisplayColumn(error)) rethrow;
-      final fallbackData = Map<String, dynamic>.from(data)
-        ..remove('media_fit')
-        ..remove('media_aspect_ratio');
+      if (!_isLegacyCommunityPostSchemaIssue(error)) rethrow;
+      final fallbackData = _legacyPostInsertData(data, post);
       await _supabase.from(_postsTable).insert(fallbackData);
     }
   }
@@ -565,12 +793,17 @@ class CommunityService {
       final expiresAt = post.expiresAt;
       final isExpired = expiresAt != null && expiresAt.isBefore(DateTime.now());
       final isOwnChurch = post.placeId == viewerChurchId;
-      final canShow = viewerChurchId == null ||
-          viewerChurchId.isEmpty ||
-          (filterIds != null && filterIds.isNotEmpty
+      final isPublicPost = post.visibleToAllChurches ||
+          post.scope == 'global' ||
+          post.scope == 'discover' ||
+          post.scope == 'public';
+      final hasViewerChurch = viewerChurchId?.trim().isNotEmpty == true;
+      final canShow = !hasViewerChurch
+          ? isPublicPost
+          : (filterIds != null && filterIds.isNotEmpty
               ? filterIds.contains(post.placeId) &&
-                  (isOwnChurch || (includeShared && post.visibleToAllChurches))
-              : isOwnChurch || (includeShared && post.visibleToAllChurches));
+                  (isOwnChurch || (includeShared && isPublicPost))
+              : isOwnChurch || (includeShared && isPublicPost));
 
       if (post.id.isNotEmpty && !isExpired && canShow) {
         postsById[post.id] = post;
@@ -579,6 +812,95 @@ class CommunityService {
     final posts = postsById.values.toList()
       ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
     return posts;
+  }
+
+  bool _matchesFeedMode(
+    Post post,
+    CommunityFeedMode mode,
+    String? circleId, {
+    Set<String> followingUserIds = const {},
+    Set<String> followingCircleIds = const {},
+  }) {
+    final expiresAt = post.expiresAt;
+    if (expiresAt != null && expiresAt.isBefore(DateTime.now())) return false;
+    return switch (mode) {
+      CommunityFeedMode.circle =>
+        circleId == null || circleId.isEmpty || post.circleId == circleId,
+      CommunityFeedMode.discover => post.visibleToAllChurches ||
+          post.scope == 'global' ||
+          post.scope == 'discover' ||
+          post.scope == 'public',
+      CommunityFeedMode.following => followingUserIds.contains(post.authorId) ||
+          (post.circleId != null && followingCircleIds.contains(post.circleId)),
+      CommunityFeedMode.church => true,
+    };
+  }
+
+  Future<Set<String>> _acceptedFollowingIds() async {
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId == null || userId.isEmpty) return const {};
+
+    try {
+      final rows = await _supabase
+          .from('social_follows')
+          .select('following_id')
+          .eq('follower_id', userId)
+          .eq('status', 'accepted');
+      return rows
+          .map((row) => row['following_id']?.toString())
+          .whereType<String>()
+          .where((id) => id.isNotEmpty)
+          .toSet();
+    } catch (error) {
+      debugPrint('Following list unavailable: $error');
+      final prefs = await SharedPreferences.getInstance();
+      return (prefs
+                  .getStringList(SocialProfileService.localFollowKey(userId)) ??
+              const [])
+          .where((id) => id.trim().isNotEmpty)
+          .toSet();
+    }
+  }
+
+  Future<Set<String>> _activeCircleIds() async {
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId == null || userId.isEmpty) return const {};
+
+    try {
+      final rows = await _supabase
+          .from('grace_circle_members')
+          .select('circle_id')
+          .eq('user_id', userId)
+          .eq('status', 'active');
+      return rows
+          .map((row) => row['circle_id']?.toString())
+          .whereType<String>()
+          .where((id) => id.isNotEmpty)
+          .toSet();
+    } catch (error) {
+      debugPrint('Followed circle list unavailable: $error');
+      return const {};
+    }
+  }
+
+  Map<String, dynamic> _legacyPostInsertData(
+    Map<String, dynamic> data,
+    Post post,
+  ) {
+    final fallbackData = Map<String, dynamic>.from(data)
+      ..remove('media_fit')
+      ..remove('media_aspect_ratio')
+      ..remove('scope')
+      ..remove('post_type')
+      ..remove('origin_church_id')
+      ..remove('circle_id')
+      ..remove('metadata')
+      ..remove('repost_of')
+      ..remove('is_persistent');
+    fallbackData['place_id'] ??= post.originChurchId ?? post.placeId;
+    fallbackData['expires_at'] ??=
+        DateTime.now().add(const Duration(days: 30)).toUtc().toIso8601String();
+    return fallbackData;
   }
 
   String? _storagePathFromPublicUrl(String? mediaUrl) {
@@ -593,6 +915,22 @@ class CommunityService {
     }
 
     return uri.pathSegments.sublist(bucketIndex + 1).join('/');
+  }
+
+  bool _isLegacyCommunityPostSchemaIssue(PostgrestException error) {
+    final message = error.message.toLowerCase();
+    return message.contains('media_fit') ||
+        message.contains('media_aspect_ratio') ||
+        message.contains('scope') ||
+        message.contains('post_type') ||
+        message.contains('origin_church_id') ||
+        message.contains('circle_id') ||
+        message.contains('metadata') ||
+        message.contains('repost_of') ||
+        message.contains('is_persistent') ||
+        message.contains('schema cache') ||
+        error.code == 'PGRST204' ||
+        error.code == '42703';
   }
 
   bool _isMissingMediaDisplayColumn(PostgrestException error) {

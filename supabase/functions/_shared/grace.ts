@@ -315,6 +315,19 @@ export function notificationSoundProfile(type: string): { channelId: string; sou
   return profiles[normalized] ?? profiles.general;
 }
 
+function notificationTag(params: {
+  type: string;
+  route: string;
+  entityTable?: string;
+  entityId?: string;
+}): string {
+  if (params.entityTable && params.entityId) {
+    return `entity:${params.entityTable}:${params.entityId}`;
+  }
+  if (params.route) return `route:${params.route}`;
+  return `type:${params.type || "general"}`;
+}
+
 export async function sendTopicPush(
   client: SupabaseClient,
   params: {
@@ -357,6 +370,7 @@ export async function sendTopicPush(
     const projectId = String(serviceAccount.project_id ?? "");
     const token = await googleAccessToken(serviceAccount);
     const sound = notificationSoundProfile(params.type);
+    const tag = notificationTag(params);
     const response = await fetch(
       `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`,
       {
@@ -377,12 +391,14 @@ export async function sendTopicPush(
               route: params.route,
               entity_table: params.entityTable ?? "",
               entity_id: params.entityId ?? "",
+              notification_tag: tag,
             },
             android: {
               priority: "HIGH",
               notification: {
                 channel_id: sound.channelId,
                 sound: sound.sound.replace(".wav", ""),
+                tag,
               },
             },
             apns: {

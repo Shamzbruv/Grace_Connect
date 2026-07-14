@@ -15,6 +15,13 @@ class Post {
   final double? mediaAspectRatio;
   final DateTime? expiresAt;
   final bool visibleToAllChurches;
+  final String scope;
+  final String postType;
+  final String? originChurchId;
+  final String? circleId;
+  final Map<String, dynamic> metadata;
+  final String? repostOf;
+  final bool isPersistent;
 
   Post({
     required this.id,
@@ -33,9 +40,17 @@ class Post {
     this.mediaAspectRatio,
     this.expiresAt,
     this.visibleToAllChurches = false,
-  });
+    this.scope = 'church',
+    this.postType = 'post',
+    this.originChurchId,
+    this.circleId,
+    this.metadata = const {},
+    this.repostOf,
+    bool? isPersistent,
+  }) : isPersistent = isPersistent ?? expiresAt == null;
 
   factory Post.fromMap(Map<String, dynamic> data) {
+    final metadataValue = data['metadata'];
     return Post(
       id: data['id'] as String,
       authorName: data['author_name'] ?? '',
@@ -57,10 +72,21 @@ class Post {
       expiresAt: _nullableDate(data['expires_at'] ?? data['expiresAt']),
       visibleToAllChurches: data['visible_to_all_churches'] == true ||
           data['visibleToAllChurches'] == true,
+      scope: data['scope']?.toString() ??
+          (data['visible_to_all_churches'] == true ? 'global' : 'church'),
+      postType: data['post_type']?.toString() ?? 'post',
+      originChurchId: data['origin_church_id']?.toString(),
+      circleId: data['circle_id']?.toString(),
+      metadata: metadataValue is Map
+          ? Map<String, dynamic>.from(metadataValue)
+          : const {},
+      repostOf: data['repost_of']?.toString(),
+      isPersistent: data['is_persistent'] == true,
     );
   }
 
   Map<String, dynamic> toMap() {
+    final cleanPlaceId = placeId.trim();
     return {
       'author_name': authorName,
       'author_id': authorId,
@@ -68,16 +94,21 @@ class Post {
       'content': content,
       'likes': likes,
       'comments_count': commentsCount,
-      'place_id': placeId,
+      'place_id': cleanPlaceId.isEmpty ? null : cleanPlaceId,
       'media_url': mediaUrl,
       'media_path': mediaPath,
       'media_type': mediaType,
       'media_fit': mediaFit,
       'media_aspect_ratio': mediaAspectRatio,
-      'expires_at': (expiresAt ?? DateTime.now().add(const Duration(days: 30)))
-          .toUtc()
-          .toIso8601String(),
+      'expires_at': expiresAt?.toUtc().toIso8601String(),
       'visible_to_all_churches': visibleToAllChurches,
+      'scope': scope,
+      'post_type': postType,
+      'origin_church_id': originChurchId,
+      'circle_id': circleId,
+      'metadata': metadata,
+      'repost_of': repostOf,
+      'is_persistent': isPersistent || expiresAt == null,
       // 'id' and 'created_at' are typically handled by Supabase DB defaults
     };
   }

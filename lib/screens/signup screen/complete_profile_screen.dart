@@ -31,6 +31,7 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
   String? _imageName;
   String? _selectedChurchId;
   String _selectedChurchName = '';
+  bool _notPartOfChurchYet = false;
 
   @override
   void dispose() {
@@ -99,7 +100,7 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
             .from('users')
             .upsert(profileData, onConflict: 'uid');
 
-        if (_selectedChurchId != null) {
+        if (!_notPartOfChurchYet && _selectedChurchId != null) {
           await MembershipService().requestMembership(
             churchId: _selectedChurchId!,
             message: _selectedChurchName.isEmpty
@@ -233,9 +234,11 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
                           return TextField(
                             controller: controller,
                             focusNode: focusNode,
+                            enabled: !_notPartOfChurchYet,
                             decoration: const InputDecoration(
                               labelText: 'Church',
-                              hintText: 'Optional: request to join a church',
+                              hintText:
+                                  'Search churches or continue without one',
                               prefixIcon: Icon(Icons.church_outlined),
                               border: OutlineInputBorder(
                                 borderRadius:
@@ -263,6 +266,7 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
                           setState(() {
                             _selectedChurchId = suggestion['id'];
                             _selectedChurchName = suggestion['name']!;
+                            _notPartOfChurchYet = false;
                             _churchSearchController.text = suggestion['name']!;
                           });
                         },
@@ -271,6 +275,25 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
                           child:
                               Text('No approved churches match that search.'),
                         ),
+                      ),
+                      CheckboxListTile(
+                        contentPadding: EdgeInsets.zero,
+                        controlAffinity: ListTileControlAffinity.leading,
+                        value: _notPartOfChurchYet,
+                        title: const Text('I am not part of a church yet'),
+                        subtitle: const Text(
+                          'You can browse Grace Connect now, search approved churches later, and send a visit or membership request when you are ready.',
+                        ),
+                        onChanged: (value) {
+                          setState(() {
+                            _notPartOfChurchYet = value ?? false;
+                            if (_notPartOfChurchYet) {
+                              _selectedChurchId = null;
+                              _selectedChurchName = '';
+                              _churchSearchController.clear();
+                            }
+                          });
+                        },
                       ),
                       const SizedBox(height: 16),
                       TextFormField(

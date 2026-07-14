@@ -3,23 +3,28 @@ import 'package:flutter_typeahead/flutter_typeahead.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../access/app_access_context.dart';
+import '../../access/app_feature.dart';
+import '../../providers/app_access_provider.dart';
 import '../../services/church_service.dart';
 import '../../services/church_subscription_service.dart';
 import '../../services/membership_service.dart';
+import '../../widgets/feature_access_guard.dart';
 import '../../widgets/app_button.dart';
 import '../../widgets/app_card.dart';
 import '../../widgets/app_scaffold.dart';
 import '../login screen/login_screen.dart';
-import '../main/main_tabs_screen.dart';
 import '../signup screen/complete_profile_screen.dart';
 
 class MembershipGate extends StatefulWidget {
   const MembershipGate({
     super.key,
     required this.child,
+    this.requiredFeature = AppFeature.appShell,
   });
 
   final Widget child;
+  final AppFeature requiredFeature;
 
   @override
   State<MembershipGate> createState() => _MembershipGateState();
@@ -89,82 +94,33 @@ class _MembershipGateState extends State<MembershipGate> {
           return const CompleteProfileScreen();
         }
 
-        if (membership.hasActiveMembership) {
-          return _SubscriptionGate(
-            churchId: membership.churchId!,
-            churchName: membership.churchName,
-            child: widget.child,
-          );
-        }
-
-        if (membership.hasPendingChurchApplication) {
-          return MainTabsScreen(
-            membershipLimited: true,
-            limitedTitle: 'Church Application Pending',
-            limitedMessage:
-                'Your church registration is ${membership.churchApplicationStatus ?? 'under review'}. You can browse the public feed while Grace Connect reviews it. Church tools unlock after approval.',
-            showFindChurchAction: false,
-          );
-        }
-
-        if (membership.hasPendingMembership) {
-          return MainTabsScreen(
-            membershipLimited: true,
-            limitedTitle: 'Membership Pending',
-            limitedMessage:
-                'Your request to join ${membership.churchName ?? 'this church'} is waiting for church leadership approval. You can browse the public feed while you wait; member tools unlock after approval.',
-            showFindChurchAction: false,
-          );
-        }
-
-        if (membership.hasBlockedMembership) {
-          final action = membership.membershipStatus == 'removed'
-              ? 'You are no longer connected to this church.'
-              : 'That membership request was not approved.';
-          return FindChurchScreen(
-            title: 'Choose a Church',
-            intro: '$action You can request access to another approved church.',
-            onSubmitted: _refresh,
-          );
-        }
-
-        if (_routeMayBrowseWithoutChurch(context)) {
-          return const MainTabsScreen(
-            membershipLimited: true,
-            limitedTitle: 'Choose a Church',
-            limitedMessage:
-                'You are not connected to a church yet. You can browse public feed posts for now, but posting, messaging, and member tools unlock after a church approves you.',
-          );
-        }
-
-        return FindChurchScreen(onSubmitted: _refresh);
+        return _AccessContextGate(
+          membership: membership,
+          requiredFeature: widget.requiredFeature,
+          child: widget.child,
+        );
       },
     );
   }
-
-  bool _routeMayBrowseWithoutChurch(BuildContext context) {
-    final route = ModalRoute.of(context)?.settings.name;
-    return route == '/community';
-  }
 }
 
-class _SubscriptionGate extends StatefulWidget {
-  const _SubscriptionGate({
-    required this.churchId,
+class _AccessContextGate extends StatefulWidget {
+  const _AccessContextGate({
+    required this.membership,
+    required this.requiredFeature,
     required this.child,
-    this.churchName,
   });
 
-  final String churchId;
-  final String? churchName;
+  final MembershipContext membership;
+  final AppFeature requiredFeature;
   final Widget child;
 
   @override
-  State<_SubscriptionGate> createState() => _SubscriptionGateState();
+  State<_AccessContextGate> createState() => _AccessContextGateState();
 }
 
-class _SubscriptionGateState extends State<_SubscriptionGate> {
-  late Future<ChurchSubscriptionContext> _subscriptionFuture;
+class _AccessContextGateState extends State<_AccessContextGate> {
+  late Future<ChurchSubscriptionContext?> _subscriptionFuture;
 
   @override
   void initState() {
@@ -173,16 +129,25 @@ class _SubscriptionGateState extends State<_SubscriptionGate> {
   }
 
   @override
-  void didUpdateWidget(covariant _SubscriptionGate oldWidget) {
+  void didUpdateWidget(covariant _AccessContextGate oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.churchId != widget.churchId) {
+    if (oldWidget.membership.churchId != widget.membership.churchId ||
+        oldWidget.membership.membershipStatus !=
+            widget.membership.membershipStatus) {
       _subscriptionFuture = _loadSubscription();
     }
   }
 
-  Future<ChurchSubscriptionContext> _loadSubscription() {
+  Future<ChurchSubscriptionContext?> _loadSubscription() async {
+    final churchId = widget.membership.churchId;
+    if (!widget.membership.hasActiveMembership ||
+        churchId == null ||
+        churchId.trim().isEmpty) {
+      return null;
+    }
+
     return ChurchSubscriptionService().getCurrentChurchSubscription(
-      churchId: widget.churchId,
+      churchId: churchId,
     );
   }
 
@@ -192,17 +157,9 @@ class _SubscriptionGateState extends State<_SubscriptionGate> {
     });
   }
 
-  bool _routeMayBypassSubscription(BuildContext context) {
-    final route = ModalRoute.of(context)?.settings.name;
-    return route == null ||
-        route == '/' ||
-        route == '/bible' ||
-        route == '/daily_word';
-  }
-
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<ChurchSubscriptionContext>(
+    return FutureBuilder<ChurchSubscriptionContext?>(
       future: _subscriptionFuture,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
@@ -211,16 +168,17 @@ class _SubscriptionGateState extends State<_SubscriptionGate> {
           );
         }
 
-        final subscription = snapshot.data;
-        if (subscription?.isActive == true ||
-            _routeMayBypassSubscription(context)) {
-          return widget.child;
-        }
+        final access = AppAccessContext(
+          membership: widget.membership,
+          subscription: snapshot.data,
+        );
 
-        return _SubscriptionRequiredScreen(
-          churchName: widget.churchName,
-          loadError: subscription?.loadError,
-          onRefresh: _refresh,
+        return AppAccessScope(
+          access: access,
+          child: FeatureAccessGuard(
+            feature: widget.requiredFeature,
+            child: widget.child,
+          ),
         );
       },
     );

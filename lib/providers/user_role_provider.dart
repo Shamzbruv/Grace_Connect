@@ -123,6 +123,9 @@ class UserRoleProvider with ChangeNotifier {
       churchId: profile.churchId,
       roles: profile.roles,
       privileges: profile.appPrivileges,
+      notifyAttendance: profile.notifyAttendance,
+      notifyDailyMotivation: profile.notifyDailyMotivation,
+      notifyDailyQuiz: profile.notifyDailyQuiz,
     ));
     NotificationService().watchForegroundNotifications(profile.uid);
     if (!kIsWeb && !AttendanceService().isMonitoring) {

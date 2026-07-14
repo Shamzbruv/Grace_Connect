@@ -1,11 +1,10 @@
-import 'dart:io';
 import 'package:flutter/foundation.dart';
 
 class Config {
   static String get apiUrl {
     if (kIsWeb) {
       return 'http://localhost:3000';
-    } else if (Platform.isAndroid) {
+    } else if (defaultTargetPlatform == TargetPlatform.android) {
       return 'http://10.0.2.2:3000';
     } else {
       return 'http://localhost:3000';

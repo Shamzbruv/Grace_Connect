@@ -120,7 +120,7 @@ class _SignupScreenState extends State<SignupScreen> {
         await _showVerificationDialog(
           title: 'Account Created!',
           message:
-              'Welcome, ${_nameController.text.trim()}!\n\nA verification link has been sent to ${_emailController.text.trim()}.\n\nAfter verifying your email, you can submit a church membership request for approval.',
+              'Welcome, ${_nameController.text.trim()}!\n\nA verification link has been sent to ${_emailController.text.trim()}.\n\nAfter verifying your email, you can finish your profile. If you already have a church, submit a membership request. If not, you can browse Grace Connect now and search approved churches later.',
         );
       } on AuthException catch (e) {
         if (mounted) {

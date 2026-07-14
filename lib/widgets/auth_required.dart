@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../access/app_feature.dart';
 import '../screens/login screen/login_screen.dart';
 import '../screens/membership/membership_gate_screen.dart';
 import '../services/auth_flow_service.dart';
@@ -9,9 +10,11 @@ class AuthRequired extends StatelessWidget {
   const AuthRequired({
     super.key,
     required this.child,
+    this.requiredFeature = AppFeature.appShell,
   });
 
   final Widget child;
+  final AppFeature requiredFeature;
 
   Stream<AuthState> _safeAuthStateStream() {
     try {
@@ -35,7 +38,10 @@ class AuthRequired extends StatelessWidget {
             return const LoginScreen();
           }
 
-          return MembershipGate(child: child);
+          return MembershipGate(
+            requiredFeature: requiredFeature,
+            child: child,
+          );
         } catch (error) {
           debugPrint(
               'Failed to read Supabase auth state, falling back to login: $error');

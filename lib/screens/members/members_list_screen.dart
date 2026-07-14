@@ -1211,8 +1211,21 @@ class _MembersListScreenState extends State<MembersListScreen> {
                                           ],
                                         ),
                                       ),
-                                      Icon(Icons.chevron_right,
-                                          color: colorScheme.onSurfaceVariant),
+                                      if (careAlert != null)
+                                        TextButton.icon(
+                                          onPressed: () =>
+                                              _openMessageWithMember(member),
+                                          icon: const Icon(
+                                            Icons.favorite_outline,
+                                            size: 18,
+                                          ),
+                                          label: const Text('Check In'),
+                                        )
+                                      else
+                                        Icon(
+                                          Icons.chevron_right,
+                                          color: colorScheme.onSurfaceVariant,
+                                        ),
                                     ],
                                   ),
                                 ),

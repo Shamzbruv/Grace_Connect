@@ -57,10 +57,10 @@ class _BibleReaderScreenState extends State<BibleReaderScreen> {
 
   void _startReadingTimer() {
     _readingTimer?.cancel();
-    _readingTimer = Timer(const Duration(minutes: 5), () async {
+    _readingTimer = Timer(const Duration(minutes: 1), () async {
       if (!mounted || _streakRecorded) return;
 
-      final streak = await BibleStreakService().recordFiveMinuteRead();
+      final streak = await BibleStreakService().recordQualifiedRead();
       _streakRecorded = true;
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

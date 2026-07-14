@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -5,9 +6,11 @@ import 'package:flutter/rendering.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../models/daily_motivation.dart';
 import '../../services/daily_motivation_service.dart';
+import '../../services/notification_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/ui/app_feedback.dart';
 import '../../widgets/ui/app_loader.dart';
@@ -33,13 +36,24 @@ class _DailyWordScreenState extends State<DailyWordScreen> {
   }
 
   Future<_DailyWordData> _load({bool forceRegenerate = false}) async {
-    final selected = widget.motivationId?.isNotEmpty == true
+    var selected = widget.motivationId?.isNotEmpty == true
         ? await _service.fetchById(widget.motivationId!)
         : await _service.fetchToday(
             generateIfMissing: true,
             forceRegenerate: forceRegenerate,
           );
-    final recent = await _service.fetchRecent();
+    final currentYear = DateTime.now().year;
+    if (selected != null &&
+        selected.publishDate.toLocal().year != currentYear) {
+      selected = await _service.fetchToday(generateIfMissing: true);
+    }
+    final recent = (await _service.fetchRecent(limit: 370))
+        .where((motivation) =>
+            motivation.publishDate.toLocal().year == currentYear)
+        .toList();
+    if (selected != null) {
+      unawaited(_clearDailyWordNotification(selected.id));
+    }
     return _DailyWordData(selected: selected, recent: recent);
   }
 
@@ -47,6 +61,24 @@ class _DailyWordScreenState extends State<DailyWordScreen> {
     setState(() {
       _future = _load(forceRegenerate: widget.motivationId?.isNotEmpty != true);
     });
+  }
+
+  Future<void> _clearDailyWordNotification(String motivationId) async {
+    final cleanId = motivationId.trim();
+    if (cleanId.isEmpty) return;
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId != null) {
+      await NotificationService().markEntityAsRead(
+        userId: userId,
+        entityTable: 'daily_motivations',
+        entityId: cleanId,
+      );
+      return;
+    }
+    await NotificationService().clearEntityNotifications(
+      entityTable: 'daily_motivations',
+      entityId: cleanId,
+    );
   }
 
   Future<void> _shareDailyWordImage(DailyMotivation motivation) async {
@@ -152,25 +184,23 @@ class _DailyWordScreenState extends State<DailyWordScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                ...data.recent.map(
-                  (motivation) => _RecentDailyWordTile(
-                    motivation: motivation,
-                    selected: motivation.id == data.selected!.id,
-                    onTap: () {
-                      setState(() {
-                        _future = Future.value(
-                          _DailyWordData(
-                            selected: motivation,
-                            recent: data.recent,
-                          ),
-                        );
-                      });
-                      AppFeedback.show(
-                        context,
-                        DateFormat.yMMMMd().format(motivation.publishDate),
+                _DailyWordArchive(
+                  words: data.recent,
+                  selectedId: data.selected!.id,
+                  onSelected: (motivation) {
+                    setState(() {
+                      _future = Future.value(
+                        _DailyWordData(
+                          selected: motivation,
+                          recent: data.recent,
+                        ),
                       );
-                    },
-                  ),
+                    });
+                    AppFeedback.show(
+                      context,
+                      DateFormat.yMMMMd().format(motivation.publishDate),
+                    );
+                  },
                 ),
               ],
             ),
@@ -276,6 +306,100 @@ class _DailyWordHero extends StatelessWidget {
               ],
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DailyWordArchive extends StatelessWidget {
+  const _DailyWordArchive({
+    required this.words,
+    required this.selectedId,
+    required this.onSelected,
+  });
+
+  final List<DailyMotivation> words;
+  final String selectedId;
+  final ValueChanged<DailyMotivation> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final grouped = <DateTime, List<DailyMotivation>>{};
+    for (final word in words) {
+      final local = word.publishDate.toLocal();
+      final month = DateTime(local.year, local.month);
+      grouped.putIfAbsent(month, () => []).add(word);
+    }
+    final months = grouped.keys.toList()..sort((a, b) => b.compareTo(a));
+    final now = DateTime.now();
+    final currentMonth = DateTime(now.year, now.month);
+
+    return Column(
+      children: [
+        for (final month in months)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: _DailyWordMonthGroup(
+              month: month,
+              words: grouped[month]!,
+              selectedId: selectedId,
+              initiallyExpanded: month == currentMonth,
+              onSelected: onSelected,
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _DailyWordMonthGroup extends StatelessWidget {
+  const _DailyWordMonthGroup({
+    required this.month,
+    required this.words,
+    required this.selectedId,
+    required this.initiallyExpanded,
+    required this.onSelected,
+  });
+
+  final DateTime month;
+  final List<DailyMotivation> words;
+  final String selectedId;
+  final bool initiallyExpanded;
+  final ValueChanged<DailyMotivation> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final sortedWords = words.toList()
+      ..sort((a, b) => b.publishDate.compareTo(a.publishDate));
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: theme.cardTheme.color,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: theme.dividerColor.withValues(alpha: 0.16)),
+      ),
+      child: ExpansionTile(
+        initiallyExpanded: initiallyExpanded,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        collapsedShape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: Text(
+          DateFormat.yMMMM().format(month),
+          style: GoogleFonts.outfit(fontWeight: FontWeight.w900),
+        ),
+        subtitle: Text(
+            '${sortedWords.length} day${sortedWords.length == 1 ? '' : 's'}'),
+        children: [
+          for (final motivation in sortedWords)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+              child: _RecentDailyWordTile(
+                motivation: motivation,
+                selected: motivation.id == selectedId,
+                onTap: () => onSelected(motivation),
+              ),
+            ),
         ],
       ),
     );

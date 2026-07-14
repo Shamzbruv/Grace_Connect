@@ -1,5 +1,3 @@
-
-
 class AttendanceRecord {
   final String id;
   final String userId;
@@ -35,8 +33,8 @@ class AttendanceRecord {
       userId: data['user_id'] ?? '',
       churchId: data['church_id'] ?? '',
       serviceId: data['service_id'] ?? '',
-      timestamp: data['timestamp'] != null 
-          ? DateTime.parse(data['timestamp'])
+      timestamp: data['timestamp'] != null
+          ? DateTime.parse(data['timestamp']).toLocal()
           : DateTime.now(),
       method: data['method'] ?? 'unknown',
       present: data['present'] ?? false,
@@ -53,7 +51,7 @@ class AttendanceRecord {
       'user_id': userId,
       'church_id': churchId,
       'service_id': serviceId,
-      'timestamp': timestamp.toIso8601String(),
+      'timestamp': timestamp.toUtc().toIso8601String(),
       'method': method,
       'present': present,
       'status': status,

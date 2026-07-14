@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../access/app_access_context.dart';
+import '../access/app_feature.dart';
 import '../models/user_profile.dart';
 import '../providers/user_role_provider.dart';
 import '../services/feed_scroll_service.dart';
@@ -15,6 +17,7 @@ class AppBottomMenu extends StatelessWidget {
     this.limitedAllowedIndexes = const {0},
     this.limitedAllowedRoutes = const {'/community'},
     this.limitedNotice,
+    this.access,
   });
 
   final int? selectedIndex;
@@ -23,6 +26,7 @@ class AppBottomMenu extends StatelessWidget {
   final Set<int> limitedAllowedIndexes;
   final Set<String> limitedAllowedRoutes;
   final String? limitedNotice;
+  final AppAccessContext? access;
 
   static const List<_MenuItem> _primaryItems = [
     _MenuItem(
@@ -30,29 +34,34 @@ class AppBottomMenu extends StatelessWidget {
       route: '/community',
       icon: Icons.dynamic_feed_outlined,
       selectedIcon: Icons.dynamic_feed,
+      feature: AppFeature.communityRead,
     ),
     _MenuItem(
       label: 'Events',
       route: '/events',
       icon: Icons.calendar_month_outlined,
       selectedIcon: Icons.calendar_month,
+      feature: AppFeature.publicEvents,
     ),
     _MenuItem(
       label: 'Home',
       route: '/dashboard',
       icon: Icons.dashboard_outlined,
       selectedIcon: Icons.dashboard,
+      feature: AppFeature.appShell,
     ),
     _MenuItem(
       label: 'Bible',
       route: '/bible',
       icon: Icons.menu_book_outlined,
       selectedIcon: Icons.menu_book,
+      feature: AppFeature.bibleReading,
     ),
     _MenuItem(
       label: 'More',
       icon: Icons.more_horiz,
       selectedIcon: Icons.more,
+      feature: AppFeature.appShell,
     ),
   ];
 
@@ -62,90 +71,133 @@ class AppBottomMenu extends StatelessWidget {
       route: '/members',
       icon: Icons.people_outline,
       selectedIcon: Icons.people,
+      feature: AppFeature.memberDirectory,
     ),
     _MenuItem(
       label: 'Announcements',
       route: '/announcements',
       icon: Icons.campaign_outlined,
       selectedIcon: Icons.campaign,
+      feature: AppFeature.announcements,
     ),
     _MenuItem(
       label: 'Ministries',
       route: '/ministries',
       icon: Icons.groups_outlined,
       selectedIcon: Icons.groups,
+      feature: AppFeature.ministryManagement,
     ),
     _MenuItem(
       label: 'Attendance',
       route: '/attendance',
       icon: Icons.checklist_rtl_outlined,
       selectedIcon: Icons.checklist_rtl,
+      feature: AppFeature.attendance,
     ),
     _MenuItem(
       label: 'Transfer',
       route: '/church_transfer',
       icon: Icons.compare_arrows_outlined,
       selectedIcon: Icons.compare_arrows,
+      feature: AppFeature.churchTransfer,
     ),
     _MenuItem(
       label: 'Prayers',
       route: '/prayers',
       icon: Icons.volunteer_activism_outlined,
       selectedIcon: Icons.volunteer_activism,
+      feature: AppFeature.privatePrayerCare,
     ),
     _MenuItem(
       label: 'Counseling',
       route: '/counseling',
       icon: Icons.favorite_outline,
       selectedIcon: Icons.favorite,
+      feature: AppFeature.counseling,
     ),
     _MenuItem(
       label: 'Live Streaming',
       route: '/live_streaming',
       icon: Icons.live_tv_outlined,
       selectedIcon: Icons.live_tv,
+      feature: AppFeature.communityRead,
     ),
     _MenuItem(
       label: 'Manage Live',
       route: '/admin/live_stream',
       icon: Icons.settings_input_antenna_outlined,
       selectedIcon: Icons.settings_input_antenna,
+      feature: AppFeature.liveManagement,
     ),
     _MenuItem(
       label: 'Analytics',
       route: '/analytics',
       icon: Icons.analytics_outlined,
       selectedIcon: Icons.analytics,
+      feature: AppFeature.churchAnalytics,
     ),
     _MenuItem(
       label: 'Notifications',
       route: '/notifications',
       icon: Icons.notifications_outlined,
       selectedIcon: Icons.notifications,
+      feature: AppFeature.notifications,
     ),
     _MenuItem(
       label: 'Giving',
       route: '/donations',
       icon: Icons.volunteer_activism_outlined,
       selectedIcon: Icons.volunteer_activism,
+      feature: AppFeature.churchFinance,
+    ),
+    _MenuItem(
+      label: 'Grace Rooms',
+      route: '/grace_rooms',
+      icon: Icons.volunteer_activism_outlined,
+      selectedIcon: Icons.volunteer_activism,
+      feature: AppFeature.graceRooms,
+    ),
+    _MenuItem(
+      label: 'Grace Circles',
+      route: '/grace_circles',
+      icon: Icons.diversity_3_outlined,
+      selectedIcon: Icons.diversity_3,
+      feature: AppFeature.graceCircles,
+    ),
+    _MenuItem(
+      label: 'Saved',
+      route: '/saved',
+      icon: Icons.bookmarks_outlined,
+      selectedIcon: Icons.bookmarks,
+      feature: AppFeature.savedItems,
+    ),
+    _MenuItem(
+      label: 'Public Profile',
+      route: '/public_profile',
+      icon: Icons.person_pin_circle_outlined,
+      selectedIcon: Icons.person_pin_circle,
+      feature: AppFeature.socialProfile,
     ),
     _MenuItem(
       label: 'Settings',
       route: '/settings',
       icon: Icons.settings_outlined,
       selectedIcon: Icons.settings,
+      feature: AppFeature.appShell,
     ),
     _MenuItem(
       label: 'Profile',
       route: '/profile',
       icon: Icons.person_outline,
       selectedIcon: Icons.person,
+      feature: AppFeature.appShell,
     ),
     _MenuItem(
       label: 'Support',
       route: '/support',
       icon: Icons.support_agent_outlined,
       selectedIcon: Icons.support_agent,
+      feature: AppFeature.appShell,
     ),
   ];
 
@@ -153,6 +205,7 @@ class AppBottomMenu extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final effectiveSelectedIndex = selectedIndex ?? _selectedIndex(context);
+    final effectiveAccess = _readAccess(context, listen: true);
 
     return NavigationBar(
       selectedIndex: effectiveSelectedIndex,
@@ -163,8 +216,9 @@ class AppBottomMenu extends StatelessWidget {
       elevation: 6,
       labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
       onDestinationSelected: (index) {
-        if (subscriptionLimited && !limitedAllowedIndexes.contains(index)) {
-          _showLimitedNotice(context);
+        final item = _primaryItems[index];
+        if (_isPrimaryDisabled(index, effectiveAccess)) {
+          _showLimitedNotice(context, item.feature, effectiveAccess);
           return;
         }
 
@@ -174,7 +228,6 @@ class AppBottomMenu extends StatelessWidget {
           return;
         }
 
-        final item = _primaryItems[index];
         final route = item.route;
 
         if (route == null) {
@@ -182,7 +235,7 @@ class AppBottomMenu extends StatelessWidget {
           return;
         }
 
-        _navigateTo(context, route);
+        _navigateTo(context, route, effectiveAccess);
       },
       destinations: [
         for (var index = 0; index < _primaryItems.length; index++)
@@ -190,14 +243,12 @@ class AppBottomMenu extends StatelessWidget {
             icon: _menuIcon(
               context,
               _primaryItems[index].icon,
-              disabled:
-                  subscriptionLimited && !limitedAllowedIndexes.contains(index),
+              disabled: _isPrimaryDisabled(index, effectiveAccess),
             ),
             selectedIcon: _menuIcon(
               context,
               _primaryItems[index].selectedIcon,
-              disabled:
-                  subscriptionLimited && !limitedAllowedIndexes.contains(index),
+              disabled: _isPrimaryDisabled(index, effectiveAccess),
             ),
             label: _primaryItems[index].label,
           ),
@@ -237,9 +288,15 @@ class AppBottomMenu extends StatelessWidget {
     return _moreItems.any((item) => item.route == currentRoute);
   }
 
-  void _navigateTo(BuildContext context, String route) {
-    if (subscriptionLimited && !limitedAllowedRoutes.contains(route)) {
-      _showLimitedNotice(context);
+  void _navigateTo(
+    BuildContext context,
+    String route, [
+    AppAccessContext? effectiveAccess,
+  ]) {
+    final feature = _featureForRoute(route);
+    if (_isRouteDisabled(route,
+        feature: feature, accessContext: effectiveAccess)) {
+      _showLimitedNotice(context, feature, effectiveAccess);
       return;
     }
 
@@ -256,6 +313,7 @@ class AppBottomMenu extends StatelessWidget {
     final currentRoute = ModalRoute.of(context)?.settings.name;
     final roleProvider = context.read<UserRoleProvider>();
     final items = _visibleMoreItems(roleProvider.userProfile);
+    final effectiveAccess = _readAccess(context);
 
     showModalBottomSheet<void>(
       context: context,
@@ -268,9 +326,10 @@ class AppBottomMenu extends StatelessWidget {
           subscriptionLimited: subscriptionLimited,
           limitedAllowedRoutes: limitedAllowedRoutes,
           limitedNotice: limitedNotice,
+          access: effectiveAccess,
           onSelectRoute: (route) {
             Navigator.of(sheetContext).pop();
-            _navigateTo(context, route);
+            _navigateTo(context, route, effectiveAccess);
           },
           onLogOut: () async {
             Navigator.of(sheetContext).pop();
@@ -295,11 +354,7 @@ class AppBottomMenu extends StatelessWidget {
   }
 
   bool _canViewMembers(UserProfile? profile) {
-    if (profile == null) return false;
-    final capabilities = profile.capabilities;
-    return profile.isDeveloper ||
-        capabilities.canManageMembersBasic ||
-        capabilities.canManageRoles;
+    return profile != null;
   }
 
   bool _canViewAnalytics(UserProfile? profile) {
@@ -316,13 +371,65 @@ class AppBottomMenu extends StatelessWidget {
     return profile.isDeveloper || profile.capabilities.canManageMediaUploads;
   }
 
-  void _showLimitedNotice(BuildContext context) {
+  bool _isPrimaryDisabled(int index, AppAccessContext? effectiveAccess) {
+    final item = _primaryItems[index];
+    return _isRouteDisabled(
+          item.route,
+          feature: item.feature,
+          accessContext: effectiveAccess,
+        ) ||
+        (subscriptionLimited && !limitedAllowedIndexes.contains(index));
+  }
+
+  bool _isRouteDisabled(
+    String? route, {
+    AppFeature? feature,
+    AppAccessContext? accessContext,
+  }) {
+    if (route != null &&
+        subscriptionLimited &&
+        !limitedAllowedRoutes.contains(route)) {
+      return true;
+    }
+    if (accessContext == null) return false;
+    return !accessContext.canUse(feature ?? _featureForRoute(route));
+  }
+
+  AppFeature _featureForRoute(String? route) {
+    if (route == null) return AppFeature.appShell;
+    final primary = _primaryItems.where((item) => item.route == route).toList();
+    if (primary.isNotEmpty) return primary.first.feature;
+    final more = _moreItems.where((item) => item.route == route).toList();
+    if (more.isNotEmpty) return more.first.feature;
+    if (route.startsWith('/settings')) return AppFeature.appShell;
+    return AppFeature.appShell;
+  }
+
+  AppAccessContext? _readAccess(
+    BuildContext context, {
+    bool listen = false,
+  }) {
+    if (access != null) return access;
+    try {
+      return Provider.of<AppAccessContext>(context, listen: listen);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void _showLimitedNotice(
+    BuildContext context, [
+    AppFeature? feature,
+    AppAccessContext? effectiveAccess,
+  ]) {
+    final accessContext = effectiveAccess ?? _readAccess(context);
+    final message = feature != null && accessContext != null
+        ? accessContext.unavailableMessageFor(feature)
+        : limitedNotice ??
+            'This church subscription is not active. Please contact your church admin about subscription options.';
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(
-          limitedNotice ??
-              'This church subscription is not active. Please contact your church admin about subscription options.',
-        ),
+        content: Text(message),
       ),
     );
   }
@@ -334,6 +441,7 @@ class _MoreMenuSheet extends StatelessWidget {
   final bool subscriptionLimited;
   final Set<String> limitedAllowedRoutes;
   final String? limitedNotice;
+  final AppAccessContext? access;
   final ValueChanged<String> onSelectRoute;
   final VoidCallback onLogOut;
 
@@ -343,6 +451,7 @@ class _MoreMenuSheet extends StatelessWidget {
     required this.subscriptionLimited,
     required this.limitedAllowedRoutes,
     this.limitedNotice,
+    this.access,
     required this.onSelectRoute,
     required this.onLogOut,
   });
@@ -383,10 +492,11 @@ class _MoreMenuSheet extends StatelessWidget {
                 isActive: item.route == currentRoute ||
                     (item.route == '/settings' &&
                         currentRoute?.startsWith('/settings') == true),
-                isDisabled: subscriptionLimited &&
-                    !(item.route != null &&
-                        limitedAllowedRoutes.contains(item.route)),
-                limitedNotice: limitedNotice,
+                isDisabled: _isDisabled(item),
+                limitedNotice: item.route == null
+                    ? limitedNotice
+                    : access?.unavailableMessageFor(item.feature) ??
+                        limitedNotice,
                 onTap: () {
                   final route = item.route;
                   if (route != null) onSelectRoute(route);
@@ -411,6 +521,18 @@ class _MoreMenuSheet extends StatelessWidget {
       ),
     );
   }
+
+  bool _isDisabled(_MenuItem item) {
+    final route = item.route;
+    if (route != null &&
+        subscriptionLimited &&
+        !limitedAllowedRoutes.contains(route)) {
+      return true;
+    }
+    final accessContext = access;
+    if (accessContext == null) return false;
+    return !accessContext.canUse(item.feature);
+  }
 }
 
 class _MoreMenuTile extends StatelessWidget {
@@ -431,25 +553,50 @@ class _MoreMenuTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isGraceRooms = item.route == '/grace_rooms';
+    final activeColor =
+        isGraceRooms ? theme.colorScheme.secondary : theme.colorScheme.primary;
+    final iconColor = isDisabled
+        ? theme.colorScheme.onSurface.withValues(alpha: 0.38)
+        : isActive || isGraceRooms
+            ? activeColor
+            : null;
 
     return ListTile(
-      leading: Icon(
-        isActive ? item.selectedIcon : item.icon,
-        color: isDisabled
-            ? theme.colorScheme.onSurface.withValues(alpha: 0.38)
-            : isActive
-                ? theme.colorScheme.primary
-                : null,
-      ),
+      leading: isGraceRooms
+          ? Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: isDisabled
+                    ? theme.colorScheme.surfaceContainerHighest
+                    : activeColor.withValues(alpha: 0.18),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: isDisabled
+                      ? theme.dividerColor.withValues(alpha: 0.12)
+                      : activeColor.withValues(alpha: 0.32),
+                ),
+              ),
+              child: Icon(
+                isActive ? item.selectedIcon : item.icon,
+                color: iconColor,
+              ),
+            )
+          : Icon(
+              isActive ? item.selectedIcon : item.icon,
+              color: iconColor,
+            ),
       title: Text(
         item.label,
         style: TextStyle(
           color: isDisabled
               ? theme.colorScheme.onSurface.withValues(alpha: 0.38)
               : isActive
-                  ? theme.colorScheme.primary
+                  ? activeColor
                   : null,
-          fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
+          fontWeight:
+              isActive || isGraceRooms ? FontWeight.w800 : FontWeight.w500,
         ),
       ),
       trailing: isDisabled ? const Icon(Icons.lock_outline) : null,
@@ -481,11 +628,13 @@ class _MenuItem {
   final String? route;
   final IconData icon;
   final IconData selectedIcon;
+  final AppFeature feature;
 
   const _MenuItem({
     required this.label,
     required this.icon,
     required this.selectedIcon,
+    required this.feature,
     this.route,
   });
 }

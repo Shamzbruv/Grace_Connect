@@ -63,6 +63,27 @@ class DeveloperService {
     return const [];
   }
 
+  Future<List<Map<String, dynamic>>> getReportedUsers() async {
+    final data = await _supabase.rpc('developer_list_reported_users');
+    if (data is List) {
+      return data.map((row) => Map<String, dynamic>.from(row)).toList();
+    }
+    return const [];
+  }
+
+  Future<void> updateContentReportStatus({
+    required String reportId,
+    required String status,
+  }) async {
+    await _supabase.rpc(
+      'developer_update_content_report_status',
+      params: {
+        'p_report_id': reportId,
+        'p_status': status,
+      },
+    );
+  }
+
   Future<ChurchSubscriptionContext> grantFreeSubscription({
     required String churchId,
     required int months,

@@ -1,0 +1,8 @@
+Grace Connect 1.0.22-beta+24
+
+- Added Grace Network foundation: public profiles, Discover/Following feed modes, saved items, Grace Circles, and Grace Rooms.
+- Updated access control so unconnected or pending users can still use Community, Bible, public events, Grace Rooms, Grace Circles, Saved, profile, and notifications.
+- Added public events discovery for users without an active church workspace.
+- Improved notification deep links for posts, profiles, events, Grace Circles, Grace Rooms, saved items, messages, Daily Word, and Bible quiz.
+- Added backend migration for persistent social posts, public profiles, follows, saved items, Grace Circles, Grace Rooms, and feed RPCs.
+- Preserved church workspace tools behind membership/subscription feature guards to avoid breaking church management workflows.

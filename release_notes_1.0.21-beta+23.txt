@@ -1,0 +1,6 @@
+Grace Connect 1.0.21-beta+23
+
+- Verified Android Maps key setup and removed public key diagnostics from geofence setup.
+- Live service attendance now resumes saved watch progress instead of restarting.
+- Fixed live viewer count foundation with secure Supabase presence RPCs.
+- Attendance care alerts now refresh after finalized services and show Check In actions on member rows.

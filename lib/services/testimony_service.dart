@@ -65,4 +65,9 @@ class TestimonyService {
       },
     );
   }
+
+  Future<void> deleteTestimony(String testimonyId) async {
+    if (testimonyId.trim().isEmpty) return;
+    await _supabase.from('testimonies').delete().eq('id', testimonyId.trim());
+  }
 }

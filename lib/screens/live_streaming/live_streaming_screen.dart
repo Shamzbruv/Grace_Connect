@@ -4,10 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:youtube_player_flutter/youtube_player_flutter.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../providers/user_role_provider.dart';
 import '../../services/attendance_service.dart';
 import '../../services/church_service.dart';
 import '../../utils/youtube_url_utils.dart';
+import '../../widgets/live_mini_player_overlay.dart';
 import '../../widgets/ui/app_feedback.dart';
 import '../../widgets/ui/app_loader.dart';
 
@@ -31,14 +33,20 @@ class _LiveStreamingScreenState extends State<LiveStreamingScreen>
   bool _isMarkingRemotePresent = false;
   bool _isManualSignInChecking = false;
   bool _autoRemotePromptShown = false;
+  bool _remoteAttendanceCompleted = false;
   String? _churchId;
+  String? _currentUserId;
+  String? _activeServiceId;
   String? _activeServiceName;
+  String? _activeVideoId;
   Timer? _engagementTimer;
   Timer? _viewerHeartbeatTimer;
   Timer? _viewerCountTimer;
+  Timer? _progressSaveTimer;
   int _activeViewerCount = 0;
   int _engagedSeconds = 0;
   static const int _requiredEngagementSeconds = 60 * 60;
+  static const String _progressPrefix = 'live_attendance_progress_v2';
 
   @override
   void initState() {
@@ -51,14 +59,13 @@ class _LiveStreamingScreenState extends State<LiveStreamingScreen>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (!_isLive) return;
     if (state == AppLifecycleState.paused ||
-        state == AppLifecycleState.inactive ||
         state == AppLifecycleState.detached) {
-      _leftAppDuringService = true;
+      unawaited(_saveEngagementProgress());
       _stopEngagementTimer();
       _stopViewerPresence(markInactive: true);
       if (mounted) setState(() {});
     } else if (state == AppLifecycleState.resumed) {
-      if (!_leftAppDuringService) {
+      if (!_remoteAttendanceCompleted) {
         _startEngagementTimer();
       }
       final churchId = _churchId;
@@ -69,9 +76,9 @@ class _LiveStreamingScreenState extends State<LiveStreamingScreen>
   }
 
   Future<void> _loadStream() async {
-    final churchId = Provider.of<UserRoleProvider>(context, listen: false)
-        .userProfile
-        ?.churchId;
+    final roleProvider = Provider.of<UserRoleProvider>(context, listen: false);
+    final churchId = roleProvider.userProfile?.churchId;
+    final currentUser = roleProvider.user;
     if (churchId == null) {
       _stopViewerPresence(markInactive: true);
       if (mounted) {
@@ -83,13 +90,30 @@ class _LiveStreamingScreenState extends State<LiveStreamingScreen>
       return;
     }
     _churchId = churchId;
+    _currentUserId = currentUser?.uid;
 
     final church = await ChurchService().getChurch(churchId);
     final activeService = await _attendanceService.getActiveService(churchId);
+    final activeServiceId = activeService?['id']?.toString();
+    final alreadyPresent = activeService != null &&
+        currentUser != null &&
+        await _attendanceService.hasAttendanceForActiveService(
+          churchId,
+          userId: currentUser.uid,
+        );
     if (mounted) {
       if (church != null && church.isLive && church.liveStreamUrl != null) {
         final videoId = YoutubeUrlUtils.extractVideoId(church.liveStreamUrl!);
         if (videoId != null) {
+          LiveMiniPlayerService().close();
+          final savedSeconds = alreadyPresent
+              ? _requiredEngagementSeconds
+              : await _loadEngagementProgress(
+                  churchId: churchId,
+                  serviceId: activeServiceId,
+                  videoId: videoId,
+                  userId: currentUser?.uid,
+                );
           _controller = YoutubePlayerController(
             initialVideoId: videoId,
             flags: const YoutubePlayerFlags(
@@ -100,13 +124,16 @@ class _LiveStreamingScreenState extends State<LiveStreamingScreen>
           setState(() {
             _isLive = true;
             _hasActiveService = activeService != null;
+            _activeServiceId = activeServiceId;
             _activeServiceName = activeService?['name']?.toString();
+            _activeVideoId = videoId;
             _leftAppDuringService = false;
-            _autoRemotePromptShown = false;
-            _engagedSeconds = 0;
+            _autoRemotePromptShown = alreadyPresent;
+            _remoteAttendanceCompleted = alreadyPresent;
+            _engagedSeconds = savedSeconds;
             _isLoading = false;
           });
-          _startEngagementTimer();
+          if (!alreadyPresent) _startEngagementTimer();
           _startViewerPresence(churchId);
           return;
         }
@@ -115,7 +142,9 @@ class _LiveStreamingScreenState extends State<LiveStreamingScreen>
       setState(() {
         _isLive = false;
         _hasActiveService = activeService != null;
+        _activeServiceId = activeServiceId;
         _activeServiceName = activeService?['name']?.toString();
+        _activeVideoId = null;
         _isLoading = false;
       });
     }
@@ -123,14 +152,23 @@ class _LiveStreamingScreenState extends State<LiveStreamingScreen>
 
   void _startEngagementTimer() {
     _engagementTimer?.cancel();
-    if (!_isLive || _leftAppDuringService) return;
+    if (!_isLive || _leftAppDuringService || _remoteAttendanceCompleted) {
+      return;
+    }
+    _startProgressSaveTimer();
     _engagementTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (!mounted || !_isLive || _leftAppDuringService) return;
+      if (!mounted ||
+          !_isLive ||
+          _leftAppDuringService ||
+          _remoteAttendanceCompleted) {
+        return;
+      }
       setState(() => _engagedSeconds++);
       if (_hasActiveService &&
           !_autoRemotePromptShown &&
           _engagedSeconds >= _requiredEngagementSeconds) {
         _autoRemotePromptShown = true;
+        unawaited(_saveEngagementProgress());
         unawaited(_showLiveAttendancePrompt());
       }
     });
@@ -139,6 +177,74 @@ class _LiveStreamingScreenState extends State<LiveStreamingScreen>
   void _stopEngagementTimer() {
     _engagementTimer?.cancel();
     _engagementTimer = null;
+    _progressSaveTimer?.cancel();
+    _progressSaveTimer = null;
+    unawaited(_saveEngagementProgress());
+  }
+
+  void _startProgressSaveTimer() {
+    _progressSaveTimer?.cancel();
+    _progressSaveTimer = Timer.periodic(
+      const Duration(seconds: 15),
+      (_) => unawaited(_saveEngagementProgress()),
+    );
+  }
+
+  String? _progressKey({
+    required String? churchId,
+    required String? serviceId,
+    required String? videoId,
+    required String? userId,
+  }) {
+    final cleanUserId = userId?.trim() ?? '';
+    final cleanChurchId = churchId?.trim() ?? '';
+    final cleanVideoId = videoId?.trim() ?? '';
+    final cleanServiceId = serviceId?.trim();
+    if (cleanUserId.isEmpty || cleanChurchId.isEmpty || cleanVideoId.isEmpty) {
+      return null;
+    }
+    return [
+      _progressPrefix,
+      cleanUserId,
+      cleanChurchId,
+      cleanServiceId?.isNotEmpty == true ? cleanServiceId : 'live',
+      cleanVideoId,
+    ].join('|');
+  }
+
+  Future<int> _loadEngagementProgress({
+    required String? churchId,
+    required String? serviceId,
+    required String? videoId,
+    required String? userId,
+  }) async {
+    final key = _progressKey(
+      churchId: churchId,
+      serviceId: serviceId,
+      videoId: videoId,
+      userId: userId,
+    );
+    if (key == null) return 0;
+    final prefs = await SharedPreferences.getInstance();
+    return (prefs.getInt(key) ?? 0)
+        .clamp(0, _requiredEngagementSeconds)
+        .toInt();
+  }
+
+  Future<void> _saveEngagementProgress() async {
+    if (_engagedSeconds <= 0) return;
+    final key = _progressKey(
+      churchId: _churchId,
+      serviceId: _activeServiceId,
+      videoId: _activeVideoId,
+      userId: _currentUserId,
+    );
+    if (key == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(
+      key,
+      _engagedSeconds.clamp(0, _requiredEngagementSeconds).toInt(),
+    );
   }
 
   void _startViewerPresence(String churchId) {
@@ -226,6 +332,12 @@ class _LiveStreamingScreenState extends State<LiveStreamingScreen>
 
       await _attendanceService.markManualOnSitePresent(churchId);
       if (!mounted) return;
+      _stopEngagementTimer();
+      setState(() {
+        _remoteAttendanceCompleted = true;
+        _engagedSeconds = _requiredEngagementSeconds;
+      });
+      unawaited(_saveEngagementProgress());
       AppFeedback.show(
         context,
         'Attendance marked present. Thank you for joining service.',
@@ -291,6 +403,19 @@ class _LiveStreamingScreenState extends State<LiveStreamingScreen>
                     engagementAnswer: engagementController.text.trim(),
                     watchedMinutes: (_engagedSeconds / 60).floor(),
                   );
+                  _stopEngagementTimer();
+                  if (mounted) {
+                    setState(() {
+                      _remoteAttendanceCompleted = true;
+                      _engagedSeconds = _engagedSeconds
+                          .clamp(
+                            _requiredEngagementSeconds,
+                            1 << 31,
+                          )
+                          .toInt();
+                    });
+                    unawaited(_saveEngagementProgress());
+                  }
                   if (!mounted || !dialogContext.mounted) return;
                   Navigator.pop(dialogContext);
                   AppFeedback.show(
@@ -501,8 +626,20 @@ class _LiveStreamingScreenState extends State<LiveStreamingScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    unawaited(_saveEngagementProgress());
     _stopEngagementTimer();
     _stopViewerPresence(markInactive: true);
+    if (_remoteAttendanceCompleted &&
+        _isLive &&
+        _activeVideoId?.trim().isNotEmpty == true) {
+      LiveMiniPlayerService().show(
+        videoId: _activeVideoId!,
+        title: _activeServiceName == null
+            ? 'Live Service'
+            : '${_activeServiceName!} is Live',
+        churchId: _churchId ?? '',
+      );
+    }
     _controller?.dispose();
     super.dispose();
   }
@@ -637,10 +774,11 @@ class _LiveStreamingScreenState extends State<LiveStreamingScreen>
     final progress =
         (_engagedSeconds / _requiredEngagementSeconds).clamp(0, 1).toDouble();
     final remainingSeconds =
-        (_requiredEngagementSeconds - _engagedSeconds).clamp(0, 999999);
+        (_requiredEngagementSeconds - _engagedSeconds).clamp(0, 999999).toInt();
     final canMarkRemote = _isLive &&
         _hasActiveService &&
         !_leftAppDuringService &&
+        !_remoteAttendanceCompleted &&
         _engagedSeconds >= _requiredEngagementSeconds;
 
     return ConstrainedBox(
@@ -668,10 +806,10 @@ class _LiveStreamingScreenState extends State<LiveStreamingScreen>
               ),
               const SizedBox(height: 8),
               Text(
-                _leftAppDuringService
-                    ? 'Engagement reset because the app was left during the live service. Reopen the live screen and stay here to qualify.'
+                _remoteAttendanceCompleted
+                    ? 'Remote attendance is recorded. You can continue using Grace Connect while the live service stays available as a mini-player.'
                     : _hasActiveService
-                        ? 'Stay on this live screen. After one hour, Grace Connect will ask for a remote attendance note and mark you present when submitted.'
+                        ? 'Watch time is saved on this device. If you leave and come back, Grace Connect continues from your saved progress.'
                         : 'The stream is live, but no attendance service window is active yet.',
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
@@ -681,9 +819,11 @@ class _LiveStreamingScreenState extends State<LiveStreamingScreen>
               LinearProgressIndicator(value: progress),
               const SizedBox(height: 8),
               Text(
-                canMarkRemote
-                    ? 'Remote attendance note is ready.'
-                    : '${(_engagedSeconds / 60).floor()} min watched. ${Duration(seconds: remainingSeconds).inMinutes + 1} min remaining.',
+                _remoteAttendanceCompleted
+                    ? 'Remote attendance completed.'
+                    : canMarkRemote
+                        ? 'Remote attendance note is ready.'
+                        : '${(_engagedSeconds / 60).floor()} min watched. ${Duration(seconds: remainingSeconds).inMinutes + 1} min remaining.',
                 style: theme.textTheme.labelMedium,
               ),
               const SizedBox(height: 12),
@@ -701,7 +841,9 @@ class _LiveStreamingScreenState extends State<LiveStreamingScreen>
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
                         : const Icon(Icons.how_to_reg_outlined),
-                    label: const Text('Complete Remote Attendance'),
+                    label: Text(_remoteAttendanceCompleted
+                        ? 'Attendance Completed'
+                        : 'Complete Remote Attendance'),
                   ),
                   const SizedBox(height: 8),
                   OutlinedButton.icon(
