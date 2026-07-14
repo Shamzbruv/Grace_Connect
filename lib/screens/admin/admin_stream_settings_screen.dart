@@ -25,6 +25,7 @@ class _AdminStreamSettingsScreenState extends State<AdminStreamSettingsScreen> {
   final _formKey = GlobalKey<FormState>(); // Added form key
   final ChurchService _churchService = ChurchService();
   bool _isLive = false;
+  bool _isPublicLive = false;
   bool _isLoading = true;
   Church? _church;
   YoutubePlayerController? _previewController; // Added for preview
@@ -57,6 +58,7 @@ class _AdminStreamSettingsScreenState extends State<AdminStreamSettingsScreen> {
           _church = church;
           _urlController.text = church.liveStreamUrl ?? '';
           _isLive = church.isLive;
+          _isPublicLive = church.liveIsPublic;
           _isLoading = false;
           // Auto-load preview if URL exists
           if (_urlController.text.isNotEmpty) {
@@ -153,6 +155,7 @@ class _AdminStreamSettingsScreenState extends State<AdminStreamSettingsScreen> {
         _church!.id,
         normalizedStreamUrl ?? '',
         _isLive,
+        liveIsPublic: _isPublicLive,
       );
       if (shouldNotifyLive) {
         await _notifyChurchLiveNow();
@@ -232,6 +235,7 @@ class _AdminStreamSettingsScreenState extends State<AdminStreamSettingsScreen> {
       policies: church.policies,
       liveStreamUrl: streamUrl.isEmpty ? null : streamUrl,
       isLive: _isLive,
+      liveIsPublic: _isPublicLive,
     );
     if (_isLive) {
       _startViewerCountPolling();
@@ -353,12 +357,28 @@ class _AdminStreamSettingsScreenState extends State<AdminStreamSettingsScreen> {
               SwitchListTile(
                 title: const Text('Go Live Now'),
                 subtitle: Text(_isLive
-                    ? 'Members can currently see the stream.'
-                    : 'Stream is hidden from members.'),
+                    ? (_isPublicLive
+                        ? 'Members and Grace Connect visitors can currently see the stream.'
+                        : 'Members can currently see the stream.')
+                    : 'Stream is hidden from viewers.'),
                 value: _isLive,
                 onChanged: _isLoading ? null : _handleLiveToggle,
                 secondary: Icon(Icons.live_tv,
                     color: _isLive ? Colors.red : Colors.grey),
+              ),
+              SwitchListTile(
+                title: const Text('Make this live public'),
+                subtitle: const Text(
+                  'Show this church in the public live rail so visitors can watch and request a visit.',
+                ),
+                value: _isPublicLive,
+                onChanged: _isLoading
+                    ? null
+                    : (value) async {
+                        setState(() => _isPublicLive = value);
+                        await _saveSettings();
+                      },
+                secondary: const Icon(Icons.public_outlined),
               ),
               Card(
                 child: ListTile(

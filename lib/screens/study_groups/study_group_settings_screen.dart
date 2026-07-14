@@ -81,6 +81,7 @@ class _StudyGroupSettingsScreenState extends State<StudyGroupSettingsScreen> {
   }
 
   Future<void> _save() async {
+    if (!widget.access.canEditGroup) return;
     setState(() => _isSaving = true);
     try {
       final updated = widget.group.copyWith(
@@ -178,6 +179,24 @@ class _StudyGroupSettingsScreenState extends State<StudyGroupSettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(20, 12, 20, 120),
         children: [
+          if (!widget.access.canEditGroup && widget.access.canDeleteGroup) ...[
+            AppCard(
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.admin_panel_settings_outlined,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Text(
+                      'Church leaders can archive this group, but only the group leader or assigned group admins can edit group settings or invitations.',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           _section(
             title: 'Group Identity',
             icon: Icons.badge_outlined,
@@ -336,7 +355,7 @@ class _StudyGroupSettingsScreenState extends State<StudyGroupSettingsScreen> {
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: _isSaving ? null : _save,
+        onPressed: _isSaving || !widget.access.canEditGroup ? null : _save,
         icon: _isSaving
             ? const SizedBox(
                 width: 18,

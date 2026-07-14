@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
+import android.view.WindowManager
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.plugin.common.MethodChannel
@@ -27,9 +28,22 @@ class MainActivity : FlutterActivity() {
                         openBatteryOptimizationSettings()
                         result.success(null)
                     }
+                    "setSecureScreen" -> {
+                        val enabled = call.argument<Boolean>("enabled") ?: false
+                        setSecureScreen(enabled)
+                        result.success(null)
+                    }
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    private fun setSecureScreen(enabled: Boolean) {
+        if (enabled) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
     }
 
     @Suppress("DEPRECATION")

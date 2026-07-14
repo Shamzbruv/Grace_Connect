@@ -270,11 +270,62 @@ class ChurchService {
 
   // Update Stream Settings
   Future<void> updateStreamSettings(
-      String churchId, String url, bool isLive) async {
+    String churchId,
+    String url,
+    bool isLive, {
+    bool liveIsPublic = false,
+  }) async {
     await Supabase.instance.client.from('churches').update({
       'liveStreamUrl': url,
       'isLive': isLive,
+      'live_is_public': liveIsPublic,
     }).eq('id', churchId);
+  }
+
+  Future<List<Church>> fetchLiveChurches({
+    String? viewerChurchId,
+    int limit = 30,
+  }) async {
+    final ownChurchId = viewerChurchId?.trim() ?? '';
+    try {
+      final rows = await _supabase.rpc('list_visible_live_churches', params: {
+        'viewer_church_id': ownChurchId.isEmpty ? null : ownChurchId,
+        'result_limit': limit,
+      });
+      if (rows is List) {
+        return rows
+            .map<Church>(
+                (row) => Church.fromMap(Map<String, dynamic>.from(row)))
+            .toList();
+      }
+    } catch (error) {
+      debugPrint('Visible live church RPC unavailable: $error');
+    }
+
+    try {
+      var query = _supabase
+          .from('churches')
+          .select()
+          .eq('isLive', true)
+          .not('liveStreamUrl', 'is', null)
+          .eq('church_status', 'approved')
+          .eq('public_visibility', true);
+      if (ownChurchId.isEmpty) {
+        query = query.eq('live_is_public', true);
+      }
+      final rows = await query.order('name').limit(limit);
+      final churches = rows.map<Church>((row) => Church.fromMap(row)).where(
+        (church) {
+          final churchId =
+              church.placeId.trim().isNotEmpty ? church.placeId : church.id;
+          return church.liveIsPublic || churchId == ownChurchId;
+        },
+      ).toList();
+      return churches;
+    } catch (error) {
+      debugPrint('Could not fetch live churches: $error');
+      return const [];
+    }
   }
 
   Future<void> recordLiveViewerHeartbeat(String churchId) async {

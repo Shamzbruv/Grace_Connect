@@ -2,13 +2,14 @@ import {
   authenticatedUser,
   callHuggingFaceJson,
   createInAppNotifications,
+  GLOBAL_VISITOR_CHURCH_ID,
   handleOptions,
   hasCronSecret,
   hasReachedJamaicaHour,
   jamaicaDateString,
   jsonResponse,
   nextJamaicaRefresh,
-  profileChurchId,
+  profileQuizChurchId,
   sendTopicPush,
   serviceClient,
   userProfile,
@@ -262,7 +263,10 @@ Deno.serve(async (request) => {
       .select("placeId")
       .not("placeId", "is", null);
     churchIds = Array.from(
-      new Set((churchRows ?? []).map((row) => String(row.placeId ?? "").trim()).filter(Boolean)),
+      new Set([
+        GLOBAL_VISITOR_CHURCH_ID,
+        ...(churchRows ?? []).map((row) => String(row.placeId ?? "").trim()).filter(Boolean),
+      ]),
     );
   } else {
     let userId = "";
@@ -275,8 +279,7 @@ Deno.serve(async (request) => {
       return jsonResponse({ error: "Today's quiz opens at 7:00 AM Jamaica time." }, 425);
     }
     const profile = await userProfile(client, userId);
-    const churchId = profileChurchId(profile);
-    if (!churchId) return jsonResponse({ error: "Church membership required." }, 403);
+    const churchId = profileQuizChurchId(profile);
     churchIds = [churchId];
   }
 
@@ -458,38 +461,45 @@ Return valid JSON only in this shape:
     const body = "Today’s 5-question Bible challenge is now live. Can you earn 100 points?";
     const route = `/daily_bible_quiz?quizId=${quiz.id}`;
 
-    await createInAppNotifications(client, {
-      churchId,
-      title,
-      body,
-      type: "daily_bible_quiz",
-      route,
-      entityTable: "daily_bible_quizzes",
-      entityId: quiz.id,
-      preferenceColumn: "notifyDailyQuiz",
-    });
+    if (churchId !== GLOBAL_VISITOR_CHURCH_ID) {
+      await createInAppNotifications(client, {
+        churchId,
+        title,
+        body,
+        type: "daily_bible_quiz",
+        route,
+        entityTable: "daily_bible_quizzes",
+        entityId: quiz.id,
+        preferenceColumn: "notifyDailyQuiz",
+      });
 
-    const pushResult = await sendTopicPush(client, {
-      topic: `church_${churchId}_quiz`,
-      title,
-      body,
-      route,
-      type: "daily_bible_quiz",
-      entityTable: "daily_bible_quizzes",
-      entityId: quiz.id,
-    });
+      const pushResult = await sendTopicPush(client, {
+        topic: `church_${churchId}_quiz`,
+        title,
+        body,
+        route,
+        type: "daily_bible_quiz",
+        entityTable: "daily_bible_quizzes",
+        entityId: quiz.id,
+      });
 
-    if (pushResult.sent) {
+      if (pushResult.sent) {
+        await client
+          .from("daily_bible_quizzes")
+          .update({ notification_sent_at: new Date().toISOString() })
+          .eq("id", quiz.id);
+      } else {
+        issues.push({
+          church_id: churchId,
+          stage: "push_notification",
+          message: pushResult.reason ?? "Quiz push notification was not sent.",
+        });
+      }
+    } else {
       await client
         .from("daily_bible_quizzes")
         .update({ notification_sent_at: new Date().toISOString() })
         .eq("id", quiz.id);
-    } else {
-      issues.push({
-        church_id: churchId,
-        stage: "push_notification",
-        message: pushResult.reason ?? "Quiz push notification was not sent.",
-      });
     }
     published++;
   }

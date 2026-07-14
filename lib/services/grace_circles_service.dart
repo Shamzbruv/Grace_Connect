@@ -9,6 +9,7 @@ class GraceCircle {
     this.ownerId = '',
     this.churchId = '',
     this.visibility = 'public',
+    this.joinMode = 'approval',
     this.memberCount = 0,
     this.createdAt,
   });
@@ -19,6 +20,7 @@ class GraceCircle {
   final String ownerId;
   final String churchId;
   final String visibility;
+  final String joinMode;
   final int memberCount;
   final DateTime? createdAt;
 
@@ -30,6 +32,9 @@ class GraceCircle {
       ownerId: data['owner_id']?.toString() ?? '',
       churchId: data['church_id']?.toString() ?? '',
       visibility: data['visibility']?.toString() ?? 'public',
+      joinMode: data['join_mode']?.toString() ??
+          data['joinMode']?.toString() ??
+          'approval',
       memberCount: _intValue(data['member_count']),
       createdAt: _dateValue(data['created_at']),
     );
@@ -117,8 +122,9 @@ class GraceCirclesService {
           'circle_visibility': visibility,
         },
       );
-      if (row is Map)
+      if (row is Map) {
         return GraceCircle.fromMap(Map<String, dynamic>.from(row));
+      }
     } catch (error) {
       debugPrint('Create Grace Circle RPC unavailable: $error');
     }
@@ -136,27 +142,61 @@ class GraceCirclesService {
     return GraceCircle.fromMap(inserted);
   }
 
-  Future<void> joinCircle(String circleId) async {
+  Future<String> membershipStatus(String circleId) async {
     final userId = _userId;
-    if (userId == null || circleId.trim().isEmpty) return;
+    if (userId == null || circleId.trim().isEmpty) return 'none';
 
     try {
-      await _supabase.rpc(
-        'join_grace_circle',
-        params: {'target_circle_id': circleId},
+      final status = await _supabase.rpc(
+        'get_my_grace_circle_status',
+        params: {'target_circle_id': circleId.trim()},
       );
-      return;
+      final value = status?.toString().trim();
+      return value == null || value.isEmpty ? 'none' : value;
+    } catch (error) {
+      debugPrint('Grace Circle status RPC unavailable: $error');
+    }
+
+    try {
+      final row = await _supabase
+          .from('grace_circle_members')
+          .select('status')
+          .eq('circle_id', circleId.trim())
+          .eq('user_id', userId)
+          .maybeSingle();
+      final status = row?['status']?.toString().trim();
+      return status == null || status.isEmpty ? 'none' : status;
+    } catch (error) {
+      debugPrint('Grace Circle membership unavailable: $error');
+      return 'none';
+    }
+  }
+
+  Future<String> joinCircle(String circleId) async {
+    final userId = _userId;
+    if (userId == null || circleId.trim().isEmpty) return 'none';
+
+    try {
+      final status = await _supabase.rpc(
+        'join_grace_circle',
+        params: {'target_circle_id': circleId.trim()},
+      );
+      final value = status?.toString().trim();
+      return value == null || value.isEmpty ? 'pending' : value;
     } catch (error) {
       debugPrint('Join Grace Circle RPC unavailable: $error');
     }
 
+    final circle = await fetchCircle(circleId);
+    final fallbackStatus = circle?.joinMode == 'open' ? 'active' : 'pending';
     await _supabase.from('grace_circle_members').upsert(
       {
-        'circle_id': circleId,
+        'circle_id': circleId.trim(),
         'user_id': userId,
-        'status': 'active',
+        'status': fallbackStatus,
       },
       onConflict: 'circle_id,user_id',
     );
+    return fallbackStatus;
   }
 }

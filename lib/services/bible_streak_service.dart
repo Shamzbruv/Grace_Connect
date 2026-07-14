@@ -111,16 +111,19 @@ class BibleStreakService {
     return nextStreak;
   }
 
+  Future<int> recordFiveMinuteRead() {
+    return recordQualifiedRead();
+  }
+
   Future<List<BibleStreakLeaderboardEntry>> fetchChurchLeaderboard({
     int limit = 25,
   }) async {
     try {
-      final rows = await _supabase
-          .from('bible_streaks')
-          .select()
-          .order('streak_count', ascending: false)
-          .order('last_read_date', ascending: false)
-          .limit(limit);
+      final rows = await _supabase.rpc(
+        'list_bible_streak_leaderboard',
+        params: {'result_limit': limit},
+      );
+      if (rows is! List) return const [];
       return rows
           .map<BibleStreakLeaderboardEntry>(
             (row) => BibleStreakLeaderboardEntry.fromMap(
@@ -133,7 +136,8 @@ class BibleStreakService {
         debugPrint('Bible streak leaderboard setup pending: $error');
         return const [];
       }
-      rethrow;
+      debugPrint('Bible streak leaderboard RPC unavailable: $error');
+      return const [];
     }
   }
 

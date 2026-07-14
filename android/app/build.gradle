@@ -107,8 +107,8 @@ android {
         applicationId graceConnectApplicationId
         minSdkVersion 23
         targetSdkVersion 35
-        versionCode 26
-        versionName "1.0.24-beta"
+        versionCode 27
+        versionName "1.0.25-beta"
         multiDexEnabled true
         manifestPlaceholders = [
             googleMapsApiKey: androidMapsApiKey,

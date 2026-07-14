@@ -31,8 +31,33 @@ class SocialProfileService {
     }
 
     final userProfile = await _userService.getUserProfile(cleanUserId);
-    if (userProfile == null) return null;
-    return SocialProfile.fromUserProfile(userProfile);
+    if (userProfile != null) return SocialProfile.fromUserProfile(userProfile);
+
+    final currentUser = _supabase.auth.currentUser;
+    if (currentUser == null || currentUser.id != cleanUserId) return null;
+
+    final metadata = currentUser.userMetadata ?? const <String, dynamic>{};
+    final displayName = _firstString(metadata, const [
+          'display_name',
+          'displayName',
+          'full_name',
+          'fullName',
+          'name',
+        ]) ??
+        (currentUser.email?.split('@').first.trim().isNotEmpty == true
+            ? currentUser.email!.split('@').first.trim()
+            : 'Grace Connect Member');
+
+    return SocialProfile(
+      userId: currentUser.id,
+      displayName: displayName,
+      avatarUrl: _firstString(
+            metadata,
+            const ['avatar_url', 'picture', 'photoUrl', 'photo_url'],
+          ) ??
+          '',
+      acceptsMessages: true,
+    );
   }
 
   Future<SocialProfile?> fetchCurrentProfile() async {
@@ -165,5 +190,13 @@ class SocialProfileService {
     final ids = (prefs.getStringList(key) ?? <String>[]).toSet()
       ..remove(targetUserId);
     await prefs.setStringList(key, ids.toList());
+  }
+
+  String? _firstString(Map<String, dynamic> data, List<String> keys) {
+    for (final key in keys) {
+      final value = data[key];
+      if (value is String && value.trim().isNotEmpty) return value.trim();
+    }
+    return null;
   }
 }

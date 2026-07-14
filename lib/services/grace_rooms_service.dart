@@ -230,7 +230,7 @@ class GraceRoomsService {
         {
           'room_id': roomId,
           'user_id': userId,
-          'anonymous_name': _anonymousName(userId),
+          'anonymous_name': _anonymousName(roomId, userId),
         },
         onConflict: 'room_id,user_id',
       );
@@ -305,7 +305,7 @@ class GraceRoomsService {
     final row = {
       'room_id': cleanRoomId,
       'author_id': userId,
-      'anonymous_name': _anonymousName(userId),
+      'anonymous_name': _anonymousName(cleanRoomId, userId),
       'body': cleanBody,
       'expires_at':
           DateTime.now().toUtc().add(messageLifetime).toIso8601String(),
@@ -371,10 +371,36 @@ class GraceRoomsService {
         message.contains('schema cache');
   }
 
-  static String _anonymousName(String userId) {
-    final suffix = userId.replaceAll('-', '');
-    final safeSuffix = suffix.length <= 4 ? suffix : suffix.substring(0, 4);
-    return 'Anonymous $safeSuffix';
+  static String _anonymousName(String roomId, String userId) {
+    const adjectives = [
+      'Gentle',
+      'Steady',
+      'Bright',
+      'Hopeful',
+      'Quiet',
+      'Brave',
+      'Warm',
+      'Faithful',
+    ];
+    const nouns = [
+      'Grace',
+      'Light',
+      'Peace',
+      'Mercy',
+      'Anchor',
+      'Dawn',
+      'Hope',
+      'Prayer',
+    ];
+    final seed = '$roomId:$userId';
+    var hash = 0;
+    for (final codeUnit in seed.codeUnits) {
+      hash = (hash * 31 + codeUnit) & 0x7fffffff;
+    }
+    final adjective = adjectives[hash % adjectives.length];
+    final noun = nouns[(hash ~/ adjectives.length) % nouns.length];
+    final suffix = (hash % 1000).toString().padLeft(3, '0');
+    return '$adjective $noun $suffix';
   }
 
   static List<GraceRoom> _mergePermanentRooms(List<GraceRoom> remoteRooms) {

@@ -8,13 +8,16 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../providers/user_role_provider.dart';
 import '../../services/attendance_service.dart';
 import '../../services/church_service.dart';
+import '../../services/membership_service.dart';
 import '../../utils/youtube_url_utils.dart';
 import '../../widgets/live_mini_player_overlay.dart';
 import '../../widgets/ui/app_feedback.dart';
 import '../../widgets/ui/app_loader.dart';
 
 class LiveStreamingScreen extends StatefulWidget {
-  const LiveStreamingScreen({super.key});
+  const LiveStreamingScreen({super.key, this.churchId});
+
+  final String? churchId;
 
   @override
   State<LiveStreamingScreen> createState() => _LiveStreamingScreenState();
@@ -34,7 +37,9 @@ class _LiveStreamingScreenState extends State<LiveStreamingScreen>
   bool _isManualSignInChecking = false;
   bool _autoRemotePromptShown = false;
   bool _remoteAttendanceCompleted = false;
+  bool _isVisitorStream = false;
   String? _churchId;
+  String? _churchName;
   String? _currentUserId;
   String? _activeServiceId;
   String? _activeServiceName;
@@ -77,43 +82,69 @@ class _LiveStreamingScreenState extends State<LiveStreamingScreen>
 
   Future<void> _loadStream() async {
     final roleProvider = Provider.of<UserRoleProvider>(context, listen: false);
-    final churchId = roleProvider.userProfile?.churchId;
+    final profileChurchId = roleProvider.userProfile?.churchId.trim() ?? '';
+    var churchId = widget.churchId?.trim();
+    if (churchId == null || churchId.isEmpty) {
+      churchId = profileChurchId;
+    }
+    if (churchId.isEmpty) {
+      final liveChurches = await _churchService.fetchLiveChurches();
+      if (liveChurches.isNotEmpty) {
+        final firstChurch = liveChurches.first;
+        churchId = firstChurch.placeId.trim().isNotEmpty
+            ? firstChurch.placeId
+            : firstChurch.id;
+      }
+    }
     final currentUser = roleProvider.user;
-    if (churchId == null) {
+    if (churchId.isEmpty) {
       _stopViewerPresence(markInactive: true);
       if (mounted) {
         setState(() {
           _isLoading = false;
-          _error = 'No church found.';
+          _error = 'No public live churches are active right now.';
         });
       }
       return;
     }
+    final isOwnChurch =
+        profileChurchId.isNotEmpty && churchId == profileChurchId;
     _churchId = churchId;
+    _isVisitorStream = !isOwnChurch;
     _currentUserId = currentUser?.uid;
 
     final church = await ChurchService().getChurch(churchId);
-    final activeService = await _attendanceService.getActiveService(churchId);
+    final visibleToViewer =
+        isOwnChurch || (church?.liveIsPublic == true && church?.isLive == true);
+    final activeService = isOwnChurch
+        ? await _attendanceService.getActiveService(churchId)
+        : null;
     final activeServiceId = activeService?['id']?.toString();
-    final alreadyPresent = activeService != null &&
+    final alreadyPresent = isOwnChurch &&
+        activeService != null &&
         currentUser != null &&
         await _attendanceService.hasAttendanceForActiveService(
           churchId,
           userId: currentUser.uid,
         );
     if (mounted) {
-      if (church != null && church.isLive && church.liveStreamUrl != null) {
+      if (church != null &&
+          visibleToViewer &&
+          church.isLive &&
+          church.liveStreamUrl != null) {
         final videoId = YoutubeUrlUtils.extractVideoId(church.liveStreamUrl!);
         if (videoId != null) {
           LiveMiniPlayerService().close();
           final savedSeconds = alreadyPresent
               ? _requiredEngagementSeconds
-              : await _loadEngagementProgress(
-                  churchId: churchId,
-                  serviceId: activeServiceId,
-                  videoId: videoId,
-                  userId: currentUser?.uid,
-                );
+              : isOwnChurch
+                  ? await _loadEngagementProgress(
+                      churchId: churchId,
+                      serviceId: activeServiceId,
+                      videoId: videoId,
+                      userId: currentUser?.uid,
+                    )
+                  : 0;
           _controller = YoutubePlayerController(
             initialVideoId: videoId,
             flags: const YoutubePlayerFlags(
@@ -124,6 +155,8 @@ class _LiveStreamingScreenState extends State<LiveStreamingScreen>
           setState(() {
             _isLive = true;
             _hasActiveService = activeService != null;
+            _churchName =
+                church.name.trim().isEmpty ? null : church.name.trim();
             _activeServiceId = activeServiceId;
             _activeServiceName = activeService?['name']?.toString();
             _activeVideoId = videoId;
@@ -133,7 +166,7 @@ class _LiveStreamingScreenState extends State<LiveStreamingScreen>
             _engagedSeconds = savedSeconds;
             _isLoading = false;
           });
-          if (!alreadyPresent) _startEngagementTimer();
+          if (isOwnChurch && !alreadyPresent) _startEngagementTimer();
           _startViewerPresence(churchId);
           return;
         }
@@ -142,6 +175,8 @@ class _LiveStreamingScreenState extends State<LiveStreamingScreen>
       setState(() {
         _isLive = false;
         _hasActiveService = activeService != null;
+        _churchName =
+            church?.name.trim().isEmpty == false ? church!.name.trim() : null;
         _activeServiceId = activeServiceId;
         _activeServiceName = activeService?['name']?.toString();
         _activeVideoId = null;
@@ -289,12 +324,13 @@ class _LiveStreamingScreenState extends State<LiveStreamingScreen>
   }
 
   Future<void> _markRemotePresentFromLive() async {
+    if (_isVisitorStream) return;
     await _showLiveAttendancePrompt();
   }
 
   Future<void> _handleManualOnSiteSignIn() async {
     final churchId = _churchId;
-    if (churchId == null) return;
+    if (churchId == null || _isVisitorStream) return;
 
     setState(() => _isManualSignInChecking = true);
     try {
@@ -358,7 +394,9 @@ class _LiveStreamingScreenState extends State<LiveStreamingScreen>
   Future<void> _showLiveAttendancePrompt() async {
     final churchId = _churchId;
     final user = context.read<UserRoleProvider>().user;
-    if (churchId == null || user == null || !mounted) return;
+    if (churchId == null || user == null || !mounted || _isVisitorStream) {
+      return;
+    }
     if (_isMarkingRemotePresent) return;
 
     final reasonOptions = [
@@ -629,13 +667,14 @@ class _LiveStreamingScreenState extends State<LiveStreamingScreen>
     unawaited(_saveEngagementProgress());
     _stopEngagementTimer();
     _stopViewerPresence(markInactive: true);
-    if (_remoteAttendanceCompleted &&
+    if (!_isVisitorStream &&
+        _remoteAttendanceCompleted &&
         _isLive &&
         _activeVideoId?.trim().isNotEmpty == true) {
       LiveMiniPlayerService().show(
         videoId: _activeVideoId!,
         title: _activeServiceName == null
-            ? 'Live Service'
+            ? '${_churchName ?? 'Live Service'} is Live'
             : '${_activeServiceName!} is Live',
         churchId: _churchId ?? '',
       );
@@ -652,7 +691,7 @@ class _LiveStreamingScreenState extends State<LiveStreamingScreen>
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('Live Service',
+        title: Text(_churchName ?? 'Live Service',
             style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
         backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
         foregroundColor: Theme.of(context).appBarTheme.foregroundColor,
@@ -691,25 +730,34 @@ class _LiveStreamingScreenState extends State<LiveStreamingScreen>
                       liveUIColor: Colors.red,
                     ),
                     builder: (context, player) {
-                      return Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          player,
-                          const SizedBox(height: 16),
-                          Text(
-                            _activeServiceName == null
-                                ? 'Live Now'
-                                : '${_activeServiceName!} is Live',
-                            style: GoogleFonts.poppins(
+                      return SingleChildScrollView(
+                        padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            player,
+                            const SizedBox(height: 16),
+                            Text(
+                              _activeServiceName == null
+                                  ? '${_churchName ?? 'Church'} is Live'
+                                  : '${_activeServiceName!} is Live',
+                              textAlign: TextAlign.center,
+                              style: GoogleFonts.poppins(
                                 color: Colors.red,
                                 fontWeight: FontWeight.bold,
-                                fontSize: 18),
-                          ),
-                          const SizedBox(height: 12),
-                          _buildViewerCountBadge(context),
-                          const SizedBox(height: 12),
-                          _buildEngagementCard(context),
-                        ],
+                                fontSize: 18,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            _buildViewerCountBadge(context),
+                            const SizedBox(height: 12),
+                            _buildEngagementCard(context),
+                            if (_isVisitorStream) ...[
+                              const SizedBox(height: 12),
+                              _buildVisitRequestCard(context),
+                            ],
+                          ],
+                        ),
                       );
                     },
                   ),
@@ -771,6 +819,28 @@ class _LiveStreamingScreenState extends State<LiveStreamingScreen>
 
   Widget _buildEngagementCard(BuildContext context) {
     final theme = Theme.of(context);
+    if (_isVisitorStream) {
+      return ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 520),
+        child: Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                Icon(Icons.public_outlined, color: theme.colorScheme.primary),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'You are watching a public church live. Attendance is only recorded for members of their own church workspace.',
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
     final progress =
         (_engagedSeconds / _requiredEngagementSeconds).clamp(0, 1).toDouble();
     final remainingSeconds =
@@ -905,5 +975,61 @@ class _LiveStreamingScreenState extends State<LiveStreamingScreen>
         ),
       ),
     );
+  }
+
+  Widget _buildVisitRequestCard(BuildContext context) {
+    final churchId = _churchId?.trim() ?? '';
+    final theme = Theme.of(context);
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 520),
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Icon(Icons.church_outlined, color: theme.colorScheme.primary),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Interested in ${_churchName ?? 'this church'}?',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              FilledButton(
+                onPressed: churchId.isEmpty ? null : _requestVisit,
+                child: const Text('Request Visit'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _requestVisit() async {
+    final churchId = _churchId?.trim() ?? '';
+    if (churchId.isEmpty) return;
+    try {
+      await MembershipService().requestMembership(
+        churchId: churchId,
+        message:
+            'Visit request from a public livestream viewer in Grace Connect.',
+      );
+      if (!mounted) return;
+      AppFeedback.show(
+        context,
+        'Visit request sent to ${_churchName ?? 'the church'}.',
+        type: AppFeedbackType.success,
+      );
+    } catch (error) {
+      if (!mounted) return;
+      AppFeedback.show(
+        context,
+        'Could not send visit request: $error',
+        type: AppFeedbackType.error,
+      );
+    }
   }
 }

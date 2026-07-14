@@ -1,0 +1,13 @@
+Grace Connect 1.0.25-beta+27
+
+- Fixed public profiles for newly created accounts and added Supabase profile backfill/sync.
+- Added a better visitor experience for users not connected to a church yet, including public search, public profiles, inbox access, and profile-completion support.
+- Bible streaks and daily Bible quiz leaderboards now use a Grace Connect visitor leaderboard until the user joins a church, then switch to the church leaderboard.
+- Churches can now mark livestreams as public, and public live churches appear in a live status-style row for visitors and members.
+- Public livestream viewers can request a church visit from the live screen without being counted for that church's attendance.
+- Improved public church discovery with options to view the church profile, view public posts, watch public live, or request a visit.
+- Grace Circles now use approval-based joining by default, hide member-only discussion/admin areas until approved, and show cleaner circle posts.
+- Group and Study Group admin controls are restricted to the proper leader/admin roles.
+- Grace Rooms now use unique anonymous names while keeping own messages on the right and other messages on the left.
+- Public profile photos can be opened in a protected fullscreen viewer, and public posts show media previews where available.
+- Synced Supabase policies/RPCs for public feed interactions, direct messages, live viewer counts, Grace Circles, Grace Rooms, and Bible streaks.

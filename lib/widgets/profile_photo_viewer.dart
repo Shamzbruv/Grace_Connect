@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+const MethodChannel _configChannel = MethodChannel('love.graceconnect/config');
 
 Future<void> showProfilePhotoViewer({
   required BuildContext context,
@@ -9,93 +12,113 @@ Future<void> showProfilePhotoViewer({
   final cleanUrl = imageUrl.trim();
   if (cleanUrl.isEmpty) return;
 
-  await showDialog<void>(
-    context: context,
-    builder: (dialogContext) {
-      return Dialog.fullscreen(
-        backgroundColor: Colors.black,
-        child: SafeArea(
-          child: Stack(
-            children: [
-              Positioned.fill(
-                child: InteractiveViewer(
-                  minScale: 0.8,
-                  maxScale: 4,
-                  child: Center(
-                    child: Image.network(
-                      cleanUrl,
-                      fit: BoxFit.contain,
-                      errorBuilder: (context, error, stackTrace) {
-                        return const Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.broken_image_outlined,
-                              color: Colors.white,
-                              size: 48,
-                            ),
-                            SizedBox(height: 12),
-                            Text(
-                              'Photo could not load.',
-                              style: TextStyle(color: Colors.white),
-                            ),
-                          ],
-                        );
-                      },
+  await _setSecureScreen(true);
+  if (!context.mounted) {
+    await _setSecureScreen(false);
+    return;
+  }
+  try {
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return Dialog.fullscreen(
+          backgroundColor: Colors.black,
+          child: SafeArea(
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: InteractiveViewer(
+                    minScale: 0.8,
+                    maxScale: 4,
+                    child: Center(
+                      child: Image.network(
+                        cleanUrl,
+                        fit: BoxFit.contain,
+                        errorBuilder: (context, error, stackTrace) {
+                          return const Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.broken_image_outlined,
+                                color: Colors.white,
+                                size: 48,
+                              ),
+                              SizedBox(height: 12),
+                              Text(
+                                'Photo could not load.',
+                                style: TextStyle(color: Colors.white),
+                              ),
+                            ],
+                          );
+                        },
+                      ),
                     ),
                   ),
                 ),
-              ),
-              Positioned(
-                left: 12,
-                right: 12,
-                top: 8,
-                child: Row(
-                  children: [
-                    IconButton.filled(
-                      tooltip: 'Close',
-                      style: IconButton.styleFrom(
-                        backgroundColor: Colors.black54,
-                        foregroundColor: Colors.white,
+                Positioned(
+                  left: 12,
+                  right: 12,
+                  top: 8,
+                  child: Row(
+                    children: [
+                      IconButton.filled(
+                        tooltip: 'Close',
+                        style: IconButton.styleFrom(
+                          backgroundColor: Colors.black54,
+                          foregroundColor: Colors.white,
+                        ),
+                        onPressed: () => Navigator.pop(dialogContext),
+                        icon: const Icon(Icons.close),
                       ),
-                      onPressed: () => Navigator.pop(dialogContext),
-                      icon: const Icon(Icons.close),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        displayName.trim().isEmpty
-                            ? 'Profile photo'
-                            : displayName.trim(),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w800,
-                          fontSize: 18,
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          displayName.trim().isEmpty
+                              ? 'Profile photo'
+                              : displayName.trim(),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 18,
+                          ),
                         ),
                       ),
-                    ),
-                    if (onChangePhoto != null)
-                      TextButton.icon(
-                        style: TextButton.styleFrom(
-                          backgroundColor: Colors.white,
-                          foregroundColor: Colors.black,
+                      if (onChangePhoto != null)
+                        TextButton.icon(
+                          style: TextButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            foregroundColor: Colors.black,
+                          ),
+                          onPressed: () {
+                            Navigator.pop(dialogContext);
+                            onChangePhoto();
+                          },
+                          icon: const Icon(Icons.camera_alt_outlined),
+                          label: const Text('Change'),
                         ),
-                        onPressed: () {
-                          Navigator.pop(dialogContext);
-                          onChangePhoto();
-                        },
-                        icon: const Icon(Icons.camera_alt_outlined),
-                        label: const Text('Change'),
-                      ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
-      );
-    },
-  );
+        );
+      },
+    );
+  } finally {
+    await _setSecureScreen(false);
+  }
+}
+
+Future<void> _setSecureScreen(bool enabled) async {
+  try {
+    await _configChannel.invokeMethod<void>(
+      'setSecureScreen',
+      {'enabled': enabled},
+    );
+  } catch (_) {
+    // Web/iOS/older builds should still open the viewer.
+  }
 }

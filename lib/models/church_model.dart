@@ -14,6 +14,7 @@ class Church {
   final Map<String, dynamic> policies; // Added policies for RBAC
   final String? liveStreamUrl;
   final bool isLive;
+  final bool liveIsPublic;
   final String about;
   final int? foundedYear;
   final String contactEmail;
@@ -37,6 +38,7 @@ class Church {
     this.policies = const {},
     this.liveStreamUrl,
     this.isLive = false,
+    this.liveIsPublic = false,
     this.about = '',
     this.foundedYear,
     this.contactEmail = '',
@@ -66,6 +68,8 @@ class Church {
       policies: Map<String, dynamic>.from(data['policies'] ?? {}),
       liveStreamUrl: data['liveStreamUrl'],
       isLive: data['isLive'] ?? false,
+      liveIsPublic:
+          data['live_is_public'] == true || data['liveIsPublic'] == true,
       about: data['about'] ?? '',
       foundedYear: data['founded_year'] is int
           ? data['founded_year'] as int
@@ -100,6 +104,7 @@ class Church {
       'policies': policies,
       'liveStreamUrl': liveStreamUrl,
       'isLive': isLive,
+      'live_is_public': liveIsPublic,
       'about': about,
       'founded_year': foundedYear,
       'contact_email': contactEmail,

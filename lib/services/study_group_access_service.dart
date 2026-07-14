@@ -17,13 +17,13 @@ class StudyGroupAccess {
   final bool canDeleteStudyGroups;
 
   bool get canOpenSettings =>
-      isGroupLeader || isGroupAdmin || isChurchLeader || canManageStudyGroups;
+      isGroupLeader || isGroupAdmin || canManageStudyGroups || canDeleteGroup;
 
   bool get canManageMembers =>
-      isGroupLeader || isGroupAdmin || isChurchLeader || canManageStudyGroups;
+      isGroupLeader || isGroupAdmin || canManageStudyGroups;
 
   bool get canEditGroup =>
-      isGroupLeader || isGroupAdmin || isChurchLeader || canManageStudyGroups;
+      isGroupLeader || isGroupAdmin || canManageStudyGroups;
 
   bool get canDeleteGroup =>
       isGroupLeader || isGroupAdmin || isChurchLeader || canDeleteStudyGroups;
@@ -73,8 +73,7 @@ class StudyGroupAccessService {
       isGroupAdmin: isGroupAdmin,
       isChurchLeader: isChurchLeader,
       canManageStudyGroups:
-          privileges.intersection(_managePrivileges).isNotEmpty ||
-              profile?.capabilities.canManageMembersBasic == true,
+          privileges.intersection(_managePrivileges).isNotEmpty,
       canDeleteStudyGroups:
           privileges.intersection(_deletePrivileges).isNotEmpty,
     );

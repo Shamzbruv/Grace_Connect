@@ -4,7 +4,8 @@ import {
   jamaicaDateString,
   jsonResponse,
   nextJamaicaRefresh,
-  profileChurchId,
+  profileQuizChurchId,
+  profileQuizScope,
   serviceClient,
   userProfile,
 } from "../_shared/grace.ts";
@@ -18,8 +19,8 @@ Deno.serve(async (request) => {
     const client = serviceClient();
     const user = await authenticatedUser(request);
     const profile = await userProfile(client, user.id);
-    const churchId = profileChurchId(profile);
-    if (!churchId) return jsonResponse({ error: "Church membership required." }, 403);
+    const churchId = profileQuizChurchId(profile);
+    const leaderboardScope = profileQuizScope(profile);
 
     const quizDate = jamaicaDateString();
     const refreshAt = nextJamaicaRefresh(7);
@@ -37,6 +38,7 @@ Deno.serve(async (request) => {
         available: false,
         can_start: false,
         status: "not_available",
+        leaderboard_scope: leaderboardScope,
         next_refresh_at: refreshAt.toISOString(),
       });
     }
@@ -53,6 +55,7 @@ Deno.serve(async (request) => {
         status: "not_ready",
         quiz,
         question_count: questionCount ?? 0,
+        leaderboard_scope: leaderboardScope,
         next_refresh_at: refreshAt.toISOString(),
       });
     }
@@ -71,6 +74,7 @@ Deno.serve(async (request) => {
       attempt,
       can_start: !attempt,
       status: attempt?.status ?? "ready",
+      leaderboard_scope: leaderboardScope,
       next_refresh_at: refreshAt.toISOString(),
     });
   } catch (error) {

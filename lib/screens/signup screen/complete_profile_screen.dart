@@ -9,6 +9,7 @@ import '../../providers/user_role_provider.dart';
 import '../../services/church_service.dart';
 import '../../services/membership_service.dart';
 import '../../services/profile_service.dart';
+import '../../services/social_profile_service.dart';
 import '../../utils/profile_photo_picker.dart';
 import '../../widgets/app_scaffold.dart';
 import '../../widgets/app_button.dart';
@@ -75,12 +76,22 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
               .uploadProfilePhotoBytes(_imageBytes!, _imageName!);
         }
 
+        final fullName = _stringValue(
+          existingData,
+          metadata,
+          const ['fullName', 'full_name', 'name'],
+        );
+        final fallbackName = user.email?.split('@').first.trim() ?? '';
+
         final profileData = {
           'id': user.id,
           'uid': user.id,
           'email': user.email ?? '',
-          'fullName': _stringValue(
-              existingData, metadata, const ['fullName', 'full_name', 'name']),
+          'fullName': fullName.isNotEmpty
+              ? fullName
+              : fallbackName.isNotEmpty
+                  ? fallbackName
+                  : 'Grace Connect Member',
           'phone': _stringValue(
               existingData, metadata, const ['phone', 'phoneNumber']),
           'placeId': '',
@@ -116,6 +127,7 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
             .eq('uid', user.id)
             .maybeSingle();
         final userProfile = UserProfile.fromMap(updatedData ?? profileData);
+        await SocialProfileService().ensureProfile(userProfile);
 
         if (mounted) {
           // Set user profile in provider

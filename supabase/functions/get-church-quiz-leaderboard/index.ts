@@ -6,8 +6,9 @@ import {
   jamaicaMonthRange,
   jsonResponse,
   parseJamaicaMonthKey,
-  profileChurchId,
   profileDisplayName,
+  profileQuizChurchId,
+  profileQuizScope,
   serviceClient,
   userProfile,
 } from "../_shared/grace.ts";
@@ -29,8 +30,8 @@ Deno.serve(async (request) => {
     const user = await authenticatedUser(request);
     const body = await request.json().catch(() => ({}));
     const profile = await userProfile(client, user.id);
-    const churchId = profileChurchId(profile);
-    if (!churchId) return jsonResponse({ error: "Church membership required." }, 403);
+    const churchId = profileQuizChurchId(profile);
+    const leaderboardScope = profileQuizScope(profile);
 
     const selectedMonth = parseJamaicaMonthKey(String(body.quiz_month ?? ""));
     const selectedMonthKey = jamaicaMonthDateKey(selectedMonth);
@@ -141,6 +142,10 @@ Deno.serve(async (request) => {
       entries: entries.slice(0, 50),
       current_member: currentMember,
       winners,
+      leaderboard_scope: leaderboardScope,
+      leaderboard_label: leaderboardScope === "global"
+        ? "Grace Connect visitors"
+        : "Church members",
       available_months: Array.from(availableMonthKeys)
         .sort()
         .reverse()

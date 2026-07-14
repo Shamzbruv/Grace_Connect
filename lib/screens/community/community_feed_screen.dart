@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../widgets/ui/app_scaffold.dart';
@@ -18,6 +17,7 @@ import '../../services/direct_message_service.dart';
 import '../../services/feed_scroll_service.dart';
 import '../../services/moderation_service.dart';
 import '../../services/saved_items_service.dart';
+import '../../services/membership_service.dart';
 import '../../services/user_service.dart';
 import '../../models/community_feed_mode.dart';
 import '../../models/church_model.dart';
@@ -35,6 +35,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:video_player/video_player.dart';
 import '../../widgets/inbox_icon_button.dart';
+import '../church/church_public_profile_screen.dart';
+import '../live_streaming/live_streaming_screen.dart';
 
 class CommunityFeedScreen extends StatefulWidget {
   const CommunityFeedScreen({
@@ -1129,7 +1131,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
   bool _isDifferentKnownChurch(String otherChurchId, String currentChurchId) {
     final other = otherChurchId.trim();
     final current = currentChurchId.trim();
-    return other.isNotEmpty && current.isNotEmpty && other != current;
+    return other.isNotEmpty && (current.isEmpty || other != current);
   }
 
   bool _isBibleNudgeAccessIssue(Object error) {
@@ -1185,8 +1187,10 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
     UserProfile currentUser,
     Object error,
   ) {
-    final isOtherChurch =
-        post.placeId.trim().isNotEmpty && post.placeId != currentUser.churchId;
+    final isOtherChurch = _isDifferentKnownChurch(
+      post.placeId,
+      currentUser.churchId,
+    );
     final isAccessIssue = _isBibleNudgeAccessIssue(error);
 
     if (isOtherChurch && isAccessIssue) {
@@ -1378,9 +1382,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
       leading: IconButton(
         tooltip: 'Search feed',
         icon: const Icon(Icons.search),
-        onPressed: churchId.isEmpty || browseOnly
-            ? null
-            : () => _showFeedSearchSheet(churchId),
+        onPressed: browseOnly ? null : () => _showFeedSearchSheet(churchId),
       ),
       actions: [
         Builder(
@@ -1736,20 +1738,18 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
               icon: Icons.public_outlined,
               onSelected: () => applyScope(scope: 'discover'),
             ),
-            if (ownChurchId.trim().isNotEmpty) ...[
-              const SizedBox(height: 10),
-              _FeedScopeChip(
-                label: _feedScope == 'custom'
-                    ? (_selectedFeedLabel ?? 'Filtered feed')
-                    : 'Filter churches',
-                selected: _feedScope == 'custom',
-                icon: Icons.filter_alt_outlined,
-                onSelected: () {
-                  Navigator.maybePop(context);
-                  _showFeedSearchSheet(ownChurchId);
-                },
-              ),
-            ],
+            const SizedBox(height: 10),
+            _FeedScopeChip(
+              label: _feedScope == 'custom'
+                  ? (_selectedFeedLabel ?? 'Filtered feed')
+                  : 'Filter churches',
+              selected: _feedScope == 'custom',
+              icon: Icons.filter_alt_outlined,
+              onSelected: () {
+                Navigator.maybePop(context);
+                _showFeedSearchSheet(ownChurchId);
+              },
+            ),
           ],
         ),
       ),
@@ -1892,16 +1892,18 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                       children: [
                         Expanded(
                           child: OutlinedButton.icon(
-                            onPressed: () {
-                              setState(() {
-                                _feedScope = 'church';
-                                _selectedFeedChurchIds = null;
-                                _selectedFeedLabel = null;
-                                _feedRefreshToken++;
-                              });
-                              unawaited(_saveFeedScopePreferences());
-                              Navigator.pop(sheetContext);
-                            },
+                            onPressed: ownChurchId.trim().isEmpty
+                                ? null
+                                : () {
+                                    setState(() {
+                                      _feedScope = 'church';
+                                      _selectedFeedChurchIds = null;
+                                      _selectedFeedLabel = null;
+                                      _feedRefreshToken++;
+                                    });
+                                    unawaited(_saveFeedScopePreferences());
+                                    Navigator.pop(sheetContext);
+                                  },
                             icon: const Icon(Icons.church_outlined),
                             label: const Text('My Church'),
                           ),
@@ -1982,19 +1984,11 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                                               value.trim().isNotEmpty)
                                           .join(' - ')),
                                       onTap: () {
-                                        final id = church.placeId.isNotEmpty
-                                            ? church.placeId
-                                            : church.id;
-                                        setState(() {
-                                          _feedScope = id == ownChurchId
-                                              ? 'church'
-                                              : 'custom';
-                                          _selectedFeedChurchIds = [id];
-                                          _selectedFeedLabel = church.name;
-                                          _feedRefreshToken++;
-                                        });
-                                        unawaited(_saveFeedScopePreferences());
                                         Navigator.pop(sheetContext);
+                                        _showChurchDiscoveryActions(
+                                          church: church,
+                                          ownChurchId: ownChurchId,
+                                        );
                                       },
                                     ),
                                 if (people.isNotEmpty) ...[
@@ -2087,9 +2081,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                                             ),
                                             onTap: () {
                                               Navigator.pop(sheetContext);
-                                              _openMessageWithUserProfile(
-                                                person,
-                                              );
+                                              _openPublicProfile(person.uid);
                                             },
                                           );
                                         },
@@ -2108,6 +2100,137 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
     );
     searchDebounce?.cancel();
     searchController.dispose();
+  }
+
+  void _applyChurchFilter(Church church, String ownChurchId) {
+    final id = church.placeId.isNotEmpty ? church.placeId : church.id;
+    if (id.trim().isEmpty) return;
+    setState(() {
+      _feedScope = id == ownChurchId ? 'church' : 'custom';
+      _selectedFeedChurchIds = [id];
+      _selectedFeedLabel = church.name;
+      _feedRefreshToken++;
+    });
+    unawaited(_saveFeedScopePreferences());
+  }
+
+  Future<void> _requestVisitForChurch(Church church) async {
+    final id = church.placeId.trim().isNotEmpty ? church.placeId : church.id;
+    if (id.trim().isEmpty) return;
+    try {
+      await MembershipService().requestMembership(
+        churchId: id.trim(),
+        message: 'Visit request from Grace Connect church discovery.',
+      );
+      if (!mounted) return;
+      AppFeedback.show(
+        context,
+        'Visit request sent to ${church.name}.',
+        type: AppFeedbackType.success,
+      );
+    } catch (error) {
+      if (!mounted) return;
+      AppFeedback.show(
+        context,
+        'Could not send visit request: $error',
+        type: AppFeedbackType.error,
+      );
+    }
+  }
+
+  Future<void> _showChurchDiscoveryActions({
+    required Church church,
+    required String ownChurchId,
+  }) async {
+    final theme = Theme.of(context);
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(18, 8, 18, 18),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  church.name,
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                if (church.address.trim().isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    church.address.trim(),
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 14),
+                ListTile(
+                  leading: const Icon(Icons.dynamic_feed_outlined),
+                  title: const Text('View public posts'),
+                  subtitle: const Text('Show this church in your feed'),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    _applyChurchFilter(church, ownChurchId);
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.church_outlined),
+                  title: const Text('View church profile'),
+                  subtitle:
+                      const Text('Church information, posts and visit request'),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => ChurchPublicProfileScreen(
+                          church: church,
+                          onViewFeed: () {
+                            Navigator.of(context).pop();
+                            _applyChurchFilter(church, ownChurchId);
+                          },
+                        ),
+                      ),
+                    );
+                  },
+                ),
+                if (church.isLive && church.liveIsPublic)
+                  ListTile(
+                    leading: const Icon(Icons.live_tv_outlined),
+                    title: const Text('Watch live'),
+                    subtitle: const Text('Join this public live service'),
+                    onTap: () {
+                      Navigator.pop(sheetContext);
+                      final id = church.placeId.trim().isNotEmpty
+                          ? church.placeId
+                          : church.id;
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => LiveStreamingScreen(churchId: id),
+                        ),
+                      );
+                    },
+                  ),
+                ListTile(
+                  leading: const Icon(Icons.how_to_reg_outlined),
+                  title: const Text('Request a visit'),
+                  subtitle: const Text('Let the church know you want to visit'),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    _requestVisitForChurch(church);
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   List<Church> _mergeChurchResults({
@@ -2283,8 +2406,10 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
     UserProfile currentUser,
     Object error,
   ) {
-    final isOtherChurch = otherUser.churchId.trim().isNotEmpty &&
-        otherUser.churchId != currentUser.churchId;
+    final isOtherChurch = _isDifferentKnownChurch(
+      otherUser.churchId,
+      currentUser.churchId,
+    );
     final isAccessIssue = _isBibleNudgeAccessIssue(error);
 
     if (isOtherChurch && isAccessIssue) {
@@ -2952,6 +3077,67 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
     );
   }
 
+  Widget _buildPublicLiveSection(BuildContext context, String churchId) {
+    final theme = Theme.of(context);
+    return FutureBuilder<List<Church>>(
+      future: _churchService.fetchLiveChurches(viewerChurchId: churchId),
+      builder: (context, snapshot) {
+        final churches = snapshot.data ?? const <Church>[];
+        if (churches.isEmpty) return const SizedBox.shrink();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.live_tv_outlined,
+                    size: 18,
+                    color: theme.colorScheme.primary,
+                  ),
+                  const SizedBox(width: 7),
+                  Text(
+                    'Live Churches',
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              height: 94,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: churches.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 12),
+                itemBuilder: (context, index) {
+                  final church = churches[index];
+                  final id = church.placeId.trim().isNotEmpty
+                      ? church.placeId.trim()
+                      : church.id.trim();
+                  return _LiveChurchBubble(
+                    church: church,
+                    onTap: id.isEmpty
+                        ? null
+                        : () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) =>
+                                    LiveStreamingScreen(churchId: id),
+                              ),
+                            ),
+                  );
+                },
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Widget _buildStoriesSection(BuildContext context, String churchId) {
     final theme = Theme.of(context);
     final currentUser = context.watch<UserRoleProvider>().userProfile;
@@ -2967,6 +3153,8 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          _buildPublicLiveSection(context, churchId),
+          const SizedBox(height: 10),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 4),
             child: Row(
@@ -4552,6 +4740,97 @@ class _ComposeActionButton extends StatelessWidget {
       onPressed: onPressed,
       icon: Icon(icon, color: theme.colorScheme.primary),
       label: Text(label),
+    );
+  }
+}
+
+class _LiveChurchBubble extends StatelessWidget {
+  const _LiveChurchBubble({
+    required this.church,
+    required this.onTap,
+  });
+
+  final Church church;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final label = church.name.trim().isEmpty ? 'Live' : church.name.trim();
+    return SizedBox(
+      width: 72,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Column(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(3),
+              decoration: const BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: LinearGradient(
+                  colors: [
+                    Color(0xFFEF476F),
+                    Color(0xFFFFD166),
+                  ],
+                ),
+              ),
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  CircleAvatar(
+                    radius: 24,
+                    backgroundColor: theme.colorScheme.primaryContainer,
+                    child: Icon(
+                      Icons.church_outlined,
+                      color: theme.colorScheme.onPrimaryContainer,
+                    ),
+                  ),
+                  Positioned(
+                    left: -5,
+                    bottom: -4,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.error,
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(
+                          color: theme.colorScheme.surface,
+                          width: 1.5,
+                        ),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 5,
+                          vertical: 2,
+                        ),
+                        child: Text(
+                          'LIVE',
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: theme.colorScheme.onError,
+                            fontWeight: FontWeight.w900,
+                            fontSize: 9,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 5),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall?.copyWith(
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

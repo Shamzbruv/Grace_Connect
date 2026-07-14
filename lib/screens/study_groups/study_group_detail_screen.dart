@@ -323,45 +323,54 @@ class _MoreTab extends StatelessWidget {
             ],
           ),
         ),
-        AppCard(
-          child: Column(
-            children: [
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.attach_file_outlined),
-                title: const Text('Resources'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => StudyGroupResourcesScreen(group: group),
-                  ),
-                ),
-              ),
-              if (access.canManageMembers)
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.person_add_alt_outlined),
-                  title: const Text('Invitations'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => StudyGroupInvitationScreen(group: group),
+        if (isMember || access.canManageMembers || access.canOpenSettings)
+          AppCard(
+            child: Column(
+              children: [
+                if (isMember)
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.attach_file_outlined),
+                    title: const Text('Resources'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => StudyGroupResourcesScreen(group: group),
+                      ),
                     ),
                   ),
-                ),
-              if (access.canOpenSettings)
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.settings_outlined),
-                  title: const Text('Group settings'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: onSettings,
-                ),
-            ],
+                if (access.canManageMembers)
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.person_add_alt_outlined),
+                    title: const Text('Invitations'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            StudyGroupInvitationScreen(group: group),
+                      ),
+                    ),
+                  ),
+                if (access.canOpenSettings)
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.settings_outlined),
+                    title: const Text('Group settings'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: onSettings,
+                  ),
+              ],
+            ),
+          )
+        else
+          const AppCard(
+            child: Text(
+              'Request to join this group before resources and discussion tools become available.',
+            ),
           ),
-        ),
         if (isMember &&
             group.leaderId != Supabase.instance.client.auth.currentUser?.id)
           OutlinedButton.icon(

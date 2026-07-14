@@ -138,7 +138,7 @@ class _MainTabsScreenState extends State<MainTabsScreen> {
                   : UnconnectedDashboard(access: access),
               BibleHomeScreen(
                 showBottomNavigation: false,
-                allowDailyQuiz: access?.hasActiveChurchSubscription ?? true,
+                allowDailyQuiz: true,
               ),
               _MoreTabScreen(
                 access: access,

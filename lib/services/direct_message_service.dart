@@ -156,13 +156,17 @@ class DirectMessageService {
       throw Exception('This member is not accepting messages right now.');
     }
 
+    final conversationChurchId = currentUser.churchId.trim().isNotEmpty
+        ? currentUser.churchId.trim()
+        : otherUser.churchId.trim().isNotEmpty
+            ? otherUser.churchId.trim()
+            : 'public';
+
     try {
       final inserted = await _supabase
           .from('direct_conversations')
           .insert({
-            'church_id': currentUser.churchId.isNotEmpty
-                ? currentUser.churchId
-                : otherUser.churchId,
+            'church_id': conversationChurchId,
             'member_ids': [currentUser.uid, otherUser.uid],
             'participant_key': key,
             'created_by': currentUser.uid,

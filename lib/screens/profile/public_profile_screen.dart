@@ -6,6 +6,7 @@ import '../../models/social_profile.dart';
 import '../../providers/user_role_provider.dart';
 import '../../services/community_service.dart';
 import '../../services/social_profile_service.dart';
+import '../../widgets/profile_photo_viewer.dart';
 import '../../widgets/ui/app_scaffold.dart';
 
 class PublicProfileScreen extends StatefulWidget {
@@ -219,14 +220,23 @@ class _ProfileHeader extends StatelessWidget {
 
     return Column(
       children: [
-        CircleAvatar(
-          radius: 48,
-          backgroundImage: profile.avatarUrl.isNotEmpty
-              ? NetworkImage(profile.avatarUrl)
-              : null,
-          child: profile.avatarUrl.isEmpty
-              ? Text(initial, style: theme.textTheme.headlineMedium)
-              : null,
+        GestureDetector(
+          onTap: profile.avatarUrl.trim().isEmpty
+              ? null
+              : () => showProfilePhotoViewer(
+                    context: context,
+                    imageUrl: profile.avatarUrl,
+                    displayName: profile.displayName,
+                  ),
+          child: CircleAvatar(
+            radius: 48,
+            backgroundImage: profile.avatarUrl.isNotEmpty
+                ? NetworkImage(profile.avatarUrl)
+                : null,
+            child: profile.avatarUrl.isEmpty
+                ? Text(initial, style: theme.textTheme.headlineMedium)
+                : null,
+          ),
         ),
         const SizedBox(height: 14),
         Text(
@@ -303,27 +313,40 @@ class _PublicPostsList extends StatelessWidget {
                       color: theme.dividerColor.withValues(alpha: 0.18),
                     ),
                   ),
-                  child: ListTile(
-                    contentPadding: const EdgeInsets.all(14),
-                    title: Text(
-                      post.content.isEmpty ? 'Shared a post' : post.content,
-                      maxLines: 4,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    subtitle: Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Text(
-                        _formatPostDate(post.timestamp),
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ),
-                    trailing: post.mediaUrl?.isNotEmpty == true
-                        ? const Icon(Icons.image_outlined)
-                        : const Icon(Icons.chevron_right),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(14),
                     onTap: () => Navigator.of(context).pushNamed(
                       '/community_post?entityTable=community_posts&entityId=${Uri.encodeComponent(post.id)}',
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(14),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  post.content.isEmpty
+                                      ? 'Shared a post'
+                                      : post.content,
+                                  maxLines: 4,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  _formatPostDate(post.timestamp),
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: theme.colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          _PublicPostPreview(post: post),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -331,6 +354,84 @@ class _PublicPostsList extends StatelessWidget {
           ],
         );
       },
+    );
+  }
+}
+
+class _PublicPostPreview extends StatelessWidget {
+  const _PublicPostPreview({required this.post});
+
+  final Post post;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final mediaUrl = post.mediaUrl?.trim() ?? '';
+    final mediaType = post.mediaType?.toLowerCase() ?? '';
+    final isVideo = mediaType.startsWith('video');
+
+    Widget child;
+    if (mediaUrl.isEmpty) {
+      child = Icon(
+        Icons.chevron_right,
+        color: theme.colorScheme.onSurfaceVariant,
+      );
+    } else if (isVideo) {
+      child = Stack(
+        fit: StackFit.expand,
+        children: [
+          ColoredBox(color: theme.colorScheme.primaryContainer),
+          Center(
+            child: Icon(
+              Icons.play_circle_outline,
+              color: theme.colorScheme.onPrimaryContainer,
+            ),
+          ),
+        ],
+      );
+    } else {
+      child = Image.network(
+        mediaUrl,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => Icon(
+          Icons.image_not_supported_outlined,
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
+      );
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(10),
+      child: ColoredBox(
+        color: theme.colorScheme.surfaceContainerHighest,
+        child: SizedBox(
+          width: 64,
+          height: 64,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              Center(child: child),
+              if (isVideo)
+                Align(
+                  alignment: Alignment.bottomRight,
+                  child: Container(
+                    margin: const EdgeInsets.all(4),
+                    padding: const EdgeInsets.all(3),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.surface.withValues(alpha: 0.9),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Icon(
+                      Icons.videocam_outlined,
+                      size: 14,
+                      color: theme.colorScheme.onSurface,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

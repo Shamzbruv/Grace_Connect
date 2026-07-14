@@ -37,6 +37,10 @@ class MonthlyQuizLeaderboardPanel extends StatelessWidget {
         : null;
     final topThree = winners.isNotEmpty ? winners : entries.take(3).toList();
     final officialWinnersSaved = winners.isNotEmpty;
+    final leaderboardScope = data['leaderboard_scope']?.toString() ?? 'church';
+    final leaderboardSubtitle = leaderboardScope == 'global'
+        ? 'Grace Connect visitors • Jamaica calendar month'
+        : 'Church members only • Jamaica calendar month';
 
     return Padding(
       padding: padding,
@@ -64,7 +68,7 @@ class MonthlyQuizLeaderboardPanel extends StatelessWidget {
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        'Church members only • Jamaica calendar month',
+                        leaderboardSubtitle,
                         style: GoogleFonts.outfit(
                           color: Theme.of(context)
                               .textTheme

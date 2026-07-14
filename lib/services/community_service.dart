@@ -574,6 +574,47 @@ class CommunityService {
         .toList();
   }
 
+  Future<List<Post>> fetchPublicPostsForChurch(
+    String churchId, {
+    int limit = 30,
+  }) async {
+    final cleanChurchId = churchId.trim();
+    if (cleanChurchId.isEmpty) return const [];
+
+    final now = DateTime.now().toUtc().toIso8601String();
+    List<dynamic> rows;
+    try {
+      rows = await _supabase
+          .from(_postsTable)
+          .select()
+          .eq('place_id', cleanChurchId)
+          .or('expires_at.is.null,expires_at.gt.$now')
+          .order('created_at', ascending: false)
+          .limit(limit);
+    } on PostgrestException {
+      rows = await _supabase
+          .from(_postsTable)
+          .select()
+          .eq('place_id', cleanChurchId)
+          .order('created_at', ascending: false)
+          .limit(limit);
+    }
+
+    return _normalizePosts(
+      rows,
+      viewerChurchId: cleanChurchId,
+      churchIds: [cleanChurchId],
+      includeShared: true,
+    )
+        .where((post) =>
+            post.visibleToAllChurches ||
+            post.scope == 'global' ||
+            post.scope == 'discover' ||
+            post.scope == 'public')
+        .take(limit)
+        .toList();
+  }
+
   Future<Post?> fetchPostForNotification({
     required String? entityTable,
     required String? entityId,

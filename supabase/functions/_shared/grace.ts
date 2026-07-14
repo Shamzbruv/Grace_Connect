@@ -80,6 +80,16 @@ export function profileChurchId(profile: Record<string, unknown>): string {
   return String(profile.placeId ?? profile.churchId ?? "").trim();
 }
 
+export const GLOBAL_VISITOR_CHURCH_ID = "grace_connect_global";
+
+export function profileQuizChurchId(profile: Record<string, unknown>): string {
+  return profileChurchId(profile) || GLOBAL_VISITOR_CHURCH_ID;
+}
+
+export function profileQuizScope(profile: Record<string, unknown>): "church" | "global" {
+  return profileChurchId(profile) ? "church" : "global";
+}
+
 export function profileDisplayName(profile: Record<string, unknown>): string {
   return String(profile.fullName ?? profile.displayName ?? "Member").trim();
 }

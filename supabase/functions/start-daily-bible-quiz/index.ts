@@ -4,7 +4,8 @@ import {
   jamaicaDateString,
   jsonResponse,
   nextJamaicaRefresh,
-  profileChurchId,
+  profileQuizChurchId,
+  profileQuizScope,
   serviceClient,
   userProfile,
 } from "../_shared/grace.ts";
@@ -29,8 +30,8 @@ Deno.serve(async (request) => {
     const client = serviceClient();
     const user = await authenticatedUser(request);
     const profile = await userProfile(client, user.id);
-    const churchId = profileChurchId(profile);
-    if (!churchId) return jsonResponse({ error: "Church membership required." }, 403);
+    const churchId = profileQuizChurchId(profile);
+    const leaderboardScope = profileQuizScope(profile);
 
     const { data: quiz } = await client
       .from("daily_bible_quizzes")
@@ -102,6 +103,7 @@ Deno.serve(async (request) => {
       attempt,
       question: sanitizeQuestion(question),
       question_time_limit_seconds: 30,
+      leaderboard_scope: leaderboardScope,
       next_refresh_at: nextJamaicaRefresh(7).toISOString(),
     });
   } catch (error) {

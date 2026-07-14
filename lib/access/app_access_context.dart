@@ -51,12 +51,12 @@ class AppAccessContext {
       case AppFeature.graceCircles:
       case AppFeature.graceRooms:
       case AppFeature.socialConnectionRequests:
-        return true;
-
       case AppFeature.directMessages:
-      case AppFeature.churchHome:
       case AppFeature.churchTransfer:
       case AppFeature.churchPublicPage:
+        return true;
+
+      case AppFeature.churchHome:
       case AppFeature.churchTestimonies:
         return hasActiveChurchMembership;
 
