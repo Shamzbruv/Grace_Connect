@@ -1,0 +1,6 @@
+Grace Connect 1.0.26-beta+28
+
+- Fixed the Android Google Maps/Places configuration for the church map and geofence picker.
+- Updated the Google Cloud Android Maps key restrictions to allow the app package/signing fingerprints plus Maps, Places, and Geocoding APIs.
+- Added an Android fallback so location search can use the native Maps key from the release manifest instead of failing when no Dart-defined Places key is present.
+- Included the public visitor, Grace Rooms, Grace Circles, profile, live, inbox, and Supabase sync fixes from the previous beta build.

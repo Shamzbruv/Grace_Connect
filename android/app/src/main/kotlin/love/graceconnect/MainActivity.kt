@@ -23,6 +23,7 @@ class MainActivity : FlutterActivity() {
                 when (call.method) {
                     "isAndroidMapsApiKeyPresent" -> result.success(isAndroidMapsApiKeyPresent())
                     "getAndroidMapsConfigStatus" -> result.success(androidMapsConfigStatus())
+                    "getAndroidMapsApiKey" -> result.success(androidMapsApiKey())
                     "isIgnoringBatteryOptimizations" -> result.success(isIgnoringBatteryOptimizations())
                     "openBatteryOptimizationSettings" -> {
                         openBatteryOptimizationSettings()
@@ -48,6 +49,11 @@ class MainActivity : FlutterActivity() {
 
     @Suppress("DEPRECATION")
     private fun isAndroidMapsApiKeyPresent(): Boolean {
+        return androidMapsApiKey().isNotEmpty()
+    }
+
+    @Suppress("DEPRECATION")
+    private fun androidMapsApiKey(): String {
         val appInfo = packageManager.getApplicationInfo(
             packageName,
             PackageManager.GET_META_DATA
@@ -56,7 +62,7 @@ class MainActivity : FlutterActivity() {
             ?.getString("com.google.android.geo.API_KEY")
             ?.trim()
             .orEmpty()
-        return value.isNotEmpty() && !value.startsWith("\${")
+        return if (value.isNotEmpty() && !value.startsWith("\${")) value else ""
     }
 
     private fun androidMapsConfigStatus(): Map<String, Any?> {
