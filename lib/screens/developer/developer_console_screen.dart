@@ -3,6 +3,13 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../services/developer_service.dart';
 import 'developer_email_test_screen.dart';
 
+const _scheduledQuizMutationRoles = <String>{
+  'super_developer',
+  'support_developer',
+  'content_moderator',
+  'security_admin',
+};
+
 class DeveloperConsoleScreen extends StatefulWidget {
   const DeveloperConsoleScreen({super.key});
 
@@ -14,13 +21,16 @@ class _DeveloperConsoleScreenState extends State<DeveloperConsoleScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
   final DeveloperService _devService = DeveloperService();
+  late Future<Map<String, dynamic>> _scheduledContentFuture;
   bool _isChecking = true;
   bool _isAuthorized = false;
+  String? _developerRole;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 4, vsync: this);
+    _tabController = TabController(length: 5, vsync: this);
+    _scheduledContentFuture = _devService.getScheduledContent();
     _verifyAccess();
   }
 
@@ -30,6 +40,7 @@ class _DeveloperConsoleScreenState extends State<DeveloperConsoleScreen>
       if (mounted) {
         setState(() {
           _isAuthorized = session != null;
+          _developerRole = session?['developer_role']?.toString().toLowerCase();
           _isChecking = false;
         });
       }
@@ -40,6 +51,7 @@ class _DeveloperConsoleScreenState extends State<DeveloperConsoleScreen>
     if (mounted) {
       setState(() {
         _isAuthorized = false;
+        _developerRole = null;
         _isChecking = false;
       });
     }
@@ -80,6 +92,7 @@ class _DeveloperConsoleScreenState extends State<DeveloperConsoleScreen>
             Tab(icon: Icon(Icons.dashboard), text: 'Overview'),
             Tab(icon: Icon(Icons.church), text: 'Churches'),
             Tab(icon: Icon(Icons.report_outlined), text: 'Reports'),
+            Tab(icon: Icon(Icons.event_note_outlined), text: 'Content'),
             Tab(icon: Icon(Icons.dns), text: 'System'),
           ],
         ),
@@ -90,6 +103,7 @@ class _DeveloperConsoleScreenState extends State<DeveloperConsoleScreen>
           _buildOverviewTab(),
           _buildChurchesTab(),
           _buildReportsTab(),
+          _buildScheduledContentTab(),
           _buildSystemTab(context),
         ],
       ),
@@ -277,7 +291,7 @@ class _DeveloperConsoleScreenState extends State<DeveloperConsoleScreen>
                           reportId: report['id']?.toString() ?? '',
                           status: status,
                         );
-                        if (!mounted) return;
+                        if (!context.mounted) return;
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(content: Text('Report marked $status.')),
                         );
@@ -356,6 +370,198 @@ class _DeveloperConsoleScreenState extends State<DeveloperConsoleScreen>
     );
   }
 
+  Widget _buildScheduledContentTab() {
+    return FutureBuilder<Map<String, dynamic>>(
+      future: _scheduledContentFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (snapshot.hasError) {
+          return Center(
+            child: Text('Could not load scheduled content: ${snapshot.error}'),
+          );
+        }
+        final data = snapshot.data ?? const {};
+        final dailyWords = _mapList(data['daily_words']);
+        final quizzes = _mapList(data['quizzes']);
+        return RefreshIndicator(
+          onRefresh: _refreshScheduledContent,
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Upcoming Daily Content',
+                      style:
+                          Theme.of(context).textTheme.headlineSmall?.copyWith(
+                                fontWeight: FontWeight.w900,
+                              ),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Reload schedule',
+                    onPressed: _refreshScheduledContent,
+                    icon: const Icon(Icons.refresh),
+                  ),
+                ],
+              ),
+              const Text(
+                'Release dates and times stay fixed. Quiz answers are never shown here.',
+              ),
+              const SizedBox(height: 18),
+              Text('Daily Word',
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleLarge
+                      ?.copyWith(fontWeight: FontWeight.w900)),
+              const SizedBox(height: 8),
+              if (dailyWords.isEmpty)
+                const Card(
+                  child:
+                      ListTile(title: Text('No Daily Word is scheduled yet.')),
+                )
+              else
+                for (final word in dailyWords)
+                  Card(
+                    child: ExpansionTile(
+                      leading: const Icon(Icons.wb_sunny_outlined),
+                      title: Text(word['title']?.toString() ?? 'Daily Word'),
+                      subtitle: Text(
+                        '${_formatReleaseDate(word['release_at'])} • ${word['status'] ?? 'scheduled'}',
+                      ),
+                      childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                      children: [
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(word['message']?.toString() ?? ''),
+                        ),
+                        const SizedBox(height: 10),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            word['scripture_reference']?.toString() ?? '',
+                            style: const TextStyle(fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+              const SizedBox(height: 20),
+              Text('Daily Bible Quiz',
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleLarge
+                      ?.copyWith(fontWeight: FontWeight.w900)),
+              const SizedBox(height: 8),
+              if (quizzes.isEmpty)
+                const Card(
+                  child:
+                      ListTile(title: Text('No Bible Quiz is scheduled yet.')),
+                )
+              else
+                for (final quiz in quizzes) _scheduledQuizCard(quiz),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _scheduledQuizCard(Map<String, dynamic> quiz) {
+    final questions = _mapList(quiz['questions']);
+    final canReplace = _canReplaceScheduledQuiz(quiz);
+    return Card(
+      child: ExpansionTile(
+        leading: const Icon(Icons.quiz_outlined),
+        title: Text('Quiz • ${quiz['church_id'] ?? 'Global'}'),
+        subtitle: Text(
+          '${_formatReleaseDate(quiz['release_at'])} • ${quiz['status'] ?? 'unknown'} • ${questions.length} questions',
+        ),
+        trailing: canReplace
+            ? IconButton(
+                tooltip:
+                    'Generate different questions for this same release slot',
+                onPressed: () => _regenerateScheduledQuiz(quiz),
+                icon: const Icon(Icons.autorenew),
+              )
+            : null,
+        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        children: [
+          for (final question in questions)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: CircleAvatar(
+                radius: 15,
+                child: Text('${question['order'] ?? ''}'),
+              ),
+              title: Text(question['question']?.toString() ?? ''),
+              subtitle: Text(
+                (question['options'] as List? ?? const [])
+                    .map((option) => option.toString())
+                    .join(' • '),
+              ),
+            ),
+          const Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              'Answer key hidden',
+              style: TextStyle(fontStyle: FontStyle.italic),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _refreshScheduledContent() async {
+    final next = _devService.getScheduledContent();
+    if (mounted) setState(() => _scheduledContentFuture = next);
+    await next;
+  }
+
+  Future<void> _regenerateScheduledQuiz(Map<String, dynamic> quiz) async {
+    final id = quiz['id']?.toString() ?? '';
+    if (id.isEmpty) return;
+    if (!_canReplaceScheduledQuiz(quiz)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'This quiz is no longer eligible for replacement, or your developer role has preview-only access.',
+          ),
+        ),
+      );
+      await _refreshScheduledContent();
+      return;
+    }
+    try {
+      await _devService.regenerateScheduledQuiz(id);
+      await _refreshScheduledContent();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Questions replaced. The original release date and time were kept.',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not refresh quiz: $error')),
+      );
+    }
+  }
+
+  bool _canReplaceScheduledQuiz(Map<String, dynamic> quiz) {
+    if (!_scheduledQuizMutationRoles.contains(_developerRole)) return false;
+    if (quiz['status']?.toString().toLowerCase() != 'scheduled') return false;
+    final releaseAt = DateTime.tryParse(quiz['release_at']?.toString() ?? '');
+    return releaseAt != null && releaseAt.isAfter(DateTime.now());
+  }
+
   Future<void> _updateSubscription(String churchId,
       {required int months}) async {
     try {
@@ -398,6 +604,18 @@ class _DeveloperConsoleScreenState extends State<DeveloperConsoleScreen>
     final date = DateTime.tryParse(value.toString());
     if (date == null) return 'not set';
     return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+  }
+
+  String _formatReleaseDate(dynamic value) {
+    if (value == null) return 'release time not set';
+    final parsed = DateTime.tryParse(value.toString());
+    if (parsed == null) return 'release time not set';
+    // Jamaica stays on UTC-5 year-round.
+    final jamaica = parsed.toUtc().subtract(const Duration(hours: 5));
+    final hour = jamaica.hour % 12 == 0 ? 12 : jamaica.hour % 12;
+    final minute = jamaica.minute.toString().padLeft(2, '0');
+    final period = jamaica.hour < 12 ? 'AM' : 'PM';
+    return '${jamaica.year}-${jamaica.month.toString().padLeft(2, '0')}-${jamaica.day.toString().padLeft(2, '0')} $hour:$minute $period Jamaica';
   }
 }
 

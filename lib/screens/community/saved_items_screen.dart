@@ -29,9 +29,6 @@ class _SavedItemsScreenState extends State<SavedItemsScreen> {
       'community_post' || 'community_posts' => '/community_post'
           '?entityTable=community_posts&entityId=${Uri.encodeComponent(item.entityId)}',
       'event' || 'events' => '/events',
-      'grace_circle' ||
-      'grace_circles' =>
-        '/grace_circles/circle?id=${Uri.encodeComponent(item.entityId)}',
       'grace_room' ||
       'grace_rooms' =>
         '/grace_rooms/room?id=${Uri.encodeComponent(item.entityId)}',
@@ -154,7 +151,6 @@ class _SavedItemsScreenState extends State<SavedItemsScreen> {
     return switch (entityType) {
       'community_post' || 'community_posts' => Icons.dynamic_feed_outlined,
       'event' || 'events' => Icons.calendar_month_outlined,
-      'grace_circle' || 'grace_circles' => Icons.diversity_3_outlined,
       'grace_room' || 'grace_rooms' => Icons.forum_outlined,
       _ => Icons.bookmark_outline,
     };

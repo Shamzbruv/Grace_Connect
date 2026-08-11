@@ -7,32 +7,44 @@ import {
   serviceClient,
 } from "../_shared/grace.ts";
 
-type MailRequest =
-  | {
-      action: "auth-signup";
-      email?: string;
-      password?: string;
-      redirectTo?: string;
-      flowType?: string;
-      userData?: Record<string, unknown>;
-    }
-  | {
-      action: "password-reset";
-      email?: string;
-      redirectTo?: string;
-    }
-  | {
-      action: "flush-queue";
-      limit?: number;
-    }
-  | {
-      action: "flush-support-ticket";
-      ticketId?: string;
-    }
-  | {
-      action?: string;
-      [key: string]: unknown;
-    };
+type SignupMailRequest = {
+  action: "auth-signup";
+  email?: string;
+  password?: string;
+  redirectTo?: string;
+  flowType?: string;
+  userData?: Record<string, unknown>;
+  captchaToken?: string;
+};
+
+type PasswordResetMailRequest = {
+  action: "password-reset";
+  email?: string;
+  redirectTo?: string;
+  captchaToken?: string;
+};
+
+type FlushQueueMailRequest = {
+  action: "flush-queue";
+  limit?: number;
+};
+
+type FlushSupportTicketMailRequest = {
+  action: "flush-support-ticket";
+  ticketId?: string;
+};
+
+type ManagedAppMailRequest = {
+  action: "send-app-email";
+  to?: string[];
+  subject?: string;
+  htmlBody?: string;
+};
+
+type UnknownMailRequest = {
+  action?: unknown;
+  [key: string]: unknown;
+};
 
 type EmailRow = {
   id: string;
@@ -45,10 +57,25 @@ type EmailRow = {
 
 const defaultSiteUrl = "https://www.graceconnect.love";
 
+type PublicMailAction = "auth-signup" | "password-reset";
+
+class MailHttpError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly retryAfterSeconds?: number,
+  ) {
+    super(message);
+    this.name = "MailHttpError";
+  }
+}
+
 function requireResendKey(): string {
   const key = Deno.env.get("RESEND_API_KEY");
   if (!key) {
-    throw new Error("RESEND_API_KEY is not configured in Supabase Edge Function secrets.");
+    throw new Error(
+      "RESEND_API_KEY is not configured in Supabase Edge Function secrets.",
+    );
   }
   return key;
 }
@@ -60,7 +87,8 @@ function mailFrom(): string {
 }
 
 function replyTo(): string | undefined {
-  return Deno.env.get("RESEND_REPLY_TO") ?? Deno.env.get("RESEND_FROM_EMAIL") ?? undefined;
+  return Deno.env.get("RESEND_REPLY_TO") ?? Deno.env.get("RESEND_FROM_EMAIL") ??
+    undefined;
 }
 
 function plainText(html: string): string {
@@ -76,6 +104,15 @@ function plainText(html: string): string {
     .replace(/&#039;/g, "'")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+function escapeHtml(value: unknown): string {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
 function allowedRedirect(
@@ -116,8 +153,13 @@ function publicAuthCallbackUrl(params: {
   const callback = new URL("/auth-callback.html", siteUrl);
   const next = new URL(params.nextUrl, siteUrl);
   callback.searchParams.set("flow", params.flowType);
-  callback.searchParams.set("next", `${next.pathname}${next.search}${next.hash}`);
-  if (params.tokenHash) callback.searchParams.set("token_hash", params.tokenHash);
+  callback.searchParams.set(
+    "next",
+    `${next.pathname}${next.search}${next.hash}`,
+  );
+  if (params.tokenHash) {
+    callback.searchParams.set("token_hash", params.tokenHash);
+  }
   if (params.token) callback.searchParams.set("token", params.token);
   if (params.email) callback.searchParams.set("email", params.email);
   callback.searchParams.set("type", params.type || "signup");
@@ -126,13 +168,215 @@ function publicAuthCallbackUrl(params: {
 
 function normalizeEmail(email?: string): string {
   const value = String(email ?? "").trim().toLowerCase();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+  if (value.length > 320 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
     throw new Error("A valid email address is required.");
   }
   return value;
 }
 
-function normalizeSignupData(data: Record<string, unknown> | undefined, flowType: string): Record<string, unknown> {
+function configuredFlag(name: string): boolean {
+  const rawValue = Deno.env.get(name);
+  if (rawValue == null || rawValue.trim() === "") return false;
+
+  const value = rawValue.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(value)) return true;
+  if (["0", "false", "no", "off"].includes(value)) return false;
+  throw new MailHttpError("Email protection is temporarily unavailable.", 503);
+}
+
+function requestClientIp(request: Request): string | null {
+  const rawValue = request.headers.get("cf-connecting-ip") ??
+    request.headers.get("x-forwarded-for")?.split(",")[0] ??
+    request.headers.get("x-real-ip") ??
+    "";
+  const value = rawValue.trim();
+  return value ? value.slice(0, 128) : null;
+}
+
+async function privacyRateKey(
+  kind: "email" | "ip",
+  value: string,
+): Promise<string> {
+  const configuredPepper = Deno.env.get("MAIL_RATE_LIMIT_PEPPER")?.trim();
+  const pepper = configuredPepper || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!pepper || pepper.length < 32) {
+    throw new MailHttpError(
+      "Email protection is temporarily unavailable.",
+      503,
+    );
+  }
+
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(pepper),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(`grace-mail:${kind}:v1:${value}`),
+  );
+  return Array.from(new Uint8Array(signature))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function verifyPublicMailCaptcha(
+  request: Request,
+  action: PublicMailAction,
+  rawToken?: string,
+): Promise<void> {
+  const actionRequiredEnvironmentName = action === "auth-signup"
+    ? "MAIL_CAPTCHA_SIGNUP_REQUIRED"
+    : "MAIL_CAPTCHA_RESET_REQUIRED";
+  const hasActionOverride = Boolean(
+    Deno.env.get(actionRequiredEnvironmentName)?.trim(),
+  );
+  const captchaRequired = hasActionOverride
+    ? configuredFlag(actionRequiredEnvironmentName)
+    : configuredFlag("MAIL_CAPTCHA_REQUIRED");
+  if (!captchaRequired) return;
+
+  const token = String(rawToken ?? "").trim();
+  if (!token || token.length > 4096) {
+    throw new MailHttpError("Complete the security check and try again.", 403);
+  }
+
+  const secret = Deno.env.get("MAIL_CAPTCHA_SECRET")?.trim();
+  if (!secret) {
+    throw new MailHttpError(
+      "Email protection is temporarily unavailable.",
+      503,
+    );
+  }
+
+  const rawEndpoint = Deno.env.get("MAIL_CAPTCHA_VERIFY_URL")?.trim() ||
+    "https://challenges.cloudflare.com/turnstile/v0/siteverify";
+  let endpoint: URL;
+  try {
+    endpoint = new URL(rawEndpoint);
+    if (endpoint.protocol !== "https:") throw new Error("HTTPS is required.");
+  } catch (_) {
+    throw new MailHttpError(
+      "Email protection is temporarily unavailable.",
+      503,
+    );
+  }
+
+  const form = new URLSearchParams({ secret, response: token });
+  const clientIp = requestClientIp(request);
+  if (clientIp) form.set("remoteip", clientIp);
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  let response: Response;
+  try {
+    response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: form,
+      signal: controller.signal,
+    });
+  } catch (_) {
+    throw new MailHttpError(
+      "Security verification is temporarily unavailable.",
+      503,
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  if (!response.ok) {
+    throw new MailHttpError(
+      "Security verification is temporarily unavailable.",
+      503,
+    );
+  }
+
+  const result = await response.json().catch(() => null) as {
+    success?: boolean;
+    hostname?: string;
+    action?: string;
+  } | null;
+  if (result?.success !== true) {
+    throw new MailHttpError("Complete the security check and try again.", 403);
+  }
+
+  const allowedHostnames =
+    (Deno.env.get("MAIL_CAPTCHA_ALLOWED_HOSTNAMES") ?? "")
+      .split(",")
+      .map((hostname) => hostname.trim().toLowerCase())
+      .filter(Boolean);
+  if (
+    allowedHostnames.length > 0 &&
+    !allowedHostnames.includes(
+      String(result.hostname ?? "").trim().toLowerCase(),
+    )
+  ) {
+    throw new MailHttpError("Complete the security check and try again.", 403);
+  }
+
+  const actionEnvironmentName = action === "auth-signup"
+    ? "MAIL_CAPTCHA_SIGNUP_ACTION"
+    : "MAIL_CAPTCHA_RESET_ACTION";
+  const expectedAction = Deno.env.get(actionEnvironmentName)?.trim();
+  if (expectedAction && result.action !== expectedAction) {
+    throw new MailHttpError("Complete the security check and try again.", 403);
+  }
+}
+
+async function consumePublicMailRateLimit(
+  request: Request,
+  action: PublicMailAction,
+  email: string,
+): Promise<void> {
+  const clientIp = requestClientIp(request);
+  const emailKey = await privacyRateKey("email", email);
+  const ipKey = clientIp ? await privacyRateKey("ip", clientIp) : null;
+  const { data, error } = await serviceClient().rpc(
+    "consume_grace_mail_public_rate_limit",
+    {
+      target_action: action,
+      target_email_key: emailKey,
+      target_ip_key: ipKey,
+    },
+  );
+  if (error) {
+    throw new MailHttpError(
+      "Email protection is temporarily unavailable.",
+      503,
+    );
+  }
+
+  const result = (Array.isArray(data) ? data[0] : data) as {
+    allowed?: boolean;
+    retry_after_seconds?: number;
+  } | null;
+  if (result?.allowed === true) return;
+  if (result?.allowed !== false) {
+    throw new MailHttpError(
+      "Email protection is temporarily unavailable.",
+      503,
+    );
+  }
+
+  const rawRetryAfter = Number(result.retry_after_seconds ?? 60);
+  const retryAfter = Number.isFinite(rawRetryAfter)
+    ? Math.max(1, Math.min(Math.ceil(rawRetryAfter), 86400))
+    : 60;
+  throw new MailHttpError(
+    "Too many email requests. Please wait before trying again.",
+    429,
+    retryAfter,
+  );
+}
+
+function normalizeSignupData(
+  data: Record<string, unknown> | undefined,
+  flowType: string,
+): Record<string, unknown> {
   const source = data ?? {};
   return {
     full_name: String(source.full_name ?? source.fullName ?? "").trim(),
@@ -148,15 +392,19 @@ function brandedEmail(params: {
   ctaLabel?: string;
   ctaUrl?: string;
 }): { html: string; text: string } {
+  const safeTitle = escapeHtml(params.title);
+  const safePreview = escapeHtml(params.preview);
   const cta = params.ctaUrl
-    ? `<p style="margin:32px 0 8px;"><a href="${params.ctaUrl}" style="display:inline-block;background:#102655;color:#ffffff;text-decoration:none;font-weight:700;padding:14px 22px;border-radius:8px;">${params.ctaLabel ?? "Open Grace Connect"}</a></p>`
+    ? `<p style="margin:32px 0 8px;"><a href="${params.ctaUrl}" style="display:inline-block;background:#102655;color:#ffffff;text-decoration:none;font-weight:700;padding:14px 22px;border-radius:8px;">${
+      params.ctaLabel ?? "Open Grace Connect"
+    }</a></p>`
     : "";
   const html = `
-    <div data-grace-email="true" style="display:none;max-height:0;overflow:hidden;opacity:0;">${params.preview}</div>
+    <div data-grace-email="true" style="display:none;max-height:0;overflow:hidden;opacity:0;">${safePreview}</div>
     <div style="font-family:Arial,Helvetica,sans-serif;background:#f7f3ea;padding:32px 16px;color:#12213d;">
       <div style="max-width:620px;margin:0 auto;background:#ffffff;border-radius:16px;padding:34px;border:1px solid #eadcb6;">
         <p style="margin:0 0 18px;color:#c39213;font-size:13px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;">Grace Connect</p>
-        <h1 style="margin:0 0 18px;font-family:Georgia,serif;font-size:30px;line-height:1.15;color:#0d1f4c;">${params.title}</h1>
+        <h1 style="margin:0 0 18px;font-family:Georgia,serif;font-size:30px;line-height:1.15;color:#0d1f4c;">${safeTitle}</h1>
         <div style="font-size:16px;line-height:1.65;color:#263852;">${params.body}</div>
         ${cta}
         <p style="margin:28px 0 0;font-size:13px;line-height:1.5;color:#69768b;">If you did not request this email, you can ignore it.</p>
@@ -165,7 +413,11 @@ function brandedEmail(params: {
   `;
   return {
     html,
-    text: `${params.title}\n\n${plainText(params.body)}${params.ctaUrl ? `\n\n${params.ctaLabel ?? "Open Grace Connect"}: ${params.ctaUrl}` : ""}`,
+    text: `${params.title}\n\n${plainText(params.body)}${
+      params.ctaUrl
+        ? `\n\n${params.ctaLabel ?? "Open Grace Connect"}: ${params.ctaUrl}`
+        : ""
+    }`,
   };
 }
 
@@ -183,7 +435,8 @@ function queuedEmailBody(row: EmailRow): { html: string; text: string } {
     : `<p>${existingHtml.replace(/\n/g, "<br>")}</p>`;
   return brandedEmail({
     title: row.subject || "Grace Connect Update",
-    preview: plainText(body).slice(0, 140) || "Grace Connect has an update for you.",
+    preview: plainText(body).slice(0, 140) ||
+      "Grace Connect has an update for you.",
     body,
   });
 }
@@ -211,16 +464,24 @@ async function sendResendEmail(params: {
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const message = String(payload?.message ?? payload?.error ?? "Resend rejected the message.");
+    const message = String(
+      payload?.message ?? payload?.error ?? "Resend rejected the message.",
+    );
     throw new Error(message);
   }
   return String(payload?.id ?? "");
 }
 
-function actionLinkFromGenerateLink(data: Record<string, unknown> | null): string {
+function actionLinkFromGenerateLink(
+  data: Record<string, unknown> | null,
+): string {
   const properties = data?.properties as Record<string, unknown> | undefined;
-  const actionLink = String(properties?.action_link ?? properties?.actionLink ?? "");
-  if (!actionLink) throw new Error("Supabase did not return a verification link.");
+  const actionLink = String(
+    properties?.action_link ?? properties?.actionLink ?? "",
+  );
+  if (!actionLink) {
+    throw new Error("Supabase did not return a verification link.");
+  }
   return actionLink;
 }
 
@@ -264,20 +525,29 @@ function verificationUrlFromGenerateLink(
   return actionLink;
 }
 
-async function sendSignupVerification(body: MailRequest): Promise<Response> {
+async function sendSignupVerification(
+  request: Request,
+  body: SignupMailRequest,
+): Promise<Response> {
   requireResendKey();
   const email = normalizeEmail(body.email);
   const password = String(body.password ?? "");
-  if (password.length < 8) throw new Error("Password must be at least 8 characters.");
+  if (password.length < 8) {
+    throw new Error("Password must be at least 8 characters.");
+  }
   const flowType = String(body.flowType ?? "web_signup").trim();
   if (!["web_church_registration", "web_member_signup"].includes(flowType)) {
     throw new Error("Unsupported signup flow.");
   }
   const redirectTo = allowedRedirect(body.redirectTo);
-  const authRedirectTo = publicAuthCallbackUrl({ nextUrl: redirectTo, flowType });
+  await verifyPublicMailCaptcha(request, "auth-signup", body.captchaToken);
+  await consumePublicMailRateLimit(request, "auth-signup", email);
+  const authRedirectTo = publicAuthCallbackUrl({
+    nextUrl: redirectTo,
+    flowType,
+  });
   const supabase = serviceClient();
   let verificationUrl = "";
-  let usedExistingAccount = false;
   const userData = normalizeSignupData(body.userData, flowType);
 
   const signupResult = await supabase.auth.admin.generateLink({
@@ -292,10 +562,12 @@ async function sendSignupVerification(body: MailRequest): Promise<Response> {
 
   if (signupResult.error) {
     const message = signupResult.error.message.toLowerCase();
-    if (!message.includes("already") && !message.includes("registered") && !message.includes("exists")) {
+    if (
+      !message.includes("already") && !message.includes("registered") &&
+      !message.includes("exists")
+    ) {
       throw signupResult.error;
     }
-    usedExistingAccount = true;
     const magicResult = await supabase.auth.admin.generateLink({
       type: "magiclink",
       email,
@@ -319,27 +591,45 @@ async function sendSignupVerification(body: MailRequest): Promise<Response> {
 
   const isChurch = flowType === "web_church_registration";
   const emailBody = brandedEmail({
-    title: isChurch ? "Verify Your Church Registration Email" : "Verify Your Grace Connect Email",
-    preview: "Use this secure link to verify your email and continue Grace Connect signup.",
-    body: `<p>Hello${userData.full_name ? ` ${userData.full_name}` : ""},</p><p>Use the button below to verify your email address and continue your ${isChurch ? "church registration" : "membership request"}.</p><p>This link is time-sensitive and should only be used by you.</p>`,
+    title: isChurch
+      ? "Verify Your Church Registration Email"
+      : "Verify Your Grace Connect Email",
+    preview:
+      "Use this secure link to verify your email and continue Grace Connect signup.",
+    body: `<p>Hello${
+      userData.full_name ? ` ${escapeHtml(userData.full_name)}` : ""
+    },</p><p>Use the button below to verify your email address and continue your ${
+      isChurch ? "church registration" : "membership request"
+    }.</p><p>This link is time-sensitive and should only be used by you.</p>`,
     ctaLabel: "Verify Email",
     ctaUrl: verificationUrl,
   });
 
   const resendId = await sendResendEmail({
     to: email,
-    subject: isChurch ? "Verify your Grace Connect church registration" : "Verify your Grace Connect email",
+    subject: isChurch
+      ? "Verify your Grace Connect church registration"
+      : "Verify your Grace Connect email",
     html: emailBody.html,
     text: emailBody.text,
   });
 
-  return jsonResponse({ ok: true, provider: "resend", id: resendId, existing_account: usedExistingAccount });
+  return jsonResponse({
+    ok: true,
+    provider: "resend",
+    id: resendId,
+  });
 }
 
-async function sendPasswordReset(body: MailRequest): Promise<Response> {
+async function sendPasswordReset(
+  request: Request,
+  body: PasswordResetMailRequest,
+): Promise<Response> {
   requireResendKey();
   const email = normalizeEmail(body.email);
   const redirectTo = allowedRedirect(body.redirectTo, { allowNativeApp: true });
+  await verifyPublicMailCaptcha(request, "password-reset", body.captchaToken);
+  await consumePublicMailRateLimit(request, "password-reset", email);
   const supabase = serviceClient();
 
   const recoveryResult = await supabase.auth.admin.generateLink({
@@ -347,7 +637,17 @@ async function sendPasswordReset(body: MailRequest): Promise<Response> {
     email,
     options: { redirectTo },
   });
-  if (recoveryResult.error) throw recoveryResult.error;
+  if (recoveryResult.error) {
+    const message = recoveryResult.error.message.toLowerCase();
+    if (
+      message.includes("not found") || message.includes("does not exist") ||
+      message.includes("no user")
+    ) {
+      // Public recovery must not reveal whether an email is registered.
+      return jsonResponse({ ok: true });
+    }
+    throw recoveryResult.error;
+  }
 
   const resetUrl = actionLinkFromGenerateLink(
     recoveryResult.data as Record<string, unknown>,
@@ -362,14 +662,15 @@ async function sendPasswordReset(body: MailRequest): Promise<Response> {
     ctaUrl: resetUrl,
   });
 
-  const resendId = await sendResendEmail({
+  await sendResendEmail({
     to: email,
     subject: "Reset your Grace Connect password",
     html: emailBody.html,
     text: emailBody.text,
   });
 
-  return jsonResponse({ ok: true, provider: "resend", id: resendId });
+  // Keep the public response indistinguishable from the unknown-user path.
+  return jsonResponse({ ok: true });
 }
 
 async function requireDeveloper(request: Request): Promise<void> {
@@ -379,7 +680,9 @@ async function requireDeveloper(request: Request): Promise<void> {
   if (error) throw new Error("Developer access is required.");
 }
 
-async function currentUser(request: Request): Promise<{ id: string; email: string }> {
+async function currentUser(
+  request: Request,
+): Promise<{ id: string; email: string }> {
   const token = accessTokenFromRequest(request);
   if (!token) throw new Error("Sign-in is required.");
   const { data, error } = await anonClient(token).auth.getUser(token);
@@ -387,7 +690,85 @@ async function currentUser(request: Request): Promise<{ id: string; email: strin
   return { id: data.user.id, email: data.user.email ?? "" };
 }
 
-async function queuedRowsForSupportTicket(request: Request, ticketId?: string): Promise<EmailRow[]> {
+async function requireManagedEmailSender(request: Request): Promise<void> {
+  const token = accessTokenFromRequest(request);
+  if (!token) throw new Error("Sign-in is required.");
+  const client = anonClient(token);
+
+  const developer = await client.rpc("developer_get_session");
+  if (!developer.error) return;
+
+  const membership = await client.rpc("get_current_membership_context");
+  const context = membership.data as Record<string, unknown> | null;
+  const churchId = String(context?.churchId ?? "").trim();
+  if (membership.error || !churchId || context?.membershipStatus !== "active") {
+    throw new Error("Church email permission is required.");
+  }
+
+  const permission = await client.rpc("can_manage_church_members", {
+    target_church_id: churchId,
+  });
+  if (permission.error || permission.data !== true) {
+    throw new Error("Church email permission is required.");
+  }
+}
+
+async function sendManagedAppEmail(
+  request: Request,
+  body: ManagedAppMailRequest,
+): Promise<Response> {
+  await requireManagedEmailSender(request);
+  requireResendKey();
+
+  const rawRecipients = Array.isArray(body.to) ? body.to : [];
+  const recipients = Array.from(
+    new Set(rawRecipients.map((email) => normalizeEmail(String(email)))),
+  );
+  if (recipients.length < 1 || recipients.length > 200) {
+    throw new Error("Between 1 and 200 recipients are required.");
+  }
+
+  const subject = String(body.subject ?? "").trim();
+  if (!subject || subject.length > 160) {
+    throw new Error("Email subject must be between 1 and 160 characters.");
+  }
+  const suppliedHtml = String(body.htmlBody ?? "").trim();
+  if (!suppliedHtml || suppliedHtml.length > 100_000) {
+    throw new Error("Email content is empty or too large.");
+  }
+
+  const emailBody = suppliedHtml.includes('data-grace-email="true"')
+    ? { html: suppliedHtml, text: plainText(suppliedHtml) }
+    : brandedEmail({
+      title: subject,
+      preview: plainText(suppliedHtml).slice(0, 140) || "Grace Connect update",
+      body: suppliedHtml,
+    });
+
+  const providerIds: string[] = [];
+  for (const recipient of recipients) {
+    providerIds.push(
+      await sendResendEmail({
+        to: recipient,
+        subject,
+        html: emailBody.html,
+        text: emailBody.text,
+      }),
+    );
+  }
+
+  return jsonResponse({
+    ok: true,
+    provider: "resend",
+    sent: recipients.length,
+    ids: providerIds,
+  });
+}
+
+async function queuedRowsForSupportTicket(
+  request: Request,
+  ticketId?: string,
+): Promise<EmailRow[]> {
   const identifier = String(ticketId ?? "").trim();
   if (!identifier) throw new Error("Ticket ID is required.");
   const user = await currentUser(request);
@@ -400,8 +781,12 @@ async function queuedRowsForSupportTicket(request: Request, ticketId?: string): 
     .maybeSingle();
   if (error || !ticket) throw new Error("Support ticket was not found.");
 
-  const isReporter = [ticket.userId, ticket.uid].map((value) => String(value ?? "")).includes(user.id) ||
-    String(ticket.reporterEmail ?? "").toLowerCase() === user.email.toLowerCase();
+  const isReporter =
+    [ticket.userId, ticket.uid].map((value) => String(value ?? "")).includes(
+      user.id,
+    ) ||
+    String(ticket.reporterEmail ?? "").toLowerCase() ===
+      user.email.toLowerCase();
   if (!isReporter) {
     await requireDeveloper(request);
   }
@@ -418,7 +803,9 @@ async function queuedRowsForSupportTicket(request: Request, ticketId?: string): 
   return (rows ?? []) as EmailRow[];
 }
 
-async function deliverRows(rows: EmailRow[]): Promise<{ ok: boolean; total: number; sent: number; failed: number }> {
+async function deliverRows(
+  rows: EmailRow[],
+): Promise<{ ok: boolean; total: number; sent: number; failed: number }> {
   requireResendKey();
   const supabase = serviceClient();
   let sent = 0;
@@ -453,7 +840,9 @@ async function deliverRows(rows: EmailRow[]): Promise<{ ok: boolean; total: numb
         .from("email_notification_queue")
         .update({
           status: "failed",
-          error_message: error instanceof Error ? error.message : "Email delivery failed.",
+          error_message: error instanceof Error
+            ? error.message
+            : "Email delivery failed.",
         })
         .eq("id", row.id);
     }
@@ -462,7 +851,10 @@ async function deliverRows(rows: EmailRow[]): Promise<{ ok: boolean; total: numb
   return { ok: failed === 0, total: rows.length, sent, failed };
 }
 
-async function flushDeveloperQueue(request: Request, limit?: number): Promise<Response> {
+async function flushDeveloperQueue(
+  request: Request,
+  limit?: number,
+): Promise<Response> {
   await requireDeveloper(request);
   requireResendKey();
   const safeLimit = Math.max(1, Math.min(Number(limit ?? 25), 50));
@@ -481,24 +873,53 @@ Deno.serve(async (request) => {
   if (optionsResponse) return optionsResponse;
 
   try {
-    if (request.method !== "POST") return jsonResponse({ error: "Method not allowed." }, 405);
-    const body = (await request.json().catch(() => ({}))) as MailRequest;
+    if (request.method !== "POST") {
+      return jsonResponse({ error: "Method not allowed." }, 405);
+    }
+    const body = (await request.json().catch(() => ({}))) as UnknownMailRequest;
 
-    if (body.action === "auth-signup") return await sendSignupVerification(body);
-    if (body.action === "password-reset") return await sendPasswordReset(body);
-    if (body.action === "flush-queue") return await flushDeveloperQueue(request, body.limit);
+    if (body.action === "auth-signup") {
+      return await sendSignupVerification(request, body as SignupMailRequest);
+    }
+    if (body.action === "password-reset") {
+      return await sendPasswordReset(request, body as PasswordResetMailRequest);
+    }
+    if (body.action === "send-app-email") {
+      return await sendManagedAppEmail(request, body as ManagedAppMailRequest);
+    }
+    if (body.action === "flush-queue") {
+      const flushRequest = body as FlushQueueMailRequest;
+      return await flushDeveloperQueue(request, flushRequest.limit);
+    }
     if (body.action === "flush-support-ticket") {
-      const rows = await queuedRowsForSupportTicket(request, body.ticketId);
+      const flushRequest = body as FlushSupportTicketMailRequest;
+      const rows = await queuedRowsForSupportTicket(
+        request,
+        flushRequest.ticketId,
+      );
       return jsonResponse(await deliverRows(rows));
     }
 
     return jsonResponse({ error: "Unsupported mail action." }, 400);
   } catch (error) {
+    const status = error instanceof MailHttpError ? error.status : 400;
+    const retryAfter = error instanceof MailHttpError
+      ? error.retryAfterSeconds
+      : undefined;
     return new Response(
-      JSON.stringify({ ok: false, error: error instanceof Error ? error.message : "Email delivery failed." }),
+      JSON.stringify({
+        ok: false,
+        error: error instanceof Error
+          ? error.message
+          : "Email delivery failed.",
+      }),
       {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json",
+          ...(retryAfter ? { "Retry-After": String(retryAfter) } : {}),
+        },
       },
     );
   }

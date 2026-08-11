@@ -1,14 +1,12 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:timeago/timeago.dart' as timeago;
-import 'package:video_player/video_player.dart';
 import '../../models/post.dart';
 import '../../services/community_service.dart';
 import '../../utils/media_display_format.dart';
 import '../../widgets/ui/app_scaffold.dart';
 import '../../widgets/ui/app_text_field.dart';
+import '../../widgets/community_video_player.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 
 class PostDetailScreen extends StatefulWidget {
@@ -294,7 +292,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                   onTap: () => _openPostMediaViewer(post),
                                   child: ClipRRect(
                                     borderRadius: BorderRadius.circular(8),
-                                    child: _InlinePostVideoPlayer(
+                                    child: CommunityVideoPlayer(
                                       mediaUrl: post.mediaUrl!,
                                       fit: boxFitForMedia(post.mediaFit),
                                     ),
@@ -490,7 +488,7 @@ class _PostMediaViewerScreen extends StatelessWidget {
         child: Center(
           child: isVideo
               ? SizedBox.expand(
-                  child: _InlinePostVideoPlayer(
+                  child: CommunityVideoPlayer(
                     mediaUrl: mediaUrl,
                     fit: BoxFit.contain,
                   ),
@@ -510,198 +508,6 @@ class _PostMediaViewerScreen extends StatelessWidget {
                     ),
                   ),
                 ),
-        ),
-      ),
-    );
-  }
-}
-
-class _InlinePostVideoPlayer extends StatefulWidget {
-  const _InlinePostVideoPlayer({
-    required this.mediaUrl,
-    required this.fit,
-  });
-
-  final String mediaUrl;
-  final BoxFit fit;
-
-  @override
-  State<_InlinePostVideoPlayer> createState() => _InlinePostVideoPlayerState();
-}
-
-class _InlinePostVideoPlayerState extends State<_InlinePostVideoPlayer> {
-  VideoPlayerController? _controller;
-  Object? _error;
-  bool _isInitializing = true;
-
-  @override
-  void initState() {
-    super.initState();
-    unawaited(_initialize());
-  }
-
-  @override
-  void didUpdateWidget(covariant _InlinePostVideoPlayer oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.mediaUrl != widget.mediaUrl) {
-      unawaited(_initialize());
-    }
-  }
-
-  @override
-  void dispose() {
-    _controller?.dispose();
-    super.dispose();
-  }
-
-  Future<void> _initialize() async {
-    setState(() {
-      _isInitializing = true;
-      _error = null;
-    });
-
-    final previous = _controller;
-    _controller = null;
-    await previous?.dispose();
-
-    final controller = VideoPlayerController.networkUrl(
-      Uri.parse(widget.mediaUrl),
-    );
-    _controller = controller;
-
-    try {
-      await controller.initialize();
-      await controller.setLooping(true);
-      if (!mounted) return;
-      setState(() => _isInitializing = false);
-    } catch (error) {
-      await controller.dispose();
-      if (!mounted) return;
-      setState(() {
-        if (identical(_controller, controller)) {
-          _controller = null;
-        }
-        _error = error;
-        _isInitializing = false;
-      });
-    }
-  }
-
-  Future<void> _togglePlayback() async {
-    final controller = _controller;
-    if (controller == null || !controller.value.isInitialized) return;
-
-    if (controller.value.isPlaying) {
-      await controller.pause();
-    } else {
-      await controller.play();
-    }
-    if (mounted) setState(() {});
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final controller = _controller;
-    final isReady = controller != null && controller.value.isInitialized;
-
-    return ColoredBox(
-      color: Colors.black,
-      child: Stack(
-        fit: StackFit.expand,
-        alignment: Alignment.center,
-        children: [
-          if (isReady)
-            FittedBox(
-              fit: widget.fit,
-              child: SizedBox(
-                width: controller.value.size.width,
-                height: controller.value.size.height,
-                child: VideoPlayer(controller),
-              ),
-            )
-          else
-            _InlinePostVideoPlaceholder(
-              error: _error,
-              isInitializing: _isInitializing,
-              onRetry: _initialize,
-            ),
-          if (isReady)
-            Center(
-              child: IconButton.filled(
-                tooltip:
-                    controller.value.isPlaying ? 'Pause video' : 'Play video',
-                style: IconButton.styleFrom(
-                  backgroundColor: Colors.white.withValues(alpha: 0.88),
-                  foregroundColor: Colors.black,
-                  fixedSize: const Size(56, 56),
-                ),
-                onPressed: _togglePlayback,
-                icon: Icon(
-                  controller.value.isPlaying ? Icons.pause : Icons.play_arrow,
-                  size: 32,
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-class _InlinePostVideoPlaceholder extends StatelessWidget {
-  const _InlinePostVideoPlaceholder({
-    required this.error,
-    required this.isInitializing,
-    required this.onRetry,
-  });
-
-  final Object? error;
-  final bool isInitializing;
-  final VoidCallback onRetry;
-
-  @override
-  Widget build(BuildContext context) {
-    if (isInitializing) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.error_outline, color: Colors.white, size: 42),
-            const SizedBox(height: 10),
-            const Text(
-              'Video could not load. Check your internet connection or try again.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            if (error != null) ...[
-              const SizedBox(height: 6),
-              Text(
-                error.toString(),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.white70, fontSize: 12),
-              ),
-            ],
-            const SizedBox(height: 12),
-            OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.white,
-                side: const BorderSide(color: Colors.white70),
-              ),
-              onPressed: onRetry,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Retry Video'),
-            ),
-          ],
         ),
       ),
     );

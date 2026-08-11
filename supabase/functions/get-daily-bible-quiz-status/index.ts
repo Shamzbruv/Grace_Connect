@@ -73,6 +73,7 @@ Deno.serve(async (request) => {
       quiz,
       attempt,
       can_start: !attempt,
+      can_resume: Boolean(attempt && attempt.status !== "completed"),
       status: attempt?.status ?? "ready",
       leaderboard_scope: leaderboardScope,
       next_refresh_at: refreshAt.toISOString(),

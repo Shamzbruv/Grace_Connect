@@ -51,8 +51,8 @@ class MembershipContext {
   String get loadErrorTitle {
     return switch (loadStatus) {
       MembershipLoadStatus.permissionDenied => 'Membership Access Blocked',
-      MembershipLoadStatus.migrationMismatch => 'Membership Setup Mismatch',
-      MembershipLoadStatus.unexpectedResponse => 'Membership Setup Mismatch',
+      MembershipLoadStatus.migrationMismatch => 'Membership Unavailable',
+      MembershipLoadStatus.unexpectedResponse => 'Membership Unavailable',
       _ => 'Membership Unavailable',
     };
   }
@@ -63,7 +63,7 @@ class MembershipContext {
         'We could not confirm your church access because the server denied the membership lookup. Please try again or contact support.',
       MembershipLoadStatus.migrationMismatch ||
       MembershipLoadStatus.unexpectedResponse =>
-        'Grace Connect could not read the membership setup from the server. Please try again after the latest backend update is applied.',
+        'Grace Connect could not verify your membership right now. No account changes were made. Please check again in a moment.',
       _ =>
         'Grace Connect could not load your membership right now. Check your connection and try again.',
     };
@@ -150,6 +150,7 @@ class MembershipService {
 
   final SupabaseClient _client;
   static const String _cacheKeyPrefix = 'membership_context_v1';
+  static const Duration _cacheMaxAge = Duration(minutes: 15);
 
   Future<List<Map<String, dynamic>>> getRequiredPolicies(
       String flowType) async {
@@ -183,7 +184,7 @@ class MembershipService {
     if (user == null) return MembershipContext.unauthenticated;
 
     try {
-      final data = await _client.rpc('get_current_membership_context');
+      final data = await _loadCurrentContextWithRetry();
       if (data is Map<String, dynamic>) {
         final context = MembershipContext.fromMap(data);
         unawaited(_cacheContext(user.id, context));
@@ -196,6 +197,13 @@ class MembershipService {
         return context;
       }
       debugPrint('Membership context returned unexpected data: $data');
+      final cached = await _readCachedContext(user.id);
+      if (cached != null) return cached;
+      final profileFallback = await _readProfileFallbackContext(user.id);
+      if (profileFallback != null) {
+        unawaited(_cacheContext(user.id, profileFallback));
+        return profileFallback;
+      }
       return MembershipContext.loadFailed(
         status: MembershipLoadStatus.unexpectedResponse,
         error: 'Unexpected membership context response.',
@@ -203,7 +211,7 @@ class MembershipService {
     } catch (error) {
       debugPrint('Membership context unavailable: $error');
       final status = classifyContextError(error);
-      if (status == MembershipLoadStatus.backendUnavailable) {
+      if (status != MembershipLoadStatus.permissionDenied) {
         final cached = await _readCachedContext(user.id);
         if (cached != null) {
           debugPrint(
@@ -225,6 +233,29 @@ class MembershipService {
     }
   }
 
+  Future<dynamic> _loadCurrentContextWithRetry() async {
+    Object? lastError;
+    const delays = [
+      Duration(milliseconds: 300),
+      Duration(milliseconds: 900),
+    ];
+    for (var attempt = 0; attempt < 3; attempt++) {
+      try {
+        return await _client
+            .rpc('get_current_membership_context')
+            .timeout(const Duration(seconds: 12));
+      } catch (error) {
+        lastError = error;
+        final status = classifyContextError(error);
+        if (status == MembershipLoadStatus.permissionDenied || attempt == 2) {
+          rethrow;
+        }
+        await Future<void>.delayed(delays[attempt]);
+      }
+    }
+    throw lastError ?? StateError('Membership lookup failed.');
+  }
+
   Stream<MembershipContext> watchCurrentContext() async* {
     final initial = await getCurrentContext();
     yield initial;
@@ -241,7 +272,7 @@ class MembershipService {
     } catch (error) {
       debugPrint('Membership context stream unavailable: $error');
       final status = classifyContextError(error);
-      if (status == MembershipLoadStatus.backendUnavailable) {
+      if (status != MembershipLoadStatus.permissionDenied) {
         final cached = await _readCachedContext(user.id);
         if (cached != null) {
           yield cached;
@@ -252,6 +283,11 @@ class MembershipService {
           yield profileFallback;
           return;
         }
+        // A realtime transport/schema-cache interruption must not replace a
+        // membership context that was already loaded successfully with a
+        // full-screen setup error.
+        yield initial;
+        return;
       }
       yield MembershipContext.loadFailed(
         status: status,
@@ -271,7 +307,10 @@ class MembershipService {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(
         _cacheKey(userId),
-        jsonEncode(context.toMap()),
+        jsonEncode({
+          'cachedAt': DateTime.now().toUtc().toIso8601String(),
+          'context': context.toMap(),
+        }),
       );
     } catch (error) {
       debugPrint('Membership context cache skipped: $error');
@@ -286,8 +325,16 @@ class MembershipService {
       if (raw == null || raw.trim().isEmpty) return null;
       final decoded = jsonDecode(raw);
       if (decoded is! Map) return null;
+      final wrappedContext = decoded['context'];
+      final cachedAt = DateTime.tryParse(decoded['cachedAt']?.toString() ?? '');
+      if (cachedAt != null &&
+          DateTime.now().toUtc().difference(cachedAt.toUtc()) > _cacheMaxAge) {
+        return null;
+      }
       final context = MembershipContext.fromMap(
-        Map<String, dynamic>.from(decoded),
+        wrappedContext is Map
+            ? Map<String, dynamic>.from(wrappedContext)
+            : Map<String, dynamic>.from(decoded),
       );
       if (!context.authenticated || context.hasLoadError) return null;
       return context;
@@ -310,8 +357,42 @@ class MembershipService {
           .maybeSingle();
       if (data == null) return null;
 
-      final churchId = data['placeId']?.toString().trim() ?? '';
-      final churchName = data['placeName']?.toString().trim();
+      final membershipRows = await _client
+          .from('church_memberships')
+          .select('id,church_id,membership_status,decision_reason,requested_at')
+          .eq('user_id', userId)
+          .inFilter('membership_status', ['active', 'pending'])
+          .order('requested_at', ascending: false)
+          .limit(10);
+      final memberships = List<Map<String, dynamic>>.from(membershipRows);
+      Map<String, dynamic>? membership;
+      for (final row in memberships) {
+        if (row['membership_status']?.toString() == 'active') {
+          membership = row;
+          break;
+        }
+      }
+      membership ??= memberships.isEmpty ? null : memberships.first;
+
+      final churchId = membership?['church_id']?.toString().trim() ?? '';
+      Map<String, dynamic>? church;
+      if (churchId.isNotEmpty) {
+        church = await _client
+            .from('churches')
+            .select('id,placeId,display_name,name,church_status')
+            .or('id.eq.$churchId,placeId.eq.$churchId')
+            .maybeSingle();
+      }
+      final membershipStatus =
+          membership?['membership_status']?.toString() ?? 'none';
+      final churchStatus = church?['church_status']?.toString();
+      if (membershipStatus == 'active' && churchStatus != 'approved') {
+        return null;
+      }
+      final churchName =
+          (church?['display_name'] ?? church?['name'] ?? data['placeName'])
+              ?.toString()
+              .trim();
       final accountStatus =
           (data['accountStatus'] ?? data['accountState'] ?? 'active')
               .toString();
@@ -320,10 +401,12 @@ class MembershipService {
         authenticated: true,
         hasProfile: true,
         accountStatus: accountStatus,
-        membershipStatus: churchId.isEmpty ? 'none' : 'active',
+        membershipStatus: membershipStatus,
+        membershipId: membership?['id']?.toString(),
         churchId: churchId.isEmpty ? null : churchId,
         churchName: churchName?.isEmpty == true ? null : churchName,
-        churchStatus: churchId.isEmpty ? null : 'approved',
+        churchStatus: churchStatus,
+        decisionReason: membership?['decision_reason']?.toString(),
         hasPendingChurchApplication: false,
       );
     } catch (error) {
@@ -373,6 +456,16 @@ class MembershipService {
     required String churchId,
     String? message,
   }) async {
+    final current = await getCurrentContext();
+    if (current.hasActiveMembership) {
+      throw StateError(
+        'You already belong to a church. Use Church Transfer if you need to change churches.',
+      );
+    }
+    if (current.hasPendingMembership) {
+      throw StateError('Your church membership request is already pending.');
+    }
+
     final membershipId = await _client.rpc(
       'request_church_membership',
       params: {

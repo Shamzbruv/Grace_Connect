@@ -216,7 +216,10 @@ export function safeJsonParse<T>(value: string): T | null {
   }
 }
 
-export async function callHuggingFaceJson(prompt: string): Promise<unknown | null> {
+export async function callHuggingFaceJson(
+  prompt: string,
+  maxNewTokens = 900,
+): Promise<unknown | null> {
   const hfToken = Deno.env.get("HF_TOKEN");
   if (!hfToken) throw new Error("AI configuration is incomplete.");
 
@@ -231,7 +234,7 @@ export async function callHuggingFaceJson(prompt: string): Promise<unknown | nul
       body: JSON.stringify({
         inputs: prompt,
         parameters: {
-          max_new_tokens: 900,
+          max_new_tokens: Math.max(256, Math.min(maxNewTokens, 2400)),
           return_full_text: false,
           temperature: 0.7,
         },
@@ -321,6 +324,8 @@ export function notificationSoundProfile(type: string): { channelId: string; sou
     message: { channelId: "grace_messages_channel_v1", sound: "grace_message.wav" },
     direct_message: { channelId: "grace_messages_channel_v1", sound: "grace_message.wav" },
     live_stream: { channelId: "grace_live_channel_v1", sound: "grace_live.wav" },
+    bible_streak_reminder: { channelId: "grace_daily_word_channel_v1", sound: "grace_daily.wav" },
+    grace_room_invitation: { channelId: "grace_default_channel_v1", sound: "grace_default.wav" },
   };
   return profiles[normalized] ?? profiles.general;
 }
@@ -338,6 +343,125 @@ function notificationTag(params: {
   return `type:${params.type || "general"}`;
 }
 
+const REGISTERED_DELIVERY_TOPIC = "graceconnect_registered_delivery_v1";
+
+type FcmTarget =
+  | { token: string }
+  | { topic: string }
+  | { condition: string };
+
+type FcmSendResult = {
+  sent: boolean;
+  providerMessageId?: string;
+  invalidToken?: boolean;
+  providerCode?: string;
+};
+
+function fcmMessage(
+  target: FcmTarget,
+  params: {
+    title: string;
+    body: string;
+    route: string;
+    type: string;
+    entityTable?: string;
+    entityId?: string;
+  },
+): Record<string, unknown> {
+  const sound = notificationSoundProfile(params.type);
+  const tag = notificationTag(params);
+  const collapseKey = `grace_${params.type}`.slice(0, 64);
+  return {
+    ...target,
+    notification: {
+      title: params.title.slice(0, 120),
+      body: params.body.slice(0, 220),
+    },
+    data: {
+      type: params.type,
+      route: params.route,
+      entity_table: params.entityTable ?? "",
+      entity_id: params.entityId ?? "",
+      notification_tag: tag,
+      title: params.title.slice(0, 120),
+      body: params.body.slice(0, 220),
+      click_action: "FLUTTER_NOTIFICATION_CLICK",
+    },
+    android: {
+      priority: "HIGH",
+      ttl: "86400s",
+      collapse_key: collapseKey,
+      notification: {
+        channel_id: sound.channelId,
+        sound: sound.sound.replace(".wav", ""),
+        tag,
+        color: "#0B5C7D",
+        icon: "ic_stat_grace_connect",
+      },
+    },
+    apns: {
+      headers: {
+        "apns-priority": "10",
+        "apns-collapse-id": collapseKey,
+      },
+      payload: {
+        aps: {
+          sound: sound.sound,
+        },
+      },
+    },
+  };
+}
+
+async function sendFcmMessage(
+  projectId: string,
+  accessToken: string,
+  message: Record<string, unknown>,
+): Promise<FcmSendResult> {
+  try {
+    const response = await fetch(
+      `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ message }),
+      },
+    );
+    const body = await response.json().catch(() => ({})) as Record<string, unknown>;
+    if (response.ok) {
+      return {
+        sent: true,
+        providerMessageId: String(body.name ?? ""),
+      };
+    }
+
+    const providerError = (body.error ?? {}) as Record<string, unknown>;
+    const providerCode = String(providerError.status ?? response.status);
+    const details = Array.isArray(providerError.details)
+      ? providerError.details as Array<Record<string, unknown>>
+      : [];
+    const invalidToken = response.status === 404 || details.some((detail) =>
+      String(detail.errorCode ?? "") === "UNREGISTERED"
+    );
+    return { sent: false, invalidToken, providerCode };
+  } catch (_error) {
+    return { sent: false, invalidToken: false, providerCode: "NETWORK_ERROR" };
+  }
+}
+
+async function sendFcmMessageWithRetry(
+  projectId: string,
+  accessToken: string,
+  message: Record<string, unknown>,
+): Promise<FcmSendResult> {
+  const first = await sendFcmMessage(projectId, accessToken, message);
+  if (first.sent || first.invalidToken) return first;
+  return await sendFcmMessage(projectId, accessToken, message);
+}
+
 export async function sendTopicPush(
   client: SupabaseClient,
   params: {
@@ -350,6 +474,23 @@ export async function sendTopicPush(
     entityId?: string;
   },
 ): Promise<{ sent: boolean; reason?: string }> {
+  // A reclaimed delivery lease must not send a topic again after the provider
+  // already accepted it. Failed/skipped rows remain retryable.
+  if (params.entityTable && params.entityId) {
+    const { data: priorSent } = await client
+      .from("system_notification_outbox")
+      .select("id")
+      .eq("topic", params.topic)
+      .eq("type", params.type)
+      .eq("entity_table", params.entityTable)
+      .eq("entity_id", params.entityId)
+      .eq("status", "sent")
+      .limit(1);
+    if ((priorSent ?? []).length > 0) {
+      return { sent: true, reason: "Push was already delivered." };
+    }
+  }
+
   const { data: outbox } = await client
     .from("system_notification_outbox")
     .insert({
@@ -376,76 +517,143 @@ export async function sendTopicPush(
   }
 
   try {
+    const cleanTopic = params.topic.trim();
+    if (!/^[A-Za-z0-9_~%.-]{1,900}$/.test(cleanTopic)) {
+      throw new Error("Push topic is invalid.");
+    }
+
     const serviceAccount = JSON.parse(serviceAccountJson);
     const projectId = String(serviceAccount.project_id ?? "");
-    const token = await googleAccessToken(serviceAccount);
-    const sound = notificationSoundProfile(params.type);
-    const tag = notificationTag(params);
-    const response = await fetch(
-      `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          message: {
-            topic: params.topic,
-            notification: {
-              title: params.title,
-              body: params.body,
-            },
-            data: {
-              type: params.type,
-              route: params.route,
-              entity_table: params.entityTable ?? "",
-              entity_id: params.entityId ?? "",
-              notification_tag: tag,
-            },
-            android: {
-              priority: "HIGH",
-              notification: {
-                channel_id: sound.channelId,
-                sound: sound.sound.replace(".wav", ""),
-                tag,
-              },
-            },
-            apns: {
-              payload: {
-                aps: {
-                  sound: sound.sound,
-                },
-              },
-            },
-          },
-        }),
-      },
-    );
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error("Push provider rejected the message.");
+    if (!projectId) throw new Error("Firebase project configuration is incomplete.");
+    const accessToken = await googleAccessToken(serviceAccount);
+
+    // Registered installations receive a token-addressed message. App builds
+    // that predate the registry continue receiving the legacy topic message.
+    // The marker topic excludes registered builds from that fallback and
+    // prevents duplicate notifications.
+    const registrationPageSize = 500;
+    const registrations: Array<{ id: string; token: string }> = [];
+    let registryAvailable = true;
+    for (let from = 0; ; from += registrationPageSize) {
+      const registrationsResult = await client
+        .from("push_device_registrations")
+        .select("id,token")
+        .eq("enabled", true)
+        .contains("topics", [cleanTopic])
+        .order("id", { ascending: true })
+        .range(from, from + registrationPageSize - 1);
+      if (registrationsResult.error) {
+        registryAvailable = false;
+        registrations.length = 0;
+        break;
+      }
+      const page = (registrationsResult.data ?? []) as Array<{ id: string; token: string }>;
+      registrations.push(...page);
+      if (page.length < registrationPageSize) break;
+    }
+
+    let directSent = 0;
+    let directFailed = 0;
+    const providerIds: string[] = [];
+    const invalidRegistrationIds: string[] = [];
+    for (let offset = 0; offset < registrations.length; offset += 100) {
+      const batch = registrations.slice(offset, offset + 100);
+      const results = await Promise.allSettled(batch.map(async (registration) => ({
+        registration,
+        result: await sendFcmMessageWithRetry(
+          projectId,
+          accessToken,
+          fcmMessage({ token: registration.token }, params),
+        ),
+      })));
+      for (const settled of results) {
+        if (settled.status === "rejected") {
+          directFailed += 1;
+          continue;
+        }
+        const { registration, result } = settled.value;
+        if (result.sent) {
+          directSent += 1;
+          if (result.providerMessageId && providerIds.length < 2) {
+            providerIds.push(result.providerMessageId);
+          }
+        } else {
+          directFailed += 1;
+          if (result.invalidToken) invalidRegistrationIds.push(registration.id);
+        }
+      }
+    }
+
+    if (invalidRegistrationIds.length > 0) {
+      for (let offset = 0; offset < invalidRegistrationIds.length; offset += 200) {
+        await client
+          .from("push_device_registrations")
+          .update({ enabled: false, updated_at: new Date().toISOString() })
+          .in("id", invalidRegistrationIds.slice(offset, offset + 200));
+      }
+    }
+
+    // User-addressed and leader-only messages must never rely on client-managed
+    // Firebase topic membership as an authorization boundary. Those events are
+    // delivered only to server-derived registry rows. Public/broadcast topics
+    // retain the legacy fallback for older app versions.
+    const registryOnlyTopic = cleanTopic.startsWith("user_") ||
+      cleanTopic.endsWith("_leaders");
+    const fallbackTarget: FcmTarget = registryAvailable
+      ? {
+        condition:
+          `'${cleanTopic}' in topics && !('${REGISTERED_DELIVERY_TOPIC}' in topics)`,
+      }
+      : { topic: cleanTopic };
+    const fallback = registryOnlyTopic
+      ? { sent: false, providerCode: "REGISTRY_ONLY" } as FcmSendResult
+      : await sendFcmMessageWithRetry(
+        projectId,
+        accessToken,
+        fcmMessage(fallbackTarget, params),
+      );
+    if (fallback.providerMessageId) providerIds.push(fallback.providerMessageId);
+
+    if (!fallback.sent && directSent === 0) {
+      throw new Error(
+        `Push provider rejected all delivery paths (${fallback.providerCode ?? "unknown"}).`,
+      );
+    }
+
     if (outbox?.id) {
       await client
         .from("system_notification_outbox")
         .update({
           status: "sent",
-          provider_message_id: String(body.name ?? ""),
+          provider_message_id: [
+            ...providerIds.slice(0, 2),
+            `direct:${directSent}`,
+          ].filter(Boolean).join(" | ").slice(0, 500),
+          error_message: directFailed > 0
+            ? `${directFailed} registered device delivery attempt(s) failed.`
+            : null,
           sent_at: new Date().toISOString(),
         })
         .eq("id", outbox.id);
     }
-    return { sent: true };
+    return {
+      sent: true,
+      reason: directFailed > 0
+        ? `${directFailed} registered device delivery attempt(s) failed.`
+        : undefined,
+    };
   } catch (error) {
+    const reason = error instanceof Error ? error.message : "Push delivery failed.";
     if (outbox?.id) {
       await client
         .from("system_notification_outbox")
         .update({
           status: "failed",
-          error_message: error instanceof Error ? error.message : "Push delivery failed.",
+          error_message: reason.slice(0, 500),
         })
         .eq("id", outbox.id);
     }
-    return { sent: false, reason: "Push delivery failed." };
+    return { sent: false, reason };
   }
 }
 
@@ -462,27 +670,71 @@ export async function createInAppNotifications(
     preferenceColumn?: string;
   },
 ): Promise<number> {
-  let query = client.from("users").select("id, uid");
-  if (params.churchId) query = query.eq("placeId", params.churchId);
-  if (params.preferenceColumn) query = query.eq(params.preferenceColumn, true);
-  const { data: users, error } = await query;
-  if (error || !users) return 0;
-  const rows = users
-    .map((user) => String(user.id ?? user.uid ?? ""))
-    .filter(Boolean)
-    .map((userId) => ({
-      user_id: userId,
-      actor_id: null,
-      actor_name: "Grace Connect",
-      type: params.type,
-      title: params.title,
-      body: params.body,
-      place_id: params.churchId ?? null,
-      entity_table: params.entityTable ?? null,
-      entity_id: params.entityId ?? null,
-      route: params.route,
-    }));
+  const pageSize = 500;
+  const userIds = new Set<string>();
+  for (let from = 0; ; from += pageSize) {
+    let query = client
+      .from("users")
+      .select("id, uid")
+      .order("id", { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (params.churchId) query = query.eq("placeId", params.churchId);
+    if (params.preferenceColumn) query = query.eq(params.preferenceColumn, true);
+    const { data: users, error } = await query;
+    if (error || !users) return 0;
+    for (const user of users) {
+      const userId = String(user.id ?? "").trim() ||
+        String(user.uid ?? "").trim();
+      if (userId) userIds.add(userId);
+    }
+    if (users.length < pageSize) break;
+  }
+
+  let rows = [...userIds].map((userId) => ({
+    user_id: userId,
+    actor_id: null,
+    actor_name: "Grace Connect",
+    type: params.type,
+    title: params.title,
+    body: params.body,
+    place_id: params.churchId ?? null,
+    entity_table: params.entityTable ?? null,
+    entity_id: params.entityId ?? null,
+    route: params.route,
+  }));
   if (rows.length === 0) return 0;
-  const { error: insertError } = await client.from("notifications").insert(rows);
-  return insertError ? 0 : rows.length;
+
+  // Release retries can revisit this helper after an invocation crash or a
+  // provider outage. Reuse the existing in-app cards for that entity instead
+  // of showing members duplicates.
+  if (params.entityTable && params.entityId) {
+    const existingUserIds = new Set<string>();
+    for (let from = 0; ; from += pageSize) {
+      const { data: existingRows, error: existingError } = await client
+        .from("notifications")
+        .select("user_id")
+        .eq("type", params.type)
+        .eq("entity_table", params.entityTable)
+        .eq("entity_id", params.entityId)
+        .order("user_id", { ascending: true })
+        .range(from, from + pageSize - 1);
+      if (existingError || !existingRows) break;
+      for (const existing of existingRows) {
+        const userId = String(existing.user_id ?? "").trim();
+        if (userId) existingUserIds.add(userId);
+      }
+      if (existingRows.length < pageSize) break;
+    }
+    rows = rows.filter((row) => !existingUserIds.has(row.user_id));
+    if (rows.length === 0) return 0;
+  }
+
+  let inserted = 0;
+  for (let offset = 0; offset < rows.length; offset += pageSize) {
+    const chunk = rows.slice(offset, offset + pageSize);
+    const { error: insertError } = await client.from("notifications").insert(chunk);
+    if (insertError) continue;
+    inserted += chunk.length;
+  }
+  return inserted;
 }

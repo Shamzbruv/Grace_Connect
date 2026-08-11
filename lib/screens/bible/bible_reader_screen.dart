@@ -30,10 +30,14 @@ class BibleReaderScreen extends StatefulWidget {
   State<BibleReaderScreen> createState() => _BibleReaderScreenState();
 }
 
-class _BibleReaderScreenState extends State<BibleReaderScreen> {
+class _BibleReaderScreenState extends State<BibleReaderScreen>
+    with WidgetsBindingObserver {
   late Future<Map<String, dynamic>> _chapterFuture;
   Timer? _readingTimer;
   bool _streakRecorded = false;
+  bool _streakRecording = false;
+  bool _chapterReady = false;
+  bool _readerInForeground = true;
   double _fontSize = 18;
   bool _showVerseNumbers = true;
   String _translation = 'web';
@@ -43,33 +47,62 @@ class _BibleReaderScreenState extends State<BibleReaderScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _fetchChapter();
     _loadReaderSettings();
+    unawaited(_loadStreakState());
     _startReadingTimer();
+  }
+
+  Future<void> _loadStreakState() async {
+    final status = await BibleStreakService().currentStatus();
+    if (!mounted) return;
+    _streakRecorded = status.completedToday;
+    if (_streakRecorded) _readingTimer?.cancel();
   }
 
   void _fetchChapter() {
     // API expects "John 3", implies we might need to handle spaces or standard names
     // BibleService handles the query formatting
-    _chapterFuture =
-        BibleService().getChapter(widget.book.name, widget.chapter);
+    _chapterReady = false;
+    _chapterFuture = BibleService()
+        .getChapter(widget.book.name, widget.chapter)
+        .then((chapter) {
+      _chapterReady = true;
+      return chapter;
+    });
   }
 
   void _startReadingTimer() {
     _readingTimer?.cancel();
-    _readingTimer = Timer(const Duration(minutes: 1), () async {
-      if (!mounted || _streakRecorded) return;
-
-      final streak = await BibleStreakService().recordQualifiedRead();
-      _streakRecorded = true;
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
+    _readingTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
+      if (!mounted ||
+          _streakRecorded ||
+          _streakRecording ||
+          !_chapterReady ||
+          !_readerInForeground) {
+        return;
+      }
+      _streakRecording = true;
+      try {
+        final streak = await BibleStreakService()
+            .addActiveReadingTime(const Duration(seconds: 5));
+        if (streak == null || !mounted) return;
+        _streakRecorded = true;
+        _readingTimer?.cancel();
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(
               'Bible streak updated: $streak day${streak == 1 ? '' : 's'}'),
-        ),
-      );
+        ));
+      } finally {
+        _streakRecording = false;
+      }
     });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _readerInForeground = state == AppLifecycleState.resumed;
   }
 
   Future<void> _loadReaderSettings() async {
@@ -113,6 +146,7 @@ class _BibleReaderScreenState extends State<BibleReaderScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _readingTimer?.cancel();
     super.dispose();
   }

@@ -90,6 +90,9 @@ class _MembershipRequestsScreenState extends State<MembershipRequestsScreen> {
           'decision_note': reason,
         },
       );
+      if (approve) {
+        await NotificationService().sendMembershipApprovedPush(membershipId);
+      }
       if (currentUser != null) {
         await NotificationService().markEntityAsRead(
           userId: currentUser.uid,

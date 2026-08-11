@@ -84,6 +84,29 @@ class DeveloperService {
     );
   }
 
+  Future<Map<String, dynamic>> getScheduledContent({int days = 14}) async {
+    final data = await _supabase.rpc(
+      'developer_list_scheduled_content',
+      params: {'p_days': days},
+    );
+    if (data is Map<String, dynamic>) return data;
+    if (data is Map) return Map<String, dynamic>.from(data);
+    return const {'daily_words': [], 'quizzes': []};
+  }
+
+  Future<void> regenerateScheduledQuiz(String quizId) async {
+    final response = await _supabase.functions.invoke(
+      'generate-daily-bible-quiz',
+      body: {
+        'action': 'regenerate_scheduled',
+        'quiz_id': quizId,
+      },
+    );
+    if (response.data is Map && response.data['error'] != null) {
+      throw Exception(response.data['error']);
+    }
+  }
+
   Future<ChurchSubscriptionContext> grantFreeSubscription({
     required String churchId,
     required int months,

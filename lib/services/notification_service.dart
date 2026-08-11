@@ -10,7 +10,9 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:uuid/uuid.dart';
 
 import '../models/app_notification.dart';
 import 'supabase_resilience.dart';
@@ -34,6 +36,16 @@ class _NotificationSoundProfile {
   String get iosSound => '$soundName.wav';
 }
 
+class _PushInstallationCredentials {
+  const _PushInstallationCredentials({
+    required this.installationId,
+    required this.unregisterSecret,
+  });
+
+  final String installationId;
+  final String unregisterSecret;
+}
+
 class NotificationService {
   static final NotificationService _instance = NotificationService._internal();
   factory NotificationService() => _instance;
@@ -44,19 +56,35 @@ class NotificationService {
   final FlutterLocalNotificationsPlugin _localNotifications =
       FlutterLocalNotificationsPlugin();
   final FirebaseMessaging _messaging = FirebaseMessaging.instance;
-  final SupabaseClient _supabase = Supabase.instance.client;
+  // Keep this lazy. Firebase Messaging creates this singleton in a background
+  // isolate where Firebase is initialized but the app's Supabase bootstrap has
+  // not run. Data-only pushes only need local notifications, so eagerly reading
+  // Supabase.instance here would abort delivery while the app is closed.
+  SupabaseClient get _supabase => Supabase.instance.client;
   static const MethodChannel _configChannel =
       MethodChannel('love.graceconnect/config');
   StreamSubscription<List<AppNotification>>? _foregroundSubscription;
+  StreamSubscription<String>? _tokenRefreshSubscription;
   Timer? _unansweredReminderTimer;
   DateTime _foregroundStartedAt = DateTime.now();
   final Set<String> _shownForegroundNotificationIds = {};
   final Set<String> _startupPermissionUsers = {};
+  Set<String> _lastPushTopics = const {};
+  Future<void> _topicPersistenceChain = Future<void>.value();
+  Future<void>? _signedOutStartupCleanup;
+  bool _initialized = false;
   static final Uri _topicNotificationEndpoint = Uri.parse(
     'https://us-central1-graceconnect-9a97c.cloudfunctions.net/sendTopicNotification',
   );
   static const String churchWidePrefKey = 'notify_church_wide';
   static const String appWideTopic = 'graceconnect_all';
+  static const String _registeredDeliveryTopic =
+      'graceconnect_registered_delivery_v1';
+  static const String _installationIdKey = 'push_installation_id_v2';
+  static const String _unregisterSecretKey = 'push_unregister_secret_v2';
+  static const String _subscribedTopicsKey = 'push_subscribed_topics_v2';
+  static const String _registeredUserKey = 'push_registered_user_v2';
+  static const String _registeredTokenKey = 'push_registered_token_v2';
   static const Duration unansweredReminderInterval = Duration(hours: 3);
   static const Duration _unansweredReminderPollInterval = Duration(minutes: 15);
 
@@ -94,8 +122,7 @@ class NotificationService {
     'social_follow': _defaultSound,
     'social_follow_request': _defaultSound,
     'social_follow_accepted': _defaultSound,
-    'circle_invitation': _defaultSound,
-    'circle_post': _defaultSound,
+    'grace_room_invitation': _defaultSound,
     'event_invitation': _defaultSound,
     'message': _NotificationSoundProfile(
       channelId: 'grace_messages_channel_v1',
@@ -151,6 +178,12 @@ class NotificationService {
       description: 'Daily devotional and motivation notifications',
       soundName: 'grace_daily',
     ),
+    'bible_streak_reminder': _NotificationSoundProfile(
+      channelId: 'grace_daily_word_channel_v1',
+      channelName: 'Daily Word',
+      description: 'Daily devotional and Bible streak reminders',
+      soundName: 'grace_daily',
+    ),
     'daily_bible_quiz': _NotificationSoundProfile(
       channelId: 'grace_daily_quiz_channel_v1',
       channelName: 'Daily Bible Quiz',
@@ -190,6 +223,7 @@ class NotificationService {
 
   Future<void> init() async {
     if (kIsWeb) return;
+    if (_initialized) return;
 
     try {
       Firebase.app();
@@ -256,6 +290,19 @@ class NotificationService {
         const Duration(milliseconds: 500),
         () => _openRouteFromMessage(initialMessage),
       ));
+    }
+
+    await _tokenRefreshSubscription?.cancel();
+    _tokenRefreshSubscription = _messaging.onTokenRefresh.listen(
+      (token) => unawaited(_refreshPushRegistration(token)),
+      onError: (Object error) {
+        debugPrint('FCM token refresh listener failed: $error');
+      },
+    );
+    _initialized = true;
+    if (_supabase.auth.currentUser == null) {
+      _signedOutStartupCleanup = _runSignedOutStartupCleanup();
+      unawaited(_signedOutStartupCleanup);
     }
   }
 
@@ -470,6 +517,10 @@ class NotificationService {
   }) async {
     if (kIsWeb) return;
 
+    final startupCleanup = _signedOutStartupCleanup;
+    if (startupCleanup != null) await startupCleanup;
+    _signedOutStartupCleanup = null;
+    await _cleanupPreviousAccountIfNeeded(userId);
     final firstPromptThisSession = _startupPermissionUsers.add(userId);
     if (firstPromptThisSession) {
       final canUsePush = await ensurePushPermission();
@@ -651,6 +702,14 @@ class NotificationService {
     final cleanEntityId = entityId?.trim() ?? '';
     final normalizedType = normalizeNotificationType(type ?? '');
 
+    // Invitation rows use the delivery-run id as their deduplication entity,
+    // while the signed route carries the actual room id. Never reinterpret the
+    // run id as a room id when opening the notification.
+    if (normalizedType == 'grace_room_invitation') {
+      final invitationRoute = normalizeRoute(route);
+      if (invitationRoute != null) return invitationRoute;
+    }
+
     if (cleanEntityTable == 'community_posts' ||
         cleanEntityTable == 'community_comments' ||
         normalizedType == 'community_reaction' ||
@@ -681,19 +740,9 @@ class NotificationService {
       ).toString();
     }
 
-    if ((cleanEntityTable == 'grace_circles' ||
-            cleanEntityTable == 'grace_circle_posts' ||
-            normalizedType == 'circle_invitation' ||
-            normalizedType == 'circle_post') &&
-        cleanEntityId.isNotEmpty) {
-      return Uri(
-        path: '/grace_circles/circle',
-        queryParameters: {'id': cleanEntityId},
-      ).toString();
-    }
-
     if ((cleanEntityTable == 'grace_rooms' ||
             cleanEntityTable == 'grace_room_messages' ||
+            normalizedType == 'grace_room_invitation' ||
             normalizedType == 'grace_support_offer' ||
             normalizedType == 'grace_support_response') &&
         cleanEntityId.isNotEmpty) {
@@ -875,20 +924,34 @@ class NotificationService {
   }
 
   Future<void> sendMembershipRequestPush(String membershipId) async {
+    await _sendMembershipPush(membershipId, event: 'request');
+  }
+
+  Future<void> sendMembershipApprovedPush(String membershipId) async {
+    await _sendMembershipPush(membershipId, event: 'approved');
+  }
+
+  Future<void> _sendMembershipPush(
+    String membershipId, {
+    required String event,
+  }) async {
     final cleanMembershipId = membershipId.trim();
     if (kIsWeb || cleanMembershipId.isEmpty) return;
 
     try {
       final response = await _supabase.functions.invoke(
         'send-membership-request-push',
-        body: {'membershipId': cleanMembershipId},
+        body: {
+          'membershipId': cleanMembershipId,
+          'event': event,
+        },
       ).timeout(const Duration(seconds: 12));
       final data = response.data;
       if (data is Map && data['ok'] == false) {
-        debugPrint('Membership request push queued with warning: $data');
+        debugPrint('Membership $event push queued with warning: $data');
       }
     } catch (error) {
-      debugPrint('Membership request push skipped: $error');
+      debugPrint('Membership $event push skipped: $error');
     }
   }
 
@@ -1103,16 +1166,32 @@ class NotificationService {
     return await _messaging.getToken();
   }
 
-  Future<void> subscribeToTopic(String topic) async {
-    if (kIsWeb) return;
-    await _messaging.subscribeToTopic(topic);
-    debugPrint("Subscribed to topic: $topic");
+  Future<bool> subscribeToTopic(String topic) async {
+    if (kIsWeb || topic.trim().isEmpty) return false;
+    final cleanTopic = topic.trim();
+    try {
+      await _messaging.subscribeToTopic(cleanTopic);
+      await _rememberTopicSubscription(cleanTopic, subscribed: true);
+      debugPrint('Subscribed to topic: $cleanTopic');
+      return true;
+    } catch (error) {
+      debugPrint('Topic subscription deferred ($cleanTopic): $error');
+      return false;
+    }
   }
 
-  Future<void> unsubscribeFromTopic(String topic) async {
-    if (kIsWeb) return;
-    await _messaging.unsubscribeFromTopic(topic);
-    debugPrint("Unsubscribed from topic: $topic");
+  Future<bool> unsubscribeFromTopic(String topic) async {
+    if (kIsWeb || topic.trim().isEmpty) return false;
+    final cleanTopic = topic.trim();
+    try {
+      await _messaging.unsubscribeFromTopic(cleanTopic);
+      await _rememberTopicSubscription(cleanTopic, subscribed: false);
+      debugPrint('Unsubscribed from topic: $cleanTopic');
+      return true;
+    } catch (error) {
+      debugPrint('Topic unsubscribe deferred ($cleanTopic): $error');
+      return false;
+    }
   }
 
   Future<void> unsubscribeFromChurchTopics(String churchId) async {
@@ -1124,19 +1203,162 @@ class NotificationService {
     }
   }
 
-  Future<void> unsubscribeAlwaysOnTopics({String? userId}) async {
+  Future<void> unsubscribeAlwaysOnTopics({
+    String? userId,
+    String? churchId,
+  }) async {
     if (kIsWeb) return;
-    await unsubscribeFromTopic(appWideTopic);
-    final cleanUserId = userId?.trim() ?? '';
+    await _disableCurrentPushDevice();
+
+    final prefs = await SharedPreferences.getInstance();
+    final topics = await _storedSubscribedTopics();
+    topics.add(appWideTopic);
+    final rememberedUserId = prefs.getString(_registeredUserKey)?.trim() ?? '';
+    final cleanUserId = (userId?.trim().isNotEmpty ?? false)
+        ? userId!.trim()
+        : rememberedUserId;
     if (cleanUserId.isNotEmpty) {
-      await unsubscribeFromTopic(userTopicFor(cleanUserId));
+      topics.add(userTopicFor(cleanUserId));
     }
+    final cleanChurchId = churchId?.trim() ?? '';
+    if (cleanChurchId.isNotEmpty) {
+      topics.add('church_$cleanChurchId');
+      topics.add('church_${cleanChurchId}_leaders');
+      for (final suffix in topicMap.keys) {
+        topics.add('church_${cleanChurchId}_$suffix');
+      }
+    }
+
+    // Keep the marker until every content topic has been removed. Otherwise a
+    // signed-out installation could become eligible for the legacy fallback in
+    // the middle of cleanup.
+    final contentTopics = topics
+        .where((topic) => topic != _registeredDeliveryTopic)
+        .toList()
+      ..sort();
+    for (final topic in contentTopics) {
+      await _retryTopicChange(topic, subscribe: false);
+    }
+    await _retryTopicChange(_registeredDeliveryTopic, subscribe: false);
+
+    final remainingTopics = await _storedSubscribedTopics();
+    if (remainingTopics.isEmpty) {
+      await prefs.remove(_registeredUserKey);
+    }
+    _lastPushTopics = const {};
+  }
+
+  Future<void> _cleanupPreviousAccountIfNeeded(String currentUserId) async {
+    final cleanCurrentUserId = currentUserId.trim();
+    if (cleanCurrentUserId.isEmpty) return;
+    final prefs = await SharedPreferences.getInstance();
+    final previousUserId = prefs.getString(_registeredUserKey)?.trim() ?? '';
+    if (previousUserId.isEmpty || previousUserId == cleanCurrentUserId) return;
+
+    await unsubscribeAlwaysOnTopics(userId: previousUserId);
+  }
+
+  Future<void> _runSignedOutStartupCleanup() async {
+    try {
+      await unsubscribeAlwaysOnTopics();
+    } catch (error) {
+      debugPrint('Signed-out push cleanup will retry next launch: $error');
+    }
+  }
+
+  Future<void> _unsubscribeStoredTopicsOutside(
+      Set<String> desiredTopics) async {
+    final storedTopics = await _storedSubscribedTopics();
+    final staleTopics = storedTopics
+        .where((topic) =>
+            topic != _registeredDeliveryTopic && !desiredTopics.contains(topic))
+        .toList()
+      ..sort();
+    for (final topic in staleTopics) {
+      await _retryTopicChange(topic, subscribe: false);
+    }
+  }
+
+  Future<bool> _retryTopicChange(
+    String topic, {
+    required bool subscribe,
+  }) async {
+    for (var attempt = 0; attempt < 2; attempt++) {
+      final succeeded = subscribe
+          ? await subscribeToTopic(topic)
+          : await unsubscribeFromTopic(topic);
+      if (succeeded) return true;
+      if (attempt == 0) {
+        await Future<void>.delayed(const Duration(milliseconds: 250));
+      }
+    }
+    return false;
+  }
+
+  Future<Set<String>> _storedSubscribedTopics() async {
+    await _topicPersistenceChain;
+    final prefs = await SharedPreferences.getInstance();
+    return (prefs.getStringList(_subscribedTopicsKey) ?? const <String>[])
+        .map((topic) => topic.trim())
+        .where((topic) => topic.isNotEmpty)
+        .toSet();
+  }
+
+  Future<void> _rememberTopicSubscription(
+    String topic, {
+    required bool subscribed,
+  }) {
+    _topicPersistenceChain = _topicPersistenceChain.then((_) async {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final topics =
+            (prefs.getStringList(_subscribedTopicsKey) ?? const <String>[])
+                .toSet();
+        if (subscribed) {
+          topics.add(topic);
+        } else {
+          topics.remove(topic);
+        }
+        final sortedTopics = topics.toList()..sort();
+        if (sortedTopics.isEmpty) {
+          await prefs.remove(_subscribedTopicsKey);
+        } else {
+          await prefs.setStringList(_subscribedTopicsKey, sortedTopics);
+        }
+      } catch (error) {
+        debugPrint('Push topic state persistence skipped: $error');
+      }
+    });
+    return _topicPersistenceChain;
+  }
+
+  Future<_PushInstallationCredentials> _installationCredentials() async {
+    final prefs = await SharedPreferences.getInstance();
+    var installationId = prefs.getString(_installationIdKey)?.trim() ?? '';
+    var unregisterSecret = prefs.getString(_unregisterSecretKey)?.trim() ?? '';
+    final uuidPattern = RegExp(
+      r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$',
+    );
+    if (!uuidPattern.hasMatch(installationId)) {
+      installationId = const Uuid().v4();
+      await prefs.setString(_installationIdKey, installationId);
+    }
+    if (unregisterSecret.length < 20) {
+      unregisterSecret = '${const Uuid().v4()}${const Uuid().v4()}';
+      await prefs.setString(_unregisterSecretKey, unregisterSecret);
+    }
+    return _PushInstallationCredentials(
+      installationId: installationId,
+      unregisterSecret: unregisterSecret,
+    );
   }
 
   /// Syncs user subscriptions based on SharedPreferences and Church ID
   Future<void> syncSubscriptions(
     String churchId, {
     String? userId,
+    // Retained for released call sites. Leader delivery is authorized by the
+    // server RPC below, never by these denormalized client profile values.
     Iterable<String> roles = const [],
     Iterable<String> privileges = const [],
   }) async {
@@ -1144,25 +1366,41 @@ class NotificationService {
 
     final prefs = await SharedPreferences.getInstance();
     final canUsePush = await hasPushPermission();
+    final desiredTopics = <String>{};
+    if (canUsePush) {
+      desiredTopics.add(appWideTopic);
+      final cleanUserId = userId?.trim() ?? '';
+      if (cleanUserId.isNotEmpty) {
+        desiredTopics.add(userTopicFor(cleanUserId));
+      }
+    }
     await _syncAlwaysOnTopics(canUsePush: canUsePush, userId: userId);
 
     final cleanChurchId = churchId.trim();
-    if (cleanChurchId.isEmpty) return;
+    if (cleanChurchId.isEmpty) {
+      await _unsubscribeStoredTopicsOutside(desiredTopics);
+      await _syncPushDeviceRegistration(
+        desiredTopics,
+        canUsePush: canUsePush,
+      );
+      return;
+    }
 
     final shouldReceiveChurchWide =
         canUsePush && (prefs.getBool(churchWidePrefKey) ?? false);
     if (shouldReceiveChurchWide) {
-      await subscribeToTopic('church_$cleanChurchId');
+      final topic = 'church_$cleanChurchId';
+      desiredTopics.add(topic);
+      await subscribeToTopic(topic);
     } else {
       await unsubscribeFromTopic('church_$cleanChurchId');
     }
 
     final leaderTopic = 'church_${cleanChurchId}_leaders';
-    if (canUsePush &&
-        canReceiveLeaderMembershipPush(
-          roles: roles,
-          privileges: privileges,
-        )) {
+    final canManageMembers =
+        canUsePush && await _canManageChurchMembers(cleanChurchId);
+    if (canManageMembers) {
+      desiredTopics.add(leaderTopic);
       await subscribeToTopic(leaderTopic);
     } else {
       await unsubscribeFromTopic(leaderTopic);
@@ -1178,11 +1416,164 @@ class NotificationService {
       String fullTopic = 'church_${cleanChurchId}_$topicSuffix';
 
       if (shouldSubscribe) {
+        desiredTopics.add(fullTopic);
         await subscribeToTopic(fullTopic);
       } else {
         await unsubscribeFromTopic(fullTopic);
       }
     }
+
+    await _unsubscribeStoredTopicsOutside(desiredTopics);
+    await _syncPushDeviceRegistration(
+      desiredTopics,
+      canUsePush: canUsePush,
+    );
+  }
+
+  Future<bool> _canManageChurchMembers(String churchId) async {
+    if (_supabase.auth.currentUser == null || churchId.trim().isEmpty) {
+      return false;
+    }
+    try {
+      final result = await _supabase.rpc(
+        'can_manage_church_members',
+        params: {'target_church_id': churchId.trim()},
+      ).timeout(const Duration(seconds: 8));
+      return result == true;
+    } catch (error) {
+      debugPrint('Membership push capability check failed closed: $error');
+      return false;
+    }
+  }
+
+  Future<void> _syncPushDeviceRegistration(
+    Set<String> topics, {
+    required bool canUsePush,
+  }) async {
+    _lastPushTopics = Set<String>.unmodifiable(topics);
+    if (!canUsePush) {
+      await _disableCurrentPushDevice();
+      await _retryTopicChange(_registeredDeliveryTopic, subscribe: false);
+      return;
+    }
+
+    final registered = await _registerCurrentPushDevice(topics: topics);
+    if (registered) {
+      final markerSubscribed = await _retryTopicChange(
+        _registeredDeliveryTopic,
+        subscribe: true,
+      );
+      if (!markerSubscribed) {
+        // Keep token delivery active. A missing marker can cause replacement of
+        // the same tagged notification through the fallback, while removing the
+        // registration here could lose the notification altogether.
+        debugPrint(
+          'Registered delivery marker unavailable; token delivery remains active.',
+        );
+      }
+    } else {
+      // The marker excludes registered installations from the legacy topic
+      // fallback. Never keep it when registration failed.
+      final markerRemoved = await _retryTopicChange(
+        _registeredDeliveryTopic,
+        subscribe: false,
+      );
+      if (!markerRemoved) {
+        debugPrint(
+          'Push fallback marker could not be removed; delivery will retry at the next sync.',
+        );
+      }
+    }
+  }
+
+  Future<void> _refreshPushRegistration(String token) async {
+    if (kIsWeb || _lastPushTopics.isEmpty) return;
+    final registered = await _registerCurrentPushDevice(
+      token: token,
+      topics: _lastPushTopics,
+    );
+    if (registered) {
+      await _retryTopicChange(_registeredDeliveryTopic, subscribe: true);
+    } else {
+      await _retryTopicChange(_registeredDeliveryTopic, subscribe: false);
+    }
+  }
+
+  Future<bool> _registerCurrentPushDevice({
+    String? token,
+    required Set<String> topics,
+  }) async {
+    if (kIsWeb || _supabase.auth.currentUser == null) return false;
+
+    try {
+      final cleanToken = (token ?? await _messaging.getToken())?.trim() ?? '';
+      if (cleanToken.isEmpty) return false;
+      final credentials = await _installationCredentials();
+      final packageInfo = await PackageInfo.fromPlatform();
+      await _supabase.rpc(
+        'register_push_device',
+        params: {
+          'p_token': cleanToken,
+          'p_platform': _pushPlatformName(),
+          'p_app_version': '${packageInfo.version}+${packageInfo.buildNumber}',
+          'p_topics': topics.toList()..sort(),
+          'p_installation_id': credentials.installationId,
+          'p_unregister_secret': credentials.unregisterSecret,
+        },
+      ).timeout(const Duration(seconds: 12));
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        _registeredUserKey,
+        _supabase.auth.currentUser!.id,
+      );
+      await prefs.setString(_registeredTokenKey, cleanToken);
+      return true;
+    } catch (error) {
+      debugPrint('Push device registration unavailable; using topics: $error');
+      return false;
+    }
+  }
+
+  Future<bool> _disableCurrentPushDevice() async {
+    if (kIsWeb) return false;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final currentToken = (await _messaging.getToken())?.trim() ?? '';
+      final rememberedToken =
+          prefs.getString(_registeredTokenKey)?.trim() ?? '';
+      final candidateTokens = {currentToken, rememberedToken}
+        ..removeWhere((token) => token.isEmpty);
+      if (candidateTokens.isEmpty) return false;
+      final credentials = await _installationCredentials();
+      var disabled = false;
+      for (final token in candidateTokens) {
+        final result = await _supabase.rpc(
+          'unregister_push_device',
+          params: {
+            'p_token': token,
+            'p_installation_id': credentials.installationId,
+            'p_unregister_secret': credentials.unregisterSecret,
+          },
+        ).timeout(const Duration(seconds: 8));
+        disabled = disabled || result == true;
+      }
+      if (disabled) await prefs.remove(_registeredTokenKey);
+      return disabled;
+    } catch (error) {
+      debugPrint('Push device unregister skipped: $error');
+      return false;
+    }
+  }
+
+  String _pushPlatformName() {
+    return switch (defaultTargetPlatform) {
+      TargetPlatform.android => 'android',
+      TargetPlatform.iOS => 'ios',
+      TargetPlatform.macOS => 'macos',
+      TargetPlatform.windows => 'windows',
+      TargetPlatform.linux => 'linux',
+      TargetPlatform.fuchsia => 'unknown',
+    };
   }
 
   Future<void> _syncAlwaysOnTopics({
@@ -1275,40 +1666,5 @@ class NotificationService {
 
   String _routeNotificationTag(String route) {
     return 'route:${route.trim()}';
-  }
-
-  @visibleForTesting
-  static bool canReceiveLeaderMembershipPush({
-    required Iterable<String> roles,
-    required Iterable<String> privileges,
-  }) {
-    final normalizedRoles = roles.map(_normalizeAccessValue).toSet();
-    final normalizedPrivileges = privileges.map(_normalizeAccessValue).toSet();
-    const leaderRoles = {
-      'pastor',
-      'seniorpastor',
-      'assistantpastor',
-      'actingpastor',
-      'churchadmin',
-      'admin',
-      'administrator',
-      'secretary',
-      'churchsecretary',
-    };
-    const leaderPrivileges = {
-      'approvemembers',
-      'managechurchsettings',
-      'manageroles',
-    };
-    return normalizedRoles.any(leaderRoles.contains) ||
-        normalizedPrivileges.any(leaderPrivileges.contains);
-  }
-
-  static String _normalizeAccessValue(String value) {
-    return value
-        .trim()
-        .toLowerCase()
-        .replaceAll('&', 'and')
-        .replaceAll(RegExp(r'[^a-z0-9]+'), '');
   }
 }

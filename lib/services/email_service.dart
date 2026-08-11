@@ -1,80 +1,44 @@
 import 'dart:convert';
-import 'package:http/http.dart' as http;
 import 'package:flutter/foundation.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class EmailService {
-  static const String _fromEmail = String.fromEnvironment(
-    'RESEND_FROM_EMAIL',
-    defaultValue: 'Grace Connect <noreply@graceconnect.love>',
-  );
   static const String supportInbox = 'shamzbiz1@gmail.com';
-  static const String _resendApiKey = String.fromEnvironment(
-    'RESEND_API_KEY',
-    defaultValue: '',
-  );
-  static const String _apiUrl = 'https://api.resend.com/emails';
   static const String _brandingMarker = 'data-grace-email="true"';
 
-  /// Core method to send an email via Resend API
+  /// Sends through the authenticated server mailer. Provider credentials must
+  /// never be compiled into the Android or iOS application.
   Future<void> sendEmail({
     required List<String> to,
     required String subject,
     required String htmlBody,
-    String? from,
   }) async {
     try {
-      if (_resendApiKey.isEmpty) {
-        throw Exception(
-          'Missing RESEND_API_KEY. Build or run the app with --dart-define=RESEND_API_KEY.',
-        );
-      }
-
       final emailHtml = htmlBody.contains(_brandingMarker)
           ? htmlBody
           : _brandHtmlBody(title: subject, htmlBody: htmlBody);
-
-      final response = await http.post(
-        Uri.parse(_apiUrl),
-        headers: {
-          'Authorization': 'Bearer $_resendApiKey',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({
-          'from': from ?? _fromEmail,
+      final response = await Supabase.instance.client.functions.invoke(
+        'grace-mailer',
+        body: {
+          'action': 'send-app-email',
           'to': to,
           'subject': subject,
-          'html': emailHtml,
-        }),
+          'htmlBody': emailHtml,
+        },
       );
-
-      if (response.statusCode >= 200 && response.statusCode < 300) {
-        debugPrint('Email sent successfully: ${response.body}');
-      } else {
-        throw Exception(_formatResendError(response));
+      final data = response.data;
+      if (data is! Map || data['ok'] != true) {
+        throw Exception(
+          data is Map
+              ? data['error']?.toString() ?? 'Email delivery was not confirmed.'
+              : 'Email delivery was not confirmed.',
+        );
       }
+      debugPrint('Email delivered by the Grace Connect server mailer.');
     } catch (e) {
       debugPrint('Error sending email: $e');
       throw Exception(e.toString().replaceFirst('Exception: ', ''));
     }
-  }
-
-  String _formatResendError(http.Response response) {
-    var message = response.body;
-    try {
-      final decoded = jsonDecode(response.body);
-      if (decoded is Map<String, dynamic>) {
-        message = decoded['message']?.toString() ?? response.body;
-      }
-    } catch (_) {
-      // Keep the raw body when Resend returns non-JSON output.
-    }
-
-    if (response.statusCode == 403 &&
-        message.toLowerCase().contains('domain is not verified')) {
-      return 'Resend rejected the sender domain. Verify the sender domain in Resend or build with --dart-define=RESEND_FROM_EMAIL using a verified sender.';
-    }
-
-    return 'Failed to send email. Status Code: ${response.statusCode}, Body: $message';
   }
 
   String _escape(String value) => const HtmlEscape().convert(value);
@@ -87,25 +51,25 @@ class EmailService {
     return '''
       <!doctype html>
       <html>
-        <body style="margin:0;padding:0;background:#eef5f8;font-family:Arial,Helvetica,sans-serif;color:#162033;">
+        <body style="margin:0;padding:0;background:#f7f3ea;font-family:Arial,Helvetica,sans-serif;color:#263852;">
           <div $_brandingMarker style="display:none;max-height:0;overflow:hidden;opacity:0;">Grace Connect</div>
-          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#eef5f8;padding:32px 12px;">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f7f3ea;padding:32px 12px;">
             <tr>
               <td align="center">
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:640px;background:#ffffff;border-radius:20px;overflow:hidden;border:1px solid #d8e5ea;box-shadow:0 14px 36px rgba(13,40,54,0.12);">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:640px;background:#ffffff;border-radius:20px;overflow:hidden;border:1px solid #eadcb6;box-shadow:0 14px 36px rgba(13,31,76,0.12);">
                   <tr>
-                    <td style="background:#0b5c7d;padding:28px 32px;color:#ffffff;">
-                      <div style="font-size:13px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#bfe7f7;">Grace Connect</div>
+                    <td style="background:#0d1f4c;padding:28px 32px;color:#ffffff;">
+                      <div style="font-size:13px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#e5bd53;">Grace Connect</div>
                       <h1 style="margin:8px 0 0;font-size:28px;line-height:1.2;font-weight:800;">$safeTitle</h1>
                     </td>
                   </tr>
                   <tr>
-                    <td style="padding:30px 32px;font-size:16px;line-height:1.6;color:#162033;">
+                    <td style="padding:30px 32px;font-size:16px;line-height:1.65;color:#263852;">
                       $htmlBody
                     </td>
                   </tr>
                   <tr>
-                    <td style="padding:20px 32px;background:#f7fafb;color:#66788a;font-size:13px;line-height:1.5;">
+                    <td style="padding:20px 32px;background:#fbf8f0;border-top:1px solid #eadcb6;color:#69768b;font-size:13px;line-height:1.5;">
                       You are receiving this from Grace Connect because of activity in your church community.
                     </td>
                   </tr>
@@ -224,13 +188,11 @@ class EmailService {
         .toSet()
         .toList();
 
-    for (final email in uniqueEmails) {
-      await sendEmail(
-        to: [email],
-        subject: subject,
-        htmlBody: htmlBody,
-      );
-    }
+    await sendEmail(
+      to: uniqueEmails,
+      subject: subject,
+      htmlBody: htmlBody,
+    );
   }
 
   /// Sends an invitation email to a new member

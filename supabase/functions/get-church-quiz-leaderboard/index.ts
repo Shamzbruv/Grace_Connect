@@ -103,12 +103,12 @@ Deno.serve(async (request) => {
         a.member_id.localeCompare(b.member_id)
       )
       .map((entry, index) => {
-        const member = userMap.get(entry.member_id) ?? {};
+        const member = (userMap.get(entry.member_id) ?? {}) as Record<string, unknown>;
         return {
           rank: index + 1,
           member_id: entry.member_id,
           display_name: profileDisplayName(member),
-          photo_url: member.photoUrl ?? "",
+          photo_url: String(member.photoUrl ?? ""),
           total_points: entry.total_score,
           correct_answers: entry.correct_answers,
           perfect_quizzes: entry.perfect_quizzes,
@@ -119,14 +119,14 @@ Deno.serve(async (request) => {
 
     const currentMember = entries.find((entry) => entry.member_id === user.id) ?? null;
     const winners = (winnerRows ?? []).map((winner) => {
-      const member = userMap.get(String(winner.member_id)) ?? {};
+      const member = (userMap.get(String(winner.member_id)) ?? {}) as Record<string, unknown>;
       return {
         id: winner.id,
         rank: winner.rank,
         quiz_month: winner.quiz_month,
         member_id: winner.member_id,
         display_name: profileDisplayName(member),
-        photo_url: member.photoUrl ?? "",
+        photo_url: String(member.photoUrl ?? ""),
         total_points: winner.total_points,
         correct_answers: winner.correct_answers,
         perfect_quizzes: winner.perfect_quizzes,

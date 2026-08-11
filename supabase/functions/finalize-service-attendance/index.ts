@@ -90,7 +90,8 @@ function jamaicaDateInfo(daysBack = 0) {
     minute: "2-digit",
     hourCycle: "h23",
   }).formatToParts(base);
-  const value = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+  const value = (type: string) =>
+    parts.find((part) => part.type === type)?.value ?? "";
   const weekdayMap: Record<string, number> = {
     Mon: 1,
     Tue: 2,
@@ -121,7 +122,8 @@ function serviceClosedAtUtc(
 ): Date | null {
   const endMinutes = parseTimeToMinutes(schedule.endTime);
   if (endMinutes == null) return null;
-  const closeMinutes = endMinutes + Number(schedule.checkInClosesMinutesAfter ?? 30);
+  const closeMinutes = endMinutes +
+    Number(schedule.checkInClosesMinutesAfter ?? 30);
   const closedAt = new Date(`${isoDate}T05:00:00.000Z`);
   closedAt.setUTCMinutes(closedAt.getUTCMinutes() + closeMinutes);
   return closedAt;
@@ -133,21 +135,14 @@ function scheduleIsPastDue(
 ): boolean {
   const endMinutes = parseTimeToMinutes(schedule.endTime);
   if (endMinutes == null) return false;
-  const closeMinutes = endMinutes + Number(schedule.checkInClosesMinutesAfter ?? 30);
+  const closeMinutes = endMinutes +
+    Number(schedule.checkInClosesMinutesAfter ?? 30);
   return info.daysBack > 0 || info.minuteOfDay > closeMinutes;
 }
 
 function memberUserId(member: MemberRow): string {
-  return String(member.uid ?? member.id ?? "").trim();
-}
-
-function memberDisplayName(member: MemberRow): string {
-  const name = String(member.fullName ?? "").trim();
-  return name || "Member";
-}
-
-function memberPhotoUrl(member: MemberRow): string {
-  return String(member.photoUrl ?? "").trim();
+  const uid = String(member.uid ?? "").trim();
+  return uid || String(member.id ?? "").trim();
 }
 
 function memberJoinDate(member: MemberRow): Date | null {
@@ -161,142 +156,96 @@ function isSundaySchool(schedule: ServiceScheduleRow): boolean {
 
 function isLeader(member: MemberRow): boolean {
   const roles = Array.isArray(member.roles) ? member.roles : [];
-  const privileges = Array.isArray(member.appPrivileges) ? member.appPrivileges : [];
+  const privileges = Array.isArray(member.appPrivileges)
+    ? member.appPrivileges
+    : [];
   return roles.some((role) => leaderRoles.has(normalizeRole(String(role)))) ||
     privileges.some((privilege) => leaderPrivileges.has(String(privilege)));
 }
 
-async function fetchAbsenceThresholdWeeks(client: ReturnType<typeof serviceClient>, churchId: string) {
-  const { data } = await client
-    .from("church_attendance_alert_settings")
-    .select("absence_threshold_weeks")
-    .eq("church_id", churchId)
-    .maybeSingle();
-  const raw = Number(data?.absence_threshold_weeks ?? 2);
-  if (!Number.isFinite(raw)) return 2;
-  return Math.max(1, Math.min(26, Math.trunc(raw)));
-}
+const uuidPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-async function latestPresentAttendanceDate(
+async function sendSundaySchoolReport(
   client: ReturnType<typeof serviceClient>,
   churchId: string,
-  primaryUserId: string,
-  alternateUserId?: string,
-) {
-  const userIds = Array.from(
-    new Set([primaryUserId, alternateUserId].map((id) => String(id ?? "").trim()).filter(Boolean)),
+  serviceId: string,
+  serviceDate: string,
+  leaders: MemberRow[],
+): Promise<number> {
+  const leaderIds = Array.from(
+    new Set(
+      leaders.map(memberUserId).filter((userId) => uuidPattern.test(userId)),
+    ),
   );
-  if (userIds.length === 0) return null;
+  if (leaderIds.length === 0) return 0;
 
-  const { data } = await client
-    .from("attendance")
-    .select("timestamp")
-    .eq("church_id", churchId)
-    .eq("present", true)
-    .in("user_id", userIds)
-    .order("timestamp", { ascending: false })
-    .limit(1);
-
-  const timestamp = String(data?.[0]?.timestamp ?? "");
-  const parsed = new Date(timestamp);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
-}
-
-async function syncCareAlertForMember(params: {
-  client: ReturnType<typeof serviceClient>;
-  churchId: string;
-  member: MemberRow;
-  thresholdWeeks: number;
-  asOf: Date;
-}) {
-  const { client, churchId, member, thresholdWeeks, asOf } = params;
-  const primaryUserId = memberUserId(member);
-  if (!primaryUserId) return false;
-
-  const lastPresentDate = await latestPresentAttendanceDate(
-    client,
-    churchId,
-    primaryUserId,
-    String(member.id ?? "").trim(),
+  const { data: created, error } = await client.rpc(
+    "send_attendance_finalized_report",
+    {
+      p_church_id: churchId,
+      p_service_id: serviceId,
+      p_service_date: serviceDate,
+      p_leader_ids: leaderIds,
+    },
   );
-  const baseline = lastPresentDate ?? memberJoinDate(member) ?? asOf;
-  const daysAbsent = Math.max(
-    0,
-    Math.floor((asOf.getTime() - baseline.getTime()) / (24 * 60 * 60 * 1000)),
-  );
-  const weeksAbsent = daysAbsent <= 0 ? 0 : Math.floor(daysAbsent / 7);
-
-  const { data: existingRows } = await client
-    .from("priority_follow_ups")
-    .select("id")
-    .eq("churchId", churchId)
-    .eq("userId", primaryUserId)
-    .eq("status", "open")
-    .limit(1);
-  const existingId = String(existingRows?.[0]?.id ?? "").trim();
-
-  if (weeksAbsent >= thresholdWeeks) {
-    const payload = {
-      userId: primaryUserId,
-      userName: memberDisplayName(member),
-      userPhotoUrl: memberPhotoUrl(member),
-      churchId,
-      absenceStreakWeeks: weeksAbsent,
-      lastAttendedDate: lastPresentDate?.toISOString() ?? null,
-      status: "open",
-      updatedAt: new Date().toISOString(),
-    };
-    if (existingId) {
-      await client.from("priority_follow_ups").update(payload).eq("id", existingId);
-    } else {
-      await client.from("priority_follow_ups").insert({
-        ...payload,
-        flaggedAt: new Date().toISOString(),
-        createdAt: new Date().toISOString(),
-      });
-    }
-    return true;
+  if (error) {
+    console.error(
+      `Could not create Sunday School report for ${churchId}/${serviceId}/${serviceDate}:`,
+      error,
+    );
+    return 0;
   }
-
-  if (existingId) {
-    await client.from("priority_follow_ups").update({
-      status: "resolved",
-      resolvedAt: new Date().toISOString(),
-      resolvedBy: null,
-      updatedAt: new Date().toISOString(),
-    }).eq("id", existingId);
-    return true;
-  }
-
-  return false;
+  return Number(created ?? 0);
 }
 
 Deno.serve(async (request) => {
   const options = handleOptions(request);
   if (options) return options;
-  if (request.method !== "POST") return jsonResponse({ error: "POST required." }, 405);
+  if (request.method !== "POST") {
+    return jsonResponse({ error: "POST required." }, 405);
+  }
 
   const forbidden = requireCronSecret(request, "ATTENDANCE_CRON_SECRET");
   if (forbidden) return forbidden;
 
   const client = serviceClient();
-  const body = await request.json().catch(() => ({})) as Record<string, unknown>;
+  const body = await request.json().catch(() => ({})) as Record<
+    string,
+    unknown
+  >;
   const requestedChurchId = String(body.church_id ?? "").trim();
 
   let churchIds: string[] = [];
   if (requestedChurchId) {
     churchIds = [requestedChurchId];
   } else {
-    const { data: churchRows } = await client
+    const { data: membershipChurchRows } = await client
       .from("church_memberships")
       .select("church_id")
       .eq("membership_status", "active");
+    const { data: scheduleChurchRows } = await client
+      .from("service_schedules")
+      .select("churchId")
+      .eq("attendanceEnabled", true);
     churchIds = Array.from(
-      new Set((churchRows ?? []).map((row) => String(row.church_id ?? "").trim()).filter(Boolean)),
+      new Set([
+        ...(membershipChurchRows ?? []).map((row) =>
+          String(row.church_id ?? "").trim()
+        ),
+        ...(scheduleChurchRows ?? []).map((row) =>
+          String(row.churchId ?? "").trim()
+        ),
+      ].filter(Boolean)),
     );
   }
 
-  const targetDates = [jamaicaDateInfo(0), jamaicaDateInfo(1)];
+  // Catch up after outages or a missing cron run instead of permanently
+  // skipping members who did not sign in on older service days.
+  const targetDates = Array.from(
+    { length: 15 },
+    (_, daysBack) => jamaicaDateInfo(daysBack),
+  );
   let servicesChecked = 0;
   let servicesFinalized = 0;
   let absencesCreated = 0;
@@ -304,28 +253,49 @@ Deno.serve(async (request) => {
   let careAlertsUpdated = 0;
 
   for (const churchId of churchIds) {
-    const { data: membershipRows, error: membershipError } = await client
+    const { data: membershipRows } = await client
       .from("church_memberships")
       .select("user_id")
       .eq("church_id", churchId)
       .eq("membership_status", "active");
-    if (membershipError) continue;
 
     const memberIds = Array.from(
-      new Set((membershipRows ?? []).map((row) => String(row.user_id ?? "").trim()).filter(Boolean)),
+      new Set(
+        (membershipRows ?? []).map((row) => String(row.user_id ?? "").trim())
+          .filter(Boolean),
+      ),
     );
-    if (memberIds.length === 0) continue;
 
-    const { data: members, error: memberError } = await client
+    const memberSelect =
+      "id, uid, fullName, photoUrl, joinDate, roles, appPrivileges";
+    const { data: legacyMembers, error: legacyMemberError } = await client
       .from("users")
-      .select("id, uid, fullName, photoUrl, joinDate, roles, appPrivileges")
-      .in("id", memberIds);
-    if (memberError) continue;
+      .select(memberSelect)
+      .eq("placeId", churchId);
+    const { data: membersById, error: memberByIdError } = memberIds.length === 0
+      ? { data: [] as MemberRow[], error: null }
+      : await client.from("users").select(memberSelect).in("id", memberIds);
+    const { data: membersByUid, error: memberByUidError } =
+      memberIds.length === 0
+        ? { data: [] as MemberRow[], error: null }
+        : await client.from("users").select(memberSelect).in("uid", memberIds);
 
-    const churchMembers = (members ?? []) as MemberRow[];
+    if (legacyMemberError && memberByIdError && memberByUidError) continue;
+
+    const membersByUserId = new Map<string, MemberRow>();
+    for (
+      const member of [
+        ...(legacyMembers ?? []),
+        ...(membersById ?? []),
+        ...(membersByUid ?? []),
+      ] as MemberRow[]
+    ) {
+      const userId = memberUserId(member);
+      if (userId) membersByUserId.set(userId, member);
+    }
+    const churchMembers = Array.from(membersByUserId.values());
     if (churchMembers.length === 0) continue;
-    const absenceThresholdWeeks = await fetchAbsenceThresholdWeeks(client, churchId);
-
+    const sundaySchoolLeaders = churchMembers.filter(isLeader);
     for (const info of targetDates) {
       const { data: schedules, error: scheduleError } = await client
         .from("service_schedules")
@@ -340,22 +310,35 @@ Deno.serve(async (request) => {
         const serviceId = String(schedule.serviceId ?? "").trim();
         if (!serviceId || !scheduleIsPastDue(info, schedule)) continue;
 
-        const { data: finalized } = await client
+        const { data: finalized, error: finalizedError } = await client
           .from("attendance_finalized_services")
-          .select("church_id")
+          .select("church_id, report_sent_at")
           .eq("church_id", churchId)
           .eq("service_id", serviceId)
           .eq("service_date", info.isoDate)
           .maybeSingle();
-        if (finalized) continue;
+        if (finalizedError) continue;
+        if (finalized) {
+          if (isSundaySchool(schedule) && !finalized.report_sent_at) {
+            reportsCreated += await sendSundaySchoolReport(
+              client,
+              churchId,
+              serviceId,
+              info.isoDate,
+              sundaySchoolLeaders,
+            );
+          }
+          continue;
+        }
 
-        const { data: attendanceRows } = await client
+        const { data: attendanceRows, error: attendanceError } = await client
           .from("attendance")
           .select("user_id, present, status, method")
           .eq("church_id", churchId)
           .eq("service_id", serviceId)
           .gte("timestamp", info.startUtc.toISOString())
           .lt("timestamp", info.endUtc.toISOString());
+        if (attendanceError) continue;
 
         const attendanceByUserId = new Map<string, AttendanceRow>();
         for (const row of (attendanceRows ?? []) as AttendanceRow[]) {
@@ -368,15 +351,20 @@ Deno.serve(async (request) => {
         let remoteCount = 0;
         let absentCount = 0;
         const absentRows: Record<string, unknown>[] = [];
-        const timestamp = serviceClosedAtUtc(info.isoDate, schedule)?.toISOString() ??
-          new Date().toISOString();
+        const timestamp =
+          serviceClosedAtUtc(info.isoDate, schedule)?.toISOString() ??
+            new Date().toISOString();
 
         for (const member of churchMembers) {
           const primaryUserId = memberUserId(member);
           const alternateUserId = String(member.id ?? "").trim();
           if (!primaryUserId) continue;
+          const joinedAt = memberJoinDate(member);
+          if (joinedAt && joinedAt >= info.endUtc) continue;
           const attendance = attendanceByUserId.get(primaryUserId) ||
-            (alternateUserId ? attendanceByUserId.get(alternateUserId) : undefined);
+            (alternateUserId
+              ? attendanceByUserId.get(alternateUserId)
+              : undefined);
 
           if (!attendance) {
             absentCount++;
@@ -407,68 +395,49 @@ Deno.serve(async (request) => {
         }
 
         if (absentRows.length > 0) {
-          const { error: insertError } = await client.from("attendance").insert(absentRows);
-          if (!insertError) absencesCreated += absentRows.length;
+          const { data: insertedCount, error: insertError } = await client.rpc(
+            "insert_absent_attendance_rows",
+            { p_rows: absentRows },
+          );
+          // Never mark a service finalized if its absences were not saved;
+          // otherwise that service can never be repaired by a later cron run.
+          if (insertError) continue;
+          absencesCreated += Number(insertedCount ?? 0);
         }
 
-        await client.from("attendance_finalized_services").upsert({
-          church_id: churchId,
-          service_id: serviceId,
-          service_date: info.isoDate,
-          service_name: schedule.name ?? "Church Service",
-          present_count: presentCount,
-          late_count: lateCount,
-          remote_count: remoteCount,
-          absent_count: absentCount,
-          finalized_at: new Date().toISOString(),
-        }, { onConflict: "church_id,service_id,service_date" });
+        const { data: markerInserted, error: finalizeError } = await client.rpc(
+          "finalize_attendance_service",
+          {
+            p_church_id: churchId,
+            p_service_id: serviceId,
+            p_service_date: info.isoDate,
+            p_service_name: schedule.name ?? "Church Service",
+          },
+        );
+        // Do not send duplicate reports or count a service as finalized when
+        // its durable finalization marker could not be saved.
+        if (finalizeError || markerInserted !== true) continue;
         servicesFinalized++;
 
-        for (const member of churchMembers) {
-          const changed = await syncCareAlertForMember({
+        if (isSundaySchool(schedule)) {
+          reportsCreated += await sendSundaySchoolReport(
             client,
             churchId,
-            member,
-            thresholdWeeks: absenceThresholdWeeks,
-            asOf: info.endUtc,
-          });
-          if (changed) careAlertsUpdated++;
-        }
-
-        if (isSundaySchool(schedule)) {
-          const leaders = churchMembers.filter(isLeader);
-          const notificationRows = leaders
-            .map((leader) => String(leader.id ?? leader.uid ?? "").trim())
-            .filter(Boolean)
-            .map((leaderId) => ({
-              user_id: leaderId,
-              actor_id: null,
-              actor_name: "Grace Connect",
-              type: "attendance_report",
-              title: "Sunday School Attendance Ready",
-              body:
-                `${presentCount} present • ${lateCount} late • ${remoteCount} remote • ${absentCount} absent for ${info.isoDate}.`,
-              place_id: churchId,
-              entity_table: "attendance_finalized_services",
-              entity_id: `${churchId}:${serviceId}:${info.isoDate}`,
-              route: "/attendance_insights",
-            }));
-          if (notificationRows.length > 0) {
-            const { error: notifyError } = await client
-              .from("notifications")
-              .insert(notificationRows);
-            if (!notifyError) {
-              reportsCreated += notificationRows.length;
-              await client
-                .from("attendance_finalized_services")
-                .update({ report_sent_at: new Date().toISOString() })
-                .eq("church_id", churchId)
-                .eq("service_id", serviceId)
-                .eq("service_date", info.isoDate);
-            }
-          }
+            serviceId,
+            info.isoDate,
+            sundaySchoolLeaders,
+          );
         }
       }
+    }
+
+    const { data: refreshedAlertCount, error: alertRefreshError } = await client
+      .rpc("refresh_attendance_priority_list", {
+        p_church_id: churchId,
+        p_threshold_weeks: null,
+      });
+    if (!alertRefreshError) {
+      careAlertsUpdated += Number(refreshedAlertCount ?? 0);
     }
   }
 

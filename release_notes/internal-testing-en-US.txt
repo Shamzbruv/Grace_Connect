@@ -1,29 +1,13 @@
 <en-US>
-Grace Connect 1.0.19-beta messaging, media, livestream, and maps stability update:
-- Adds full inbox/message dates so conversations show when messages were sent.
-- Opens post photos and videos in a larger viewer from the post detail screen.
-- Strengthens background push delivery with app-wide and per-user FCM topics for live alerts and direct messages.
-- Sends Go Live alerts to the app-wide Grace Connect audience.
-- Adds live stream viewer counts for members and stream admins.
-- Blocks Android release builds when the final package ID or Android Maps key is missing.
-- Improves Church Geofence setup with real map error messaging, Retry Map, and manual coordinate/radius saving.
-- Keeps church admins able to save valid latitude, longitude, and radius even when map tiles cannot load.
-- Updates Grace Connect notification artwork in the Android notification shade.
-- Keeps member approval privilege fixes and Google Maps package/SHA checks in the release.
-- Fixes the direct-message/status-reply immutable map crash.
-- Allows same-church members to start messages even when cross-church messaging is restricted.
-- Lets pastors/admins view member profile details needed for care follow-up.
-- Makes feed comments load from the server immediately and refresh after posting or deleting.
-- Adds cached membership fallback for temporary backend/network membership lookup failures.
-- Adds background/data-only push notification handling.
-- Adds owner status deletion and real status video playback with retryable errors.
-- Adds real feed post video playback and safer status reply keyboard handling.
-- Hardens profile photo storage access and Android image MIME handling.
-- Opens feed/profile photos as profile/photo views instead of jumping straight to inbox or edit-photo.
-- Fixes counseling request submission by guaranteeing request IDs in app and database.
-- Sends church-wide testimony notifications and adds the testimony push type.
-- Improves feed/status video uploads, larger community media limits, inline playback, and story video preloading.
-- Sends branded password reset emails and wraps app emails in Grace Connect styling.
-- Adds localhost auth callback support for http://localhost:3000.
-- Bumps the Play version code to 21.
+Grace Connect 1.0.27-beta reliability update:
+- Fixes Bible streak counting and resets, adds evening streak reminders, and makes the leaderboard server-authoritative.
+- Fixes Bible Quiz resume/submission glitches and reduces repeated questions.
+- Adds scheduled Daily Word and quiz previews plus safe quiz refresh controls to the developer dashboard.
+- Repairs automatic attendance dwell/check-in, absence finalization, care alerts, and church-map recovery.
+- Fixes membership approval and strengthens background push delivery for Play-installed devices.
+- Adds live Grace Room presence counts and occasional room invitations.
+- Fixes black-screen/audio-only video failures, buffering/retry handling, and playback-position resets.
+- Sends app-themed support, membership, account, and security emails without embedding mail credentials in the APK.
+- Removes Grace Circles from the app and backend.
+- Bumps the Play version code to 29.
 </en-US>

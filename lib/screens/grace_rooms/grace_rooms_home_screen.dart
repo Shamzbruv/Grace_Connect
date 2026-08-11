@@ -12,16 +12,16 @@ class GraceRoomsHomeScreen extends StatefulWidget {
 
 class _GraceRoomsHomeScreenState extends State<GraceRoomsHomeScreen> {
   final GraceRoomsService _service = GraceRoomsService();
-  late Future<List<GraceRoom>> _roomsFuture;
+  late Stream<List<GraceRoom>> _roomsStream;
 
   @override
   void initState() {
     super.initState();
-    _roomsFuture = _service.fetchRooms();
+    _roomsStream = _service.watchRooms();
   }
 
   void _refresh() {
-    setState(() => _roomsFuture = _service.fetchRooms());
+    setState(() => _roomsStream = _service.watchRooms());
   }
 
   @override
@@ -42,8 +42,9 @@ class _GraceRoomsHomeScreenState extends State<GraceRoomsHomeScreen> {
             ],
           ),
         ),
-        child: FutureBuilder<List<GraceRoom>>(
-          future: _roomsFuture,
+        child: StreamBuilder<List<GraceRoom>>(
+          stream: _roomsStream,
+          initialData: GraceRoomsService.permanentRooms,
           builder: (context, snapshot) {
             final loading = snapshot.connectionState == ConnectionState.waiting;
             final rooms = (snapshot.data?.isNotEmpty == true
@@ -53,7 +54,10 @@ class _GraceRoomsHomeScreenState extends State<GraceRoomsHomeScreen> {
               ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
 
             return RefreshIndicator(
-              onRefresh: () async => _refresh(),
+              onRefresh: () async {
+                _refresh();
+                await _service.fetchRooms();
+              },
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
                 children: [
@@ -243,8 +247,12 @@ class _GraceRoomCard extends StatelessWidget {
                           ),
                           _RoomPill(
                             icon: Icons.people_outline,
-                            label: '${room.participantCount} present',
-                            color: accent,
+                            label: room.liveParticipantCount == 1
+                                ? '1 live now'
+                                : '${room.liveParticipantCount} live now',
+                            color: room.liveParticipantCount > 0
+                                ? Colors.green
+                                : accent,
                           ),
                         ],
                       ),

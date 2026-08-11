@@ -37,6 +37,7 @@ class _MembersListScreenState extends State<MembersListScreen> {
   Map<String, PriorityFollowUp> _careAlertsByUserId = {};
   bool _isLoading = true;
   bool _hasMore = true;
+  bool _careAlertsRefreshed = false;
   int _currentOffset = 0;
   static const int _limit = 20;
 
@@ -159,15 +160,55 @@ class _MembersListScreenState extends State<MembersListScreen> {
     if (churchId == null || churchId.isEmpty) return;
 
     try {
+      if (!_careAlertsRefreshed &&
+          currentUser != null &&
+          _canRefreshCareAlerts(currentUser)) {
+        _careAlertsRefreshed = true;
+        try {
+          await _attendanceAnalysisService.refreshPriorityList(churchId);
+        } catch (error) {
+          debugPrint(
+              'Could not refresh attendance care markers; using last sync: $error');
+        }
+      }
       final alerts = await _attendanceAnalysisService.getOpenFollowUpsByUserIds(
         churchId,
-        _members.map((member) => member['uid']?.toString() ?? ''),
+        _members.map(_memberIdentity),
       );
       if (!mounted) return;
       setState(() => _careAlertsByUserId = alerts);
     } catch (error) {
       debugPrint('Could not load attendance care markers: $error');
     }
+  }
+
+  bool _canRefreshCareAlerts(UserProfile user) {
+    if (user.appPrivileges.contains('managePriorityList') ||
+        user.capabilities.canManageMembersBasic) {
+      return true;
+    }
+    const roles = {
+      'pastor',
+      'senior_pastor',
+      'assistant_pastor',
+      'acting_pastor',
+      'admin',
+      'administrator',
+      'church_admin',
+    };
+    return user.roles.map((role) {
+      return role
+          .trim()
+          .toLowerCase()
+          .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+          .replaceAll(RegExp(r'_+'), '_')
+          .replaceAll(RegExp(r'^_|_$'), '');
+    }).any(roles.contains);
+  }
+
+  String _memberIdentity(Map<String, dynamic> member) {
+    final uid = member['uid']?.toString().trim() ?? '';
+    return uid.isNotEmpty ? uid : member['id']?.toString().trim() ?? '';
   }
 
   Future<void> _openMessageWithMember(Map<String, dynamic> data) async {
@@ -329,7 +370,9 @@ class _MembersListScreenState extends State<MembersListScreen> {
         memberProfile.parish.trim().isNotEmpty ||
         memberProfile.emergencyContactName.trim().isNotEmpty ||
         memberProfile.emergencyContactPhone.trim().isNotEmpty;
-    final careAlert = _careAlertsByUserId[memberProfile.uid];
+    final careAlert = _careAlertsByUserId[memberProfile.uid.isNotEmpty
+        ? memberProfile.uid
+        : data['id']?.toString()];
     final canMessage = !isOwnProfile &&
         !isPrivate &&
         (isSameChurch || memberProfile.allowMessages);
@@ -1075,8 +1118,8 @@ class _MembersListScreenState extends State<MembersListScreen> {
                               ? member['roles'][0]
                               : 'Member';
                           final bio = (member['bio'] as String?)?.trim() ?? '';
-                          final careAlert = _careAlertsByUserId[
-                              member['uid']?.toString() ?? ''];
+                          final careAlert =
+                              _careAlertsByUserId[_memberIdentity(member)];
 
                           return Container(
                             margin: const EdgeInsets.only(bottom: 12),

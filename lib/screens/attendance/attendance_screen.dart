@@ -42,7 +42,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   void initState() {
     super.initState();
     _loadAutoCheckInPreference();
-    _promptRefreshTimer = Timer.periodic(const Duration(seconds: 45), (_) {
+    _promptRefreshTimer = Timer.periodic(const Duration(seconds: 15), (_) {
       final churchId = _loadedChurchId;
       if (churchId == null || !mounted || _isPromptLoading) return;
       unawaited(_refreshCheckInPrompt(churchId));
@@ -630,7 +630,9 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
               isVerified
                   ? 'Present recorded for today.'
                   : isInside
-                      ? 'Location is inside the church radius. Tap Manual Sign-In to mark present.'
+                      ? (_autoCheckIn && prompt.canMarkPresent != true
+                          ? 'Automatic check-in countdown is running. You can leave this screen; Manual Sign-In remains available.'
+                          : 'Location is verified. Tap Manual Sign-In if automatic check-in has not completed yet.')
                       : 'Tap Manual Sign-In to request location access and confirm you are at church.',
               style: theme.textTheme.labelMedium,
             ),

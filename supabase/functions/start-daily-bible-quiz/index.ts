@@ -21,6 +21,11 @@ function sanitizeQuestion(row: Record<string, unknown>) {
   };
 }
 
+function questionDeadline(startedAt: string | null | undefined): string {
+  const start = new Date(startedAt ?? Date.now());
+  return new Date(start.getTime() + 30_000).toISOString();
+}
+
 Deno.serve(async (request) => {
   const options = handleOptions(request);
   if (options) return options;
@@ -54,16 +59,60 @@ Deno.serve(async (request) => {
 
     const { data: existing } = await client
       .from("quiz_attempts")
-      .select("id, status, total_score, correct_answers, failure_reason")
+      .select("id, status, total_score, correct_answers, failure_reason, current_question_order, question_started_at, started_at, last_heartbeat_at")
       .eq("quiz_id", quiz.id)
       .eq("member_id", user.id)
       .maybeSingle();
     if (existing) {
+      if (existing.status === "completed") {
+        return jsonResponse({
+          ok: true,
+          completed: true,
+          quiz_id: quiz.id,
+          attempt: existing,
+          leaderboard_scope: leaderboardScope,
+          next_refresh_at: nextJamaicaRefresh(7).toISOString(),
+        });
+      }
+
+      // Network loss, an Android lifecycle transition, or an older 10-second
+      // heartbeat cleanup must not consume the member's only daily attempt.
+      const resumedAt = existing.question_started_at ?? new Date().toISOString();
+      const { data: resumedAttempt, error: resumeError } = await client
+        .from("quiz_attempts")
+        .update({
+          status: "active",
+          failed_at: null,
+          failure_reason: null,
+          question_started_at: resumedAt,
+          last_heartbeat_at: new Date().toISOString(),
+        })
+        .eq("id", existing.id)
+        .select("id, status, total_score, correct_answers, current_question_order, question_started_at, started_at")
+        .single();
+      if (resumeError || !resumedAttempt) {
+        return jsonResponse({ error: "Unable to resume today's quiz." }, 500);
+      }
+      const { data: resumedQuestion } = await client
+        .from("daily_bible_quiz_questions")
+        .select("id, question_order, question_text, option_a, option_b, option_c, option_d, category, difficulty")
+        .eq("quiz_id", quiz.id)
+        .eq("question_order", resumedAttempt.current_question_order)
+        .maybeSingle();
+      if (!resumedQuestion) {
+        return jsonResponse({ error: "The current quiz question is unavailable." }, 409);
+      }
       return jsonResponse({
-        error: "You already used today’s Daily Bible Quiz attempt.",
-        attempt: existing,
+        ok: true,
+        resumed: true,
+        quiz_id: quiz.id,
+        attempt: resumedAttempt,
+        question: sanitizeQuestion(resumedQuestion),
+        question_time_limit_seconds: 30,
+        question_deadline_at: questionDeadline(resumedAttempt.question_started_at),
+        leaderboard_scope: leaderboardScope,
         next_refresh_at: nextJamaicaRefresh(7).toISOString(),
-      }, 409);
+      });
     }
 
     const now = new Date().toISOString();
@@ -96,6 +145,9 @@ Deno.serve(async (request) => {
       .eq("quiz_id", quiz.id)
       .eq("question_order", 1)
       .single();
+    if (!question) {
+      return jsonResponse({ error: "The first quiz question is unavailable." }, 409);
+    }
 
     return jsonResponse({
       ok: true,
@@ -103,6 +155,7 @@ Deno.serve(async (request) => {
       attempt,
       question: sanitizeQuestion(question),
       question_time_limit_seconds: 30,
+      question_deadline_at: questionDeadline(attempt.question_started_at),
       leaderboard_scope: leaderboardScope,
       next_refresh_at: nextJamaicaRefresh(7).toISOString(),
     });

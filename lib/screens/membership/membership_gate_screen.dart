@@ -151,12 +151,6 @@ class _AccessContextGateState extends State<_AccessContextGate> {
     );
   }
 
-  void _refresh() {
-    setState(() {
-      _subscriptionFuture = _loadSubscription();
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<ChurchSubscriptionContext?>(
@@ -181,88 +175,6 @@ class _AccessContextGateState extends State<_AccessContextGate> {
           ),
         );
       },
-    );
-  }
-}
-
-class _SubscriptionRequiredScreen extends StatelessWidget {
-  const _SubscriptionRequiredScreen({
-    this.churchName,
-    this.loadError,
-    required this.onRefresh,
-  });
-
-  final String? churchName;
-  final String? loadError;
-  final VoidCallback onRefresh;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final name = churchName == null || churchName!.trim().isEmpty
-        ? 'your church'
-        : churchName!.trim();
-    final message = loadError == null
-        ? '$name does not currently have an active Grace Connect subscription. Bible reading and Daily Word are still available, but church management tools are paused. Please contact your church administrator to discuss subscription options.'
-        : 'Grace Connect could not verify the subscription for $name. Bible reading and Daily Word remain available while this is checked. Please try again or contact your church administrator.';
-
-    return Scaffold(
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 460),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.lock_clock_outlined,
-                    size: 64,
-                    color: theme.colorScheme.primary,
-                  ),
-                  const SizedBox(height: 20),
-                  Text(
-                    'Subscription Required',
-                    style: theme.textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.w800,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    message,
-                    style: theme.textTheme.bodyLarge?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 24),
-                  FilledButton.icon(
-                    onPressed: () => Navigator.of(context)
-                        .pushNamedAndRemoveUntil('/bible', (_) => false),
-                    icon: const Icon(Icons.menu_book_outlined),
-                    label: const Text('Open Bible'),
-                  ),
-                  const SizedBox(height: 8),
-                  OutlinedButton.icon(
-                    onPressed: () => Navigator.of(context)
-                        .pushNamedAndRemoveUntil('/daily_word', (_) => false),
-                    icon: const Icon(Icons.wb_sunny_outlined),
-                    label: const Text('Open Daily Word'),
-                  ),
-                  const SizedBox(height: 8),
-                  TextButton.icon(
-                    onPressed: onRefresh,
-                    icon: const Icon(Icons.refresh),
-                    label: const Text('Check Again'),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
     );
   }
 }

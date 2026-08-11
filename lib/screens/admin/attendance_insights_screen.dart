@@ -28,6 +28,7 @@ class _AttendanceInsightsScreenState extends State<AttendanceInsightsScreen> {
   String? _loadedChurchId;
   int _thresholdWeeks = AttendanceAnalysisService.defaultAlertThresholdWeeks;
   bool _isSavingThreshold = false;
+  String? _refreshWarning;
 
   bool _hasLeadershipAccess(UserProfile user) {
     final roles = user.roles.map(_normalize).toSet();
@@ -65,14 +66,24 @@ class _AttendanceInsightsScreenState extends State<AttendanceInsightsScreen> {
 
   Future<void> _load(String churchId, bool canManage) async {
     final threshold = await _analysisService.getAlertThresholdWeeks(churchId);
+    String? refreshWarning;
     if (canManage) {
-      await _analysisService.refreshPriorityList(
-        churchId,
-        thresholdWeeks: threshold,
-      );
+      try {
+        await _analysisService.refreshPriorityList(
+          churchId,
+          thresholdWeeks: threshold,
+        );
+      } catch (error) {
+        debugPrint('Attendance care alert refresh failed: $error');
+        refreshWarning =
+            'Showing the last synced attendance alerts. Pull down to retry the refresh.';
+      }
     }
     if (!mounted) return;
-    setState(() => _thresholdWeeks = threshold);
+    setState(() {
+      _thresholdWeeks = threshold;
+      _refreshWarning = refreshWarning;
+    });
   }
 
   Future<void> _saveThreshold(String churchId, int weeks) async {
@@ -230,10 +241,27 @@ class _AttendanceInsightsScreenState extends State<AttendanceInsightsScreen> {
               return RefreshIndicator(
                 onRefresh: () async {
                   if (!canManage) return;
-                  await _analysisService.refreshPriorityList(
-                    churchId,
-                    thresholdWeeks: _thresholdWeeks,
-                  );
+                  try {
+                    await _analysisService.refreshPriorityList(
+                      churchId,
+                      thresholdWeeks: _thresholdWeeks,
+                    );
+                    if (mounted) setState(() => _refreshWarning = null);
+                  } catch (error) {
+                    debugPrint('Attendance care alert retry failed: $error');
+                    if (!context.mounted) return;
+                    setState(() {
+                      _refreshWarning =
+                          'Showing the last synced attendance alerts. Pull down to retry the refresh.';
+                    });
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          'Could not refresh attendance alerts yet. Existing alerts are still shown.',
+                        ),
+                      ),
+                    );
+                  }
                 },
                 child: ListView(
                   padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
@@ -244,6 +272,10 @@ class _AttendanceInsightsScreenState extends State<AttendanceInsightsScreen> {
                       followUps.length,
                       canManage: canManage,
                     ),
+                    if (_refreshWarning != null) ...[
+                      const SizedBox(height: 12),
+                      _buildRefreshWarning(context, _refreshWarning!),
+                    ],
                     const SizedBox(height: 16),
                     if (followUps.isEmpty)
                       _buildEmptyState(context)
@@ -261,6 +293,21 @@ class _AttendanceInsightsScreenState extends State<AttendanceInsightsScreen> {
             },
           );
         },
+      ),
+    );
+  }
+
+  Widget _buildRefreshWarning(BuildContext context, String message) {
+    final theme = Theme.of(context);
+    return AppCard(
+      color: theme.colorScheme.errorContainer.withValues(alpha: 0.45),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.sync_problem_outlined, color: theme.colorScheme.error),
+          const SizedBox(width: 10),
+          Expanded(child: Text(message)),
+        ],
       ),
     );
   }

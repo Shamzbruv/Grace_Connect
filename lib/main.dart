@@ -76,8 +76,6 @@ import 'screens/messages/inbox_screen.dart';
 import 'screens/testimonies/testimonies_screen.dart';
 import 'screens/ministries/ministries_screen.dart';
 import 'screens/transfer/church_transfer_screen.dart';
-import 'screens/grace_circles/grace_circles_screen.dart';
-import 'screens/grace_circles/grace_circle_detail_screen.dart';
 import 'screens/grace_rooms/grace_rooms_home_screen.dart';
 import 'screens/grace_rooms/grace_room_chat_screen.dart';
 import 'widgets/auth_required.dart';
@@ -427,10 +425,6 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
                     const SavedItemsScreen(),
                     feature: AppFeature.savedItems,
                   ),
-              '/grace_circles': (context) => _protected(
-                    const GraceCirclesScreen(),
-                    feature: AppFeature.graceCircles,
-                  ),
               '/grace_rooms': (context) => _protected(
                     const GraceRoomsHomeScreen(),
                     feature: AppFeature.graceRooms,
@@ -497,16 +491,6 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
                   builder: (_) => _protected(
                     PublicProfileScreen(userId: uri?.queryParameters['id']),
                     feature: AppFeature.socialProfile,
-                  ),
-                );
-              }
-              if (uri?.path == '/grace_circles/circle') {
-                return MaterialPageRoute(
-                  builder: (_) => _protected(
-                    GraceCircleDetailScreen(
-                      circleId: uri?.queryParameters['id'] ?? '',
-                    ),
-                    feature: AppFeature.graceCircles,
                   ),
                 );
               }

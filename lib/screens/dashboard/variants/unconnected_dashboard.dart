@@ -26,11 +26,11 @@ class UnconnectedDashboard extends StatelessWidget {
             ? 'Your church connection is pending'
             : 'Connect with a church';
     final message = hasInactiveSubscription
-        ? 'Community, public events, Bible, Grace Rooms, Grace Circles, Saved, notifications, profile, and church transfer remain available. Church workspace tools unlock when the subscription is active.'
+        ? 'Community, public events, Bible, Grace Rooms, Saved, notifications, profile, and church transfer remain available. Church workspace tools unlock when the subscription is active.'
         : membership.hasPendingMembership ||
                 membership.hasPendingChurchApplication
             ? 'You can keep using the Grace Connect Community while leaders review your request. Private church workspace tools unlock after approval.'
-            : 'Grace Connect works best when you are connected to a local church. You can still use Community, Bible, public events, Grace Rooms, Grace Circles, Saved, and discovery now.';
+            : 'Grace Connect works best when you are connected to a local church. You can still use Community, Bible, public events, Grace Rooms, Saved, and discovery now.';
 
     return SafeArea(
       child: ListView(
@@ -75,8 +75,6 @@ class UnconnectedDashboard extends StatelessWidget {
                   'Public Events', '/events', Icons.calendar_month_outlined),
               _QuickAction('Bible', '/bible', Icons.menu_book_outlined),
               _QuickAction('Grace Rooms', '/grace_rooms', Icons.forum_outlined),
-              _QuickAction('Grace Circles', '/grace_circles',
-                  Icons.diversity_3_outlined),
               _QuickAction('Saved', '/saved', Icons.bookmarks_outlined),
             ],
           ),

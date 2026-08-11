@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../../models/church_model.dart';
 import '../../models/post.dart';
+import '../../providers/user_role_provider.dart';
 import '../../services/community_service.dart';
 import '../../services/membership_service.dart';
 import '../../widgets/ui/app_card.dart';
@@ -78,6 +80,9 @@ class _ChurchPublicProfileScreenState extends State<ChurchPublicProfileScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final church = widget.church;
+    final canRequestVisit =
+        context.watch<UserRoleProvider>().userProfile?.placeId.trim().isEmpty ??
+            true;
     return AppScaffold(
       title: church.name,
       body: ListView(
@@ -161,17 +166,18 @@ class _ChurchPublicProfileScreenState extends State<ChurchPublicProfileScreen> {
             spacing: 10,
             runSpacing: 10,
             children: [
-              FilledButton.icon(
-                onPressed: _requestingVisit ? null : _requestVisit,
-                icon: _requestingVisit
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.how_to_reg_outlined),
-                label: const Text('Request Visit'),
-              ),
+              if (canRequestVisit)
+                FilledButton.icon(
+                  onPressed: _requestingVisit ? null : _requestVisit,
+                  icon: _requestingVisit
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.how_to_reg_outlined),
+                  label: const Text('Request Visit'),
+                ),
               if (church.isLive && church.liveIsPublic)
                 FilledButton.tonalIcon(
                   onPressed: _openLive,

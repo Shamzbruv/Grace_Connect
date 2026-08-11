@@ -42,12 +42,11 @@ class _DeveloperEmailTestScreenState extends State<DeveloperEmailTestScreen> {
       if (mounted) {
         setState(() {
           _statusMessage =
-              'Email queued successfully! Check your inbox (and spam).';
+              'Email sent successfully. Check your inbox (and spam).';
         });
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-              content: Text(
-                  'Email queued! Extension should pick it up normally within seconds.')),
+              content: Text('Email sent through the Grace Connect mailer.')),
         );
       }
     } catch (e) {
@@ -73,12 +72,12 @@ class _DeveloperEmailTestScreenState extends State<DeveloperEmailTestScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             const Text(
-              'Trigger Email Extension Test',
+              'Grace Connect Email Test',
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
             const Text(
-              'Ensure you have installed the "Trigger Email" extension in Firebase Console and set the collection to "mail".',
+              'This sends a branded test through the authenticated Grace Connect server mailer.',
               style: TextStyle(color: Colors.grey),
             ),
             const SizedBox(height: 24),
@@ -111,7 +110,8 @@ class _DeveloperEmailTestScreenState extends State<DeveloperEmailTestScreen> {
                 decoration: BoxDecoration(
                   color: AppColors.primary.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: AppColors.primary.withValues(alpha: 0.2)),
+                  border: Border.all(
+                      color: AppColors.primary.withValues(alpha: 0.2)),
                 ),
                 child: Text(
                   _statusMessage!,

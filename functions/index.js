@@ -40,6 +40,40 @@ function getTransporter() {
   });
 }
 
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function graceConnectEmailTemplate({ title, preview, bodyHtml, footer }) {
+  const safeTitle = escapeHtml(title || "Grace Connect");
+  const safePreview = escapeHtml(preview || title || "Grace Connect update");
+  return `<!doctype html>
+    <html>
+      <body style="margin:0;padding:0;background:#f7f3ea;font-family:Arial,Helvetica,sans-serif;color:#263852;">
+        <div data-grace-email="true" style="display:none;max-height:0;overflow:hidden;opacity:0;">${safePreview}</div>
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f7f3ea;padding:32px 12px;">
+          <tr><td align="center">
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:640px;background:#ffffff;border-radius:20px;overflow:hidden;border:1px solid #eadcb6;box-shadow:0 14px 36px rgba(13,31,76,0.12);">
+              <tr><td style="background:#0d1f4c;padding:28px 32px;color:#ffffff;">
+                <div style="font-size:13px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#e5bd53;">Grace Connect</div>
+                <h1 style="margin:8px 0 0;font-size:28px;line-height:1.2;font-weight:800;">${safeTitle}</h1>
+              </td></tr>
+              <tr><td style="padding:30px 32px;font-size:16px;line-height:1.65;color:#263852;">${bodyHtml}</td></tr>
+              <tr><td style="padding:20px 32px;background:#fbf8f0;border-top:1px solid #eadcb6;color:#69768b;font-size:13px;line-height:1.5;">
+                ${escapeHtml(footer || "Sent securely by Grace Connect.")}
+              </td></tr>
+            </table>
+          </td></tr>
+        </table>
+      </body>
+    </html>`;
+}
+
 // --- 2. CORE FUNCTIONS ---
 
 // Connectivity Check
@@ -378,13 +412,22 @@ exports.onSupportTicketCreated = onDocumentCreated("support_tickets/{ticketId}",
   }
 
   const subject = `[Grace Connect Support] ${ticket.issueType || 'Issue'} - ${ticketId}`;
-  const htmlBody = `
-      <h2>New Ticket: ${ticketId}</h2>
-      <p><b>User:</b> ${ticket.reporterEmail}</p>
-      <p><b>Section:</b> ${ticket.appSection || 'General'}</p>
-      <hr/>
-      <pre>${ticket.description}</pre>
-    `;
+  const htmlBody = graceConnectEmailTemplate({
+    title: "New Support Request",
+    preview: `${ticket.issueType || "Support"} report ${ticketId}`,
+    bodyHtml: `
+      <p style="margin-top:0;">A member submitted a Grace Connect support request.</p>
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="8" style="border-collapse:collapse;background:#fbf8f0;border:1px solid #eadcb6;border-radius:10px;">
+        <tr><td style="font-weight:700;color:#0d1f4c;">Ticket</td><td>${escapeHtml(ticketId)}</td></tr>
+        <tr><td style="font-weight:700;color:#0d1f4c;">Reporter</td><td>${escapeHtml(ticket.reporterEmail || "Not provided")}</td></tr>
+        <tr><td style="font-weight:700;color:#0d1f4c;">Section</td><td>${escapeHtml(ticket.appSection || "General")}</td></tr>
+        <tr><td style="font-weight:700;color:#0d1f4c;">Type</td><td>${escapeHtml(ticket.issueType || "Issue")}</td></tr>
+      </table>
+      <h2 style="margin:28px 0 10px;color:#0d1f4c;font-size:20px;">Member message</h2>
+      <div style="white-space:pre-wrap;padding:16px;border-left:4px solid #c39213;background:#fffaf0;border-radius:6px;">${escapeHtml(ticket.description || "No description supplied.")}</div>
+    `,
+    footer: "Grace Connect support reports are private and should be handled with care.",
+  });
 
   try {
     await transporter.sendMail({

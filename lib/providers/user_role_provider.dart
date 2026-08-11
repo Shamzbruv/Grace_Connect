@@ -44,9 +44,11 @@ class UserRoleProvider with ChangeNotifier {
         } else {
           final previousProfile = _userProfile;
           _stopProfileSubscription();
+          AttendanceService().stopMonitoring();
           NotificationService().stopForegroundNotifications();
           unawaited(NotificationService().unsubscribeAlwaysOnTopics(
             userId: previousProfile?.uid,
+            churchId: previousProfile?.churchId,
           ));
           _userProfile = null;
           _isLoading = false;

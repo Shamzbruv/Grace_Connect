@@ -1,6 +1,6 @@
 name: grace_connect
 description: "Grace Connect - Church Management System"
-version: "1.0.26-beta+28"
+version: "1.0.27-beta+29"
 publish_to: "none"
 
 environment:
@@ -51,6 +51,7 @@ dependencies:
   audioplayers: ^6.6.0
   path_provider: ^2.1.5
   video_player: ^2.10.1
+  visibility_detector: ^0.4.0+2
 
 dev_dependencies:
   flutter_test:

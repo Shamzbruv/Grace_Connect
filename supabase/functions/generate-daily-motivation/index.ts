@@ -202,12 +202,20 @@ function selectFallbackMotivation(
   )[0];
 }
 
+function dateOffset(dateKey: string, days: number): string {
+  const value = new Date(`${dateKey}T12:00:00.000Z`);
+  value.setUTCDate(value.getUTCDate() + days);
+  return value.toISOString().slice(0, 10);
+}
+
 Deno.serve(async (request) => {
   const options = handleOptions(request);
   if (options) return options;
   if (request.method !== "POST") return jsonResponse({ error: "POST required." }, 405);
 
   const client = serviceClient();
+  const requestBody = await request.json().catch(() => ({}));
+  const preparing = String(requestBody.action ?? "release") === "prepare";
   const cronAuthorized = hasCronSecret(request, "DAILY_MOTIVATION_CRON_SECRET");
   if (!cronAuthorized) {
     let userId = "";
@@ -216,6 +224,7 @@ Deno.serve(async (request) => {
     } catch (_) {
       return jsonResponse({ error: "Forbidden." }, 403);
     }
+    if (preparing) return jsonResponse({ error: "Forbidden." }, 403);
     if (!hasReachedJamaicaHour(5)) {
       return jsonResponse({ error: "Today's Daily Word opens at 5:00 AM Jamaica time." }, 425);
     }
@@ -223,7 +232,8 @@ Deno.serve(async (request) => {
     if (!profileChurchId(profile)) return jsonResponse({ error: "Church membership required." }, 403);
   }
 
-  const publishDate = jamaicaDateString();
+  const today = jamaicaDateString();
+  const publishDate = preparing ? dateOffset(today, 1) : today;
   const blockedReferences = await recentScriptureReferences(client, publishDate);
 
   const existing = await client
@@ -234,6 +244,14 @@ Deno.serve(async (request) => {
 
   const existingReference = normalizeReference(String(existing.data?.scripture_reference ?? ""));
   const existingRepeatsRecent = existingReference.length > 0 && blockedReferences.has(existingReference);
+  if (preparing && existing.data?.status === "scheduled") {
+    return jsonResponse({
+      ok: true,
+      status: "already_scheduled",
+      motivation_id: existing.data.id,
+      publish_date: publishDate,
+    });
+  }
   if (existing.data?.is_published && existing.data?.notification_sent_at && !existingRepeatsRecent) {
     return jsonResponse({
       ok: true,
@@ -242,7 +260,36 @@ Deno.serve(async (request) => {
     });
   }
 
-  const prompt = `You are preparing a short Christian Daily Word for a church app called Grace Connect.
+  let saved = null;
+  let source = String(existing.data?.source ?? "ai");
+
+  if (!preparing && existing.data?.is_published) {
+    // Never rewrite content that members may already have read. If the prior
+    // delivery stopped midway, only the idempotent notification step is retried.
+    saved = existing.data;
+  }
+
+  // Publish the exact row the developer reviewed. Release never silently
+  // regenerates scheduled content or changes its date/time slot.
+  if (!preparing && existing.data?.status === "scheduled") {
+    const released = await client
+      .from("daily_motivations")
+      .update({
+        status: "published",
+        is_published: true,
+        published_at: new Date().toISOString(),
+      })
+      .eq("id", existing.data.id)
+      .select("*")
+      .single();
+    if (released.error || !released.data) {
+      return jsonResponse({ error: "Unable to publish the scheduled Daily Word." }, 500);
+    }
+    saved = released.data;
+  }
+
+  if (!saved) {
+    const prompt = `You are preparing a short Christian Daily Word for a church app called Grace Connect.
 Create a warm, encouraging, Bible-centered message for a broad Christian audience.
 Use respectful, clear English that feels natural for a Jamaican church audience.
 Keep the message between 35 and 70 words.
@@ -254,49 +301,87 @@ Do not use prosperity-gospel language.
 Do not quote a Bible translation word-for-word unless it is confirmed public-domain.
 Return valid JSON only, with title, message, scripture_reference, and topic.`;
 
-  let content: DailyMotivationAiResponse | null = null;
-  let source = "ai";
-  try {
-    content = validateMotivation(await callHuggingFaceJson(prompt), blockedReferences);
-  } catch (_) {
-    content = null;
+    let content: DailyMotivationAiResponse | null = null;
+    source = "ai";
+    try {
+      content = validateMotivation(await callHuggingFaceJson(prompt), blockedReferences);
+    } catch (_) {
+      content = null;
+    }
+
+    if (!content) {
+      content = selectFallbackMotivation(publishDate, blockedReferences);
+      source = "fallback";
+    }
+
+    const stored = await client
+      .from("daily_motivations")
+      .upsert({
+        ...(existing.data?.id ? { id: existing.data.id } : {}),
+        publish_date: publishDate,
+        title: content.title,
+        message: content.message,
+        scripture_reference: content.scripture_reference,
+        topic: content.topic,
+        source,
+        status: preparing ? "scheduled" : "published",
+        is_published: !preparing,
+        generated_at: new Date().toISOString(),
+        published_at: preparing ? null : new Date().toISOString(),
+        notification_sent_at: null,
+        failure_reason: source === "fallback"
+          ? "AI response unavailable, repeated a recent scripture, or failed validation."
+          : existingRepeatsRecent
+            ? "Regenerated because the previous Daily Word repeated a recent scripture."
+            : null,
+      }, { onConflict: "publish_date" })
+      .select("*")
+      .single();
+    if (stored.error || !stored.data) {
+      return jsonResponse({ error: "Unable to save Daily Word." }, 500);
+    }
+    saved = stored.data;
   }
 
-  if (!content) {
-    content = selectFallbackMotivation(publishDate, blockedReferences);
-    source = "fallback";
-  }
-
-  const { data: saved, error: saveError } = await client
-    .from("daily_motivations")
-    .upsert({
-      id: existing.data?.id,
+  if (preparing) {
+    return jsonResponse({
+      ok: true,
+      status: "scheduled",
+      motivation_id: saved.id,
       publish_date: publishDate,
-      title: content.title,
-      message: content.message,
-      scripture_reference: content.scripture_reference,
-      topic: content.topic,
       source,
-      status: "published",
-      is_published: true,
-      generated_at: new Date().toISOString(),
-      published_at: new Date().toISOString(),
-      failure_reason: source === "fallback"
-        ? "AI response unavailable, repeated a recent scripture, or failed validation."
-        : existingRepeatsRecent
-          ? "Regenerated because the previous Daily Word repeated a recent scripture."
-          : null,
-    }, { onConflict: "publish_date" })
-    .select("*")
-    .single();
-
-  if (saveError || !saved) {
-    return jsonResponse({ error: "Unable to save Daily Word." }, 500);
+    });
   }
 
   const title = "Grace Connect Daily Word";
   const body = shortPreview(String(saved.message), 120);
   const route = `/daily_word?id=${saved.id}`;
+
+  // Use a reclaimable lease rather than marking delivery complete before FCM
+  // accepts it. The retry job can safely reclaim a crashed/failed attempt.
+  const claimedAt = new Date().toISOString();
+  const staleBefore = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  const { data: notificationClaim } = await client
+    .from("daily_motivations")
+    .update({ notification_claimed_at: claimedAt })
+    .eq("id", saved.id)
+    .is("notification_sent_at", null)
+    .or(
+      `notification_claimed_at.is.null,notification_claimed_at.lt.${staleBefore}`,
+    )
+    .select("id")
+    .maybeSingle();
+  if (!notificationClaim) {
+    return jsonResponse({
+      ok: true,
+      status: "already_published",
+      motivation_id: saved.id,
+      publish_date: publishDate,
+      source,
+      church_topics_attempted: 0,
+      push_topics_sent: 0,
+    });
+  }
 
   await createInAppNotifications(client, {
     title,
@@ -315,6 +400,7 @@ Return valid JSON only, with title, message, scripture_reference, and topic.`;
     .not("placeId", "is", null);
   const churches = new Set((churchRows ?? []).map((row) => String(row.placeId ?? "").trim()).filter(Boolean));
   let pushesSent = 0;
+  let pushesFailed = 0;
   for (const churchId of churches) {
     const result = await sendTopicPush(client, {
       topic: `church_${churchId}_devotionals`,
@@ -325,22 +411,37 @@ Return valid JSON only, with title, message, scripture_reference, and topic.`;
       entityTable: "daily_motivations",
       entityId: saved.id,
     });
-    if (result.sent) pushesSent++;
+    if (result.sent) {
+      pushesSent++;
+    } else {
+      pushesFailed++;
+    }
   }
 
-  if (pushesSent > 0 || churches.size === 0) {
+  if (pushesFailed === 0) {
     await client
       .from("daily_motivations")
-      .update({ notification_sent_at: new Date().toISOString() })
-      .eq("id", saved.id);
+      .update({
+        notification_sent_at: new Date().toISOString(),
+        notification_claimed_at: null,
+      })
+      .eq("id", saved.id)
+      .eq("notification_claimed_at", claimedAt);
+  } else {
+    await client
+      .from("daily_motivations")
+      .update({ notification_claimed_at: null })
+      .eq("id", saved.id)
+      .eq("notification_claimed_at", claimedAt);
   }
 
   return jsonResponse({
-    ok: true,
+    ok: pushesFailed === 0,
     motivation_id: saved.id,
     publish_date: publishDate,
     source,
     church_topics_attempted: churches.size,
     push_topics_sent: pushesSent,
+    push_topics_failed: pushesFailed,
   });
 });

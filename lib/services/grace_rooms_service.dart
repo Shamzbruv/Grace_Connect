@@ -19,6 +19,7 @@ class GraceRoom {
     this.isPlatformRoom = true,
     this.status = 'open',
     this.participantCount = 0,
+    this.liveParticipantCount = 0,
     this.createdAt,
   });
 
@@ -37,7 +38,12 @@ class GraceRoom {
   final int sortOrder;
   final bool isPlatformRoom;
   final String status;
+
+  /// Total unique people who have ever joined this room.
   final int participantCount;
+
+  /// People whose room heartbeat was seen in the last two minutes.
+  final int liveParticipantCount;
   final DateTime? createdAt;
 
   factory GraceRoom.fromMap(Map<String, dynamic> data) {
@@ -83,6 +89,7 @@ class GraceRoom {
           _permanentRoomIds.contains(data['id']?.toString()),
       status: data['status']?.toString() ?? 'open',
       participantCount: _intValue(data['participant_count']),
+      liveParticipantCount: _intValue(data['live_participant_count']),
       createdAt: _dateValue(data['created_at']),
     );
   }
@@ -172,6 +179,41 @@ class GraceRoomsService {
     }
   }
 
+  /// Emits an initial REST snapshot and then database changes. Only the room
+  /// aggregate is streamed; participant identities never leave the server.
+  Stream<List<GraceRoom>> watchRooms() async* {
+    var lastKnown = await fetchRooms();
+    yield lastKnown;
+
+    try {
+      await for (final rows in _supabase
+          .from('grace_rooms')
+          .stream(primaryKey: ['id'])
+          .eq('status', 'open')
+          .order('sort_order')) {
+        lastKnown = _mergePermanentRooms(
+          rows
+              .map((row) => GraceRoom.fromMap(Map<String, dynamic>.from(row)))
+              .toList(),
+        );
+        yield lastKnown;
+      }
+    } catch (error) {
+      debugPrint('Grace Room presence stream unavailable: $error');
+      yield lastKnown;
+    }
+  }
+
+  Stream<GraceRoom?> watchRoom(String roomId) {
+    final cleanRoomId = roomId.trim();
+    return watchRooms().map((rooms) {
+      for (final room in rooms) {
+        if (room.id == cleanRoomId) return room;
+      }
+      return fallbackRoom(cleanRoomId);
+    });
+  }
+
   Future<GraceRoom?> fetchRoom(String roomId) async {
     final cleanRoomId = roomId.trim();
     if (cleanRoomId.isEmpty) return null;
@@ -217,12 +259,21 @@ class GraceRoomsService {
 
     try {
       await _supabase.rpc(
-        'join_grace_room',
+        'touch_grace_room_presence',
         params: {'target_room_id': roomId},
       );
       return;
     } catch (error) {
-      debugPrint('Join Grace Room RPC unavailable: $error');
+      debugPrint('Grace Room presence RPC unavailable: $error');
+      try {
+        await _supabase.rpc(
+          'join_grace_room',
+          params: {'target_room_id': roomId},
+        );
+        return;
+      } catch (fallbackError) {
+        debugPrint('Join Grace Room RPC unavailable: $fallbackError');
+      }
     }
 
     try {
@@ -231,6 +282,7 @@ class GraceRoomsService {
           'room_id': roomId,
           'user_id': userId,
           'anonymous_name': _anonymousName(roomId, userId),
+          'last_seen_at': DateTime.now().toUtc().toIso8601String(),
         },
         onConflict: 'room_id,user_id',
       );
@@ -240,6 +292,36 @@ class GraceRoomsService {
         return;
       }
       rethrow;
+    }
+  }
+
+  Future<void> heartbeatRoom(String roomId) => joinRoom(roomId);
+
+  Future<void> leaveRoom(String roomId) async {
+    final userId = _userId;
+    final cleanRoomId = roomId.trim();
+    if (userId == null || cleanRoomId.isEmpty) return;
+
+    try {
+      await _supabase.rpc(
+        'leave_grace_room',
+        params: {'target_room_id': cleanRoomId},
+      );
+    } catch (error) {
+      debugPrint('Leave Grace Room RPC unavailable: $error');
+      try {
+        await _supabase
+            .from('grace_room_participants')
+            .update({
+              'last_seen_at':
+                  DateTime.fromMillisecondsSinceEpoch(0, isUtc: true)
+                      .toIso8601String()
+            })
+            .eq('room_id', cleanRoomId)
+            .eq('user_id', userId);
+      } catch (fallbackError) {
+        debugPrint('Could not expire Grace Room presence: $fallbackError');
+      }
     }
   }
 

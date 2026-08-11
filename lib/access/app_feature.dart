@@ -13,7 +13,6 @@ enum AppFeature {
   dailyWord,
   notifications,
   savedItems,
-  graceCircles,
   graceRooms,
 
   directMessages,
@@ -54,7 +53,6 @@ extension AppFeatureLabel on AppFeature {
       AppFeature.dailyWord => 'Daily Word',
       AppFeature.notifications => 'Notifications',
       AppFeature.savedItems => 'Saved',
-      AppFeature.graceCircles => 'Grace Circles',
       AppFeature.graceRooms => 'Grace Rooms',
       AppFeature.directMessages => 'Inbox',
       AppFeature.socialConnectionRequests => 'Connection requests',

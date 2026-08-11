@@ -158,13 +158,6 @@ class AppBottomMenu extends StatelessWidget {
       feature: AppFeature.graceRooms,
     ),
     _MenuItem(
-      label: 'Grace Circles',
-      route: '/grace_circles',
-      icon: Icons.diversity_3_outlined,
-      selectedIcon: Icons.diversity_3,
-      feature: AppFeature.graceCircles,
-    ),
-    _MenuItem(
       label: 'Saved',
       route: '/saved',
       icon: Icons.bookmarks_outlined,

@@ -18,7 +18,6 @@ class Post {
   final String scope;
   final String postType;
   final String? originChurchId;
-  final String? circleId;
   final Map<String, dynamic> metadata;
   final String? repostOf;
   final bool isPersistent;
@@ -43,7 +42,6 @@ class Post {
     this.scope = 'church',
     this.postType = 'post',
     this.originChurchId,
-    this.circleId,
     this.metadata = const {},
     this.repostOf,
     bool? isPersistent,
@@ -76,7 +74,6 @@ class Post {
           (data['visible_to_all_churches'] == true ? 'global' : 'church'),
       postType: data['post_type']?.toString() ?? 'post',
       originChurchId: data['origin_church_id']?.toString(),
-      circleId: data['circle_id']?.toString(),
       metadata: metadataValue is Map
           ? Map<String, dynamic>.from(metadataValue)
           : const {},
@@ -105,7 +102,6 @@ class Post {
       'scope': scope,
       'post_type': postType,
       'origin_church_id': originChurchId,
-      'circle_id': circleId,
       'metadata': metadata,
       'repost_of': repostOf,
       'is_persistent': isPersistent || expiresAt == null,

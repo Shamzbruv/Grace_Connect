@@ -91,6 +91,12 @@ void main() {
               .readAsStringSync();
       final tabSource =
           File('lib/screens/main/main_tabs_screen.dart').readAsStringSync();
+      final accessSource =
+          File('lib/access/app_access_context.dart').readAsStringSync();
+      final unavailableSource =
+          File('lib/screens/access/feature_unavailable_screen.dart')
+              .readAsStringSync();
+      final mainSource = File('lib/main.dart').readAsStringSync();
       final developerServiceSource =
           File('lib/services/developer_service.dart').readAsStringSync();
 
@@ -99,28 +105,33 @@ void main() {
       expect(migrationSource, contains('developer_set_church_subscription'));
       expect(migrationSource, contains('developer_clear_church_subscription'));
       expect(migrationSource, contains('subscription_active'));
-      expect(gateSource, contains('Subscription Required'));
-      expect(gateSource, contains("route == '/bible'"));
-      expect(gateSource, contains("route == '/daily_word'"));
-      expect(gateSource, contains('Open Bible'));
-      expect(gateSource, contains('Open Daily Word'));
-      expect(tabSource, contains('_subscriptionLimited'));
-      expect(tabSource, contains('allowDailyQuiz: !_subscriptionLimited'));
-      expect(tabSource, contains('NeverScrollableScrollPhysics'));
+      expect(gateSource, contains('FeatureAccessGuard'));
+      expect(unavailableSource, contains('unavailableMessageFor'));
+      expect(unavailableSource, contains('Find a Church'));
+      expect(mainSource, contains("'/bible': (context) => _protected("));
+      expect(mainSource, contains('feature: AppFeature.bibleReading'));
+      expect(accessSource, contains('case AppFeature.bibleReading:'));
+      expect(accessSource, contains('case AppFeature.dailyWord:'));
+      expect(tabSource, contains('access.hasActiveChurchSubscription'));
+      expect(tabSource, contains('UnconnectedDashboard(access: access)'));
+      expect(tabSource, contains('allowDailyQuiz: true'));
       expect(developerServiceSource, contains('developer_get_dashboard'));
       expect(developerServiceSource, contains('developer_list_churches'));
       expect(developerServiceSource, isNot(contains('church_locations')));
     });
 
-    test('pending and churchless users get browse-only feed access', () {
+    test('feature access keeps public tools open and church tools protected',
+        () {
       final gateSource =
           File('lib/screens/membership/membership_gate_screen.dart')
               .readAsStringSync();
       final tabSource =
           File('lib/screens/main/main_tabs_screen.dart').readAsStringSync();
-      final feedSource =
-          File('lib/screens/community/community_feed_screen.dart')
-              .readAsStringSync();
+      final accessSource =
+          File('lib/access/app_access_context.dart').readAsStringSync();
+      final unconnectedDashboardSource = File(
+        'lib/screens/dashboard/variants/unconnected_dashboard.dart',
+      ).readAsStringSync();
       final interactionLock = File(
         'supabase/migrations/20260630090000_browse_only_feed_interaction_lock.sql',
       ).readAsStringSync();
@@ -128,16 +139,22 @@ void main() {
         'supabase/migrations/20260630093000_reset_beta_platform_to_empty_churches.sql',
       ).readAsStringSync();
 
-      expect(gateSource, contains('hasPendingChurchApplication'));
-      expect(gateSource, contains('hasPendingMembership'));
-      expect(gateSource, contains('membershipLimited: true'));
-      expect(gateSource, contains("route == '/community'"));
-      expect(gateSource, contains('Browse Feed For Now'));
-      expect(tabSource, contains('_hasLimitedAccess'));
-      expect(feedSource,
-          contains('Showing public posts shared across Grace Connect'));
-      expect(feedSource, contains('readOnly: _isBrowseOnly(churchId)'));
-      expect(feedSource, contains('if (!browseOnly) const InboxIconButton()'));
+      expect(gateSource, contains('AppAccessContext('));
+      expect(gateSource, contains('AppAccessScope('));
+      expect(gateSource, contains('FeatureAccessGuard('));
+      expect(accessSource, contains('case AppFeature.communityRead:'));
+      expect(accessSource, contains('case AppFeature.bibleReading:'));
+      expect(accessSource, contains('case AppFeature.memberDirectory:'));
+      expect(accessSource, contains('return hasActiveChurchSubscription;'));
+      expect(tabSource, contains('_primaryFeatures'));
+      expect(tabSource, contains('access.hasActiveChurchSubscription'));
+      expect(tabSource, contains('UnconnectedDashboard(access: access)'));
+      expect(unconnectedDashboardSource, contains('hasPendingMembership'));
+      expect(
+          unconnectedDashboardSource, contains('hasPendingChurchApplication'));
+      expect(unconnectedDashboardSource, contains("'Community', '/community'"));
+      expect(unconnectedDashboardSource, contains("'Bible', '/bible'"));
+      expect(unconnectedDashboardSource, contains('Church membership unlocks'));
       expect(
           interactionLock,
           contains(
@@ -309,21 +326,33 @@ void main() {
       final gradle = File('android/app/build.gradle').readAsStringSync();
       final googleServices =
           File('android/app/google-services.json').readAsStringSync();
+      final pubspec = File('pubspec.yaml').readAsStringSync();
       final activity = File(
         'android/app/src/main/kotlin/love/graceconnect/MainActivity.kt',
       ).readAsStringSync();
 
       expect(gradle, contains('"love.graceconnect"'));
-      expect(gradle, contains('versionCode 21'));
-      expect(gradle, contains('versionName "1.0.19-beta"'));
+      expect(gradle, contains('versionCode 29'));
+      expect(gradle, contains('versionName "1.0.27-beta"'));
+      expect(pubspec, contains('version: "1.0.27-beta+29"'));
       expect(activity, contains('package love.graceconnect'));
       expect(manifest, contains('love.graceconnect.MainActivity'));
       expect(manifest, contains('default_notification_icon'));
+      expect(manifest, contains('default_notification_channel_id'));
+      expect(manifest, contains('grace_default_channel_v1'));
       expect(manifest, contains('@drawable/ic_stat_grace_connect'));
       expect(googleServices, contains('"package_name": "love.graceconnect"'));
       expect(googleServices, isNot(contains('com.example.grace_connect')));
+      // Auto-attendance starts a visible foreground location service while the
+      // member is using the app. It intentionally does not request unrestricted
+      // Android background-location access.
+      expect(manifest, contains('android.permission.FOREGROUND_SERVICE'));
+      expect(
+        manifest,
+        contains('android.permission.FOREGROUND_SERVICE_LOCATION'),
+      );
+      expect(manifest, contains('android.permission.WAKE_LOCK'));
       expect(manifest, isNot(contains('ACCESS_BACKGROUND_LOCATION')));
-      expect(manifest, isNot(contains('FOREGROUND_SERVICE_LOCATION')));
     });
 
     test('registration RPC and beta network crashes are hardened', () {
@@ -472,12 +501,22 @@ void main() {
       final mainSource = File('lib/main.dart').readAsStringSync();
       final notificationSource =
           File('lib/services/notification_service.dart').readAsStringSync();
+      final roleProviderSource =
+          File('lib/providers/user_role_provider.dart').readAsStringSync();
       final messageSource =
           File('lib/services/direct_message_service.dart').readAsStringSync();
 
       expect(mainSource, contains('FirebaseMessaging.onBackgroundMessage'));
       expect(notificationSource, contains('showDataOnlyBackgroundMessage'));
       expect(notificationSource, contains("message.data['title']"));
+      expect(
+        notificationSource,
+        contains('SupabaseClient get _supabase => Supabase.instance.client;'),
+      );
+      expect(
+        roleProviderSource,
+        contains('AttendanceService().stopMonitoring();'),
+      );
       expect(messageSource, contains('sanitizeReplyContext'));
       expect(messageSource, contains('<String, dynamic>{}'));
     });
@@ -522,15 +561,19 @@ void main() {
       final postDetailSource =
           File('lib/screens/community/post_detail_screen.dart')
               .readAsStringSync();
+      final playerSource =
+          File('lib/widgets/community_video_player.dart').readAsStringSync();
       final communityServiceSource =
           File('lib/services/community_service.dart').readAsStringSync();
 
-      expect(feedSource, contains('VideoPlayerController.networkUrl'));
-      expect(feedSource, contains('Video could not load'));
+      expect(feedSource, contains('CommunityVideoPlayer('));
       expect(feedSource, contains('Delete status?'));
       expect(feedSource, contains('resizeToAvoidBottomInset: true'));
-      expect(postDetailSource, contains('VideoPlayerController.networkUrl'));
-      expect(postDetailSource, contains('Retry Video'));
+      expect(postDetailSource, contains('CommunityVideoPlayer('));
+      expect(playerSource, contains('VideoPlayerController.networkUrl'));
+      expect(playerSource, contains('VideoViewType.textureView'));
+      expect(playerSource, contains('This video could not be displayed.'));
+      expect(playerSource, contains('Retry Video'));
       expect(communityServiceSource, contains('Future<void> deleteStory'));
       expect(communityServiceSource, contains('_storiesTable'));
     });
@@ -602,6 +645,8 @@ void main() {
       final feedSource =
           File('lib/screens/community/community_feed_screen.dart')
               .readAsStringSync();
+      final playerSource =
+          File('lib/widgets/community_video_player.dart').readAsStringSync();
       final uploadExport =
           File('lib/utils/community_media_upload.dart').readAsStringSync();
       final uploadIo =
@@ -615,8 +660,11 @@ void main() {
       expect(feedSource, contains('uploadCommunityMediaXFile'));
       expect(feedSource, contains('_maxCommunityVideoBytes'));
       expect(feedSource, contains('200MB'));
-      expect(feedSource, contains('_InlineCommunityVideoPlayer'));
-      expect(feedSource, contains('_preloadNextVideo'));
+      expect(feedSource, contains('CommunityVideoPlayer('));
+      expect(feedSource, isNot(contains('_InlineCommunityVideoPlayer')));
+      expect(playerSource, contains('VideoViewType.textureView'));
+      expect(playerSource, contains('VisibilityDetector'));
+      expect(playerSource, contains('_VideoPlaybackPositionStore'));
       expect(uploadExport, contains('if (dart.library.io)'));
       expect(uploadIo, contains('uploadMediaFile'));
       expect(uploadBytes, contains('uploadMediaBytes'));

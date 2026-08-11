@@ -298,12 +298,6 @@ class _MoreTabScreen extends StatelessWidget {
         AppFeature.graceRooms,
       ),
       const _MoreAction(
-        'Grace Circles',
-        '/grace_circles',
-        Icons.diversity_3_outlined,
-        AppFeature.graceCircles,
-      ),
-      const _MoreAction(
         'Saved',
         '/saved',
         Icons.bookmarks_outlined,

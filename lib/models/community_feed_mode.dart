@@ -2,7 +2,6 @@ enum CommunityFeedMode {
   church,
   following,
   discover,
-  circle,
 }
 
 extension CommunityFeedModeLabel on CommunityFeedMode {
@@ -11,7 +10,6 @@ extension CommunityFeedModeLabel on CommunityFeedMode {
       CommunityFeedMode.church => 'church',
       CommunityFeedMode.following => 'following',
       CommunityFeedMode.discover => 'discover',
-      CommunityFeedMode.circle => 'circle',
     };
   }
 
@@ -20,7 +18,6 @@ extension CommunityFeedModeLabel on CommunityFeedMode {
       CommunityFeedMode.church => 'My Church',
       CommunityFeedMode.following => 'Following',
       CommunityFeedMode.discover => 'Discover',
-      CommunityFeedMode.circle => 'Circle',
     };
   }
 }

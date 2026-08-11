@@ -127,6 +127,7 @@ class _ChurchLocationPickerScreenState
       }
       _syncCoordinateFields();
       _syncRadiusField();
+      await _moveCameraToSelectedPosition();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -134,6 +135,24 @@ class _ChurchLocationPickerScreenState
       );
     } finally {
       if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _moveCameraToSelectedPosition() async {
+    final controller = _mapController;
+    if (controller == null) return;
+
+    try {
+      await controller.animateCamera(
+        CameraUpdate.newLatLngZoom(
+          _selectedPosition,
+          _selectedPosition == _jamaicaCenter ? 8 : 17,
+        ),
+      );
+    } catch (error) {
+      // The platform view can disappear while an async location read is in
+      // flight. A recreated map will receive this position in onMapCreated.
+      debugPrint('Could not move the church-location map camera: $error');
     }
   }
 
@@ -551,6 +570,7 @@ class _ChurchLocationPickerScreenState
                           },
                           onMapCreated: (controller) {
                             _mapController = controller;
+                            unawaited(_moveCameraToSelectedPosition());
                           },
                         ),
                       ),

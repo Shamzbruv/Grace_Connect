@@ -45,6 +45,9 @@ class DailyBibleQuizService {
           'attempt_id': attemptId,
           'question_id': questionId,
           'selected_option_index': selectedOptionIndex,
+          // New clients activate the next question only after the feedback
+          // screen. Older Play Store builds omit this and retain legacy timing.
+          'defer_next_question_start': true,
         },
       );
 

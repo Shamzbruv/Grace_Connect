@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -20,30 +21,66 @@ class GraceRoomChatScreen extends StatefulWidget {
   State<GraceRoomChatScreen> createState() => _GraceRoomChatScreenState();
 }
 
-class _GraceRoomChatScreenState extends State<GraceRoomChatScreen> {
+class _GraceRoomChatScreenState extends State<GraceRoomChatScreen>
+    with WidgetsBindingObserver {
+  static const _heartbeatInterval = Duration(seconds: 45);
   final GraceRoomsService _service = GraceRoomsService();
   final TextEditingController _messageController = TextEditingController();
   late Future<GraceRoom?> _roomFuture;
   List<GraceRoomMessage> _fallbackMessages = const [];
+  Timer? _presenceTimer;
   bool _sending = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _roomFuture = _service.fetchRoom(widget.roomId);
     _joinAndPrime();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _presenceTimer?.cancel();
+    unawaited(_service.leaveRoom(widget.roomId));
     _messageController.dispose();
     super.dispose();
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_touchPresence());
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      _presenceTimer?.cancel();
+      unawaited(_service.leaveRoom(widget.roomId));
+    }
+  }
+
   Future<void> _joinAndPrime() async {
-    await _service.joinRoom(widget.roomId);
+    await _touchPresence();
     final messages = await _service.fetchMessages(widget.roomId);
     if (mounted) setState(() => _fallbackMessages = messages);
+  }
+
+  Future<void> _touchPresence() async {
+    await _sendPresenceHeartbeat();
+    if (!mounted) return;
+    _presenceTimer?.cancel();
+    _presenceTimer = Timer.periodic(
+      _heartbeatInterval,
+      (_) => unawaited(_sendPresenceHeartbeat()),
+    );
+  }
+
+  Future<void> _sendPresenceHeartbeat() async {
+    try {
+      await _service.heartbeatRoom(widget.roomId);
+    } catch (error) {
+      debugPrint('Could not refresh Grace Room presence: $error');
+    }
   }
 
   Future<void> _sendMessage() async {
@@ -75,7 +112,13 @@ class _GraceRoomChatScreenState extends State<GraceRoomChatScreen> {
           title: room?.title ?? 'Grace Room',
           body: Column(
             children: [
-              if (room != null) _RoomHeader(room: room),
+              if (room != null)
+                StreamBuilder<GraceRoom?>(
+                  stream: _service.watchRoom(widget.roomId),
+                  initialData: room,
+                  builder: (context, snapshot) =>
+                      _RoomHeader(room: snapshot.data ?? room),
+                ),
               Expanded(
                 child: StreamBuilder<List<GraceRoomMessage>>(
                   stream: _service.watchMessages(widget.roomId),
@@ -240,8 +283,13 @@ class _RoomHeader extends StatelessWidget {
           ],
           const SizedBox(height: 8),
           Text(
-            '${room.participantCount} present',
-            style: theme.textTheme.labelMedium,
+            room.liveParticipantCount == 1
+                ? '1 person live now'
+                : '${room.liveParticipantCount} people live now',
+            style: theme.textTheme.labelMedium?.copyWith(
+              color: room.liveParticipantCount > 0 ? Colors.green : null,
+              fontWeight: FontWeight.w800,
+            ),
           ),
           const SizedBox(height: 4),
           Text(

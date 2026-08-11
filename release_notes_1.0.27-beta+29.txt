@@ -1,0 +1,12 @@
+Grace Connect 1.0.27-beta+29
+
+- Rebuilt Bible reading streaks around Jamaica calendar days, including reliable increments, missed-day resets, leaderboards, offline recovery, and evening streak reminders.
+- Fixed daily Bible quiz resume/submission failures and reduced repeated questions with scheduled-content history and safe question replacement.
+- Added upcoming Daily Word and Bible Quiz previews to the developer dashboard without exposing quiz answers.
+- Reworked attendance dwell tracking, automatic check-in, missed-attendance finalization, and care alerts so reconnects and manual refreshes do not reset valid progress.
+- Improved the church map and saved-location flow for Play-distributed Android builds, with clearer permission and service recovery states.
+- Fixed membership request approval, membership-state recovery, and member/leader push delivery.
+- Added real-time Grace Room presence counts and occasional room invitation notifications.
+- Replaced feed, story, and post video playback with a lifecycle-safe player that preserves position and exposes buffering, retry, and decoder failures.
+- Branded Grace Connect support, membership, security, and account emails while keeping mail credentials on the server.
+- Retired Grace Circles and removed its app navigation, data model, and backend tables.

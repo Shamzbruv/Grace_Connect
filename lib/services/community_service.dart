@@ -221,7 +221,6 @@ class CommunityService {
   Future<List<Post>> fetchCommunityFeed({
     required CommunityFeedMode mode,
     String? viewerChurchId,
-    String? circleId,
     int limit = 75,
   }) async {
     if (mode == CommunityFeedMode.church &&
@@ -240,8 +239,6 @@ class CommunityService {
           'viewer_church_id': viewerChurchId?.trim().isEmpty == true
               ? null
               : viewerChurchId?.trim(),
-          'target_circle_id':
-              circleId?.trim().isEmpty == true ? null : circleId?.trim(),
           'result_limit': limit,
         },
       );
@@ -253,14 +250,11 @@ class CommunityService {
         );
         if (mode == CommunityFeedMode.following) {
           final followingUserIds = await _acceptedFollowingIds();
-          final followingCircleIds = await _activeCircleIds();
           return normalized
               .where((post) => _matchesFeedMode(
                     post,
                     mode,
-                    circleId,
                     followingUserIds: followingUserIds,
-                    followingCircleIds: followingCircleIds,
                   ))
               .take(limit)
               .toList();
@@ -274,7 +268,6 @@ class CommunityService {
     return _fetchCommunityFeedFallback(
       mode: mode,
       viewerChurchId: viewerChurchId,
-      circleId: circleId,
       limit: limit,
     );
   }
@@ -282,23 +275,19 @@ class CommunityService {
   Stream<List<Post>> getCommunityFeed({
     required CommunityFeedMode mode,
     String? viewerChurchId,
-    String? circleId,
     int limit = 75,
   }) async* {
     var lastKnown = <Post>[];
     var followingUserIds = const <String>{};
-    var followingCircleIds = const <String>{};
 
     if (mode == CommunityFeedMode.following) {
       followingUserIds = await _acceptedFollowingIds();
-      followingCircleIds = await _activeCircleIds();
     }
 
     try {
       lastKnown = await fetchCommunityFeed(
         mode: mode,
         viewerChurchId: viewerChurchId,
-        circleId: circleId,
         limit: limit,
       );
       yield lastKnown;
@@ -321,9 +310,7 @@ class CommunityService {
                 .where((post) => _matchesFeedMode(
                       post,
                       mode,
-                      circleId,
                       followingUserIds: followingUserIds,
-                      followingCircleIds: followingCircleIds,
                     ))
                 .toList(),
           )
@@ -345,18 +332,12 @@ class CommunityService {
   Future<List<Post>> _fetchCommunityFeedFallback({
     required CommunityFeedMode mode,
     String? viewerChurchId,
-    String? circleId,
     required int limit,
   }) async {
     final followingUserIds = mode == CommunityFeedMode.following
         ? await _acceptedFollowingIds()
         : const <String>{};
-    final followingCircleIds = mode == CommunityFeedMode.following
-        ? await _activeCircleIds()
-        : const <String>{};
-    if (mode == CommunityFeedMode.following &&
-        followingUserIds.isEmpty &&
-        followingCircleIds.isEmpty) {
+    if (mode == CommunityFeedMode.following && followingUserIds.isEmpty) {
       return const [];
     }
 
@@ -367,10 +348,7 @@ class CommunityService {
           .from(_postsTable)
           .select()
           .or('expires_at.is.null,expires_at.gt.$now');
-      if (mode == CommunityFeedMode.circle &&
-          circleId?.trim().isNotEmpty == true) {
-        query = query.eq('circle_id', circleId!.trim());
-      } else if (mode == CommunityFeedMode.discover) {
+      if (mode == CommunityFeedMode.discover) {
         query = query.or('scope.eq.global,visible_to_all_churches.eq.true');
       }
       data = await query
@@ -397,9 +375,7 @@ class CommunityService {
         .where((post) => _matchesFeedMode(
               post,
               mode,
-              circleId,
               followingUserIds: followingUserIds,
-              followingCircleIds: followingCircleIds,
             ))
         .take(limit)
         .toList();
@@ -857,22 +833,17 @@ class CommunityService {
 
   bool _matchesFeedMode(
     Post post,
-    CommunityFeedMode mode,
-    String? circleId, {
+    CommunityFeedMode mode, {
     Set<String> followingUserIds = const {},
-    Set<String> followingCircleIds = const {},
   }) {
     final expiresAt = post.expiresAt;
     if (expiresAt != null && expiresAt.isBefore(DateTime.now())) return false;
     return switch (mode) {
-      CommunityFeedMode.circle =>
-        circleId == null || circleId.isEmpty || post.circleId == circleId,
       CommunityFeedMode.discover => post.visibleToAllChurches ||
           post.scope == 'global' ||
           post.scope == 'discover' ||
           post.scope == 'public',
-      CommunityFeedMode.following => followingUserIds.contains(post.authorId) ||
-          (post.circleId != null && followingCircleIds.contains(post.circleId)),
+      CommunityFeedMode.following => followingUserIds.contains(post.authorId),
       CommunityFeedMode.church => true,
     };
   }
@@ -903,27 +874,6 @@ class CommunityService {
     }
   }
 
-  Future<Set<String>> _activeCircleIds() async {
-    final userId = _supabase.auth.currentUser?.id;
-    if (userId == null || userId.isEmpty) return const {};
-
-    try {
-      final rows = await _supabase
-          .from('grace_circle_members')
-          .select('circle_id')
-          .eq('user_id', userId)
-          .eq('status', 'active');
-      return rows
-          .map((row) => row['circle_id']?.toString())
-          .whereType<String>()
-          .where((id) => id.isNotEmpty)
-          .toSet();
-    } catch (error) {
-      debugPrint('Followed circle list unavailable: $error');
-      return const {};
-    }
-  }
-
   Map<String, dynamic> _legacyPostInsertData(
     Map<String, dynamic> data,
     Post post,
@@ -934,7 +884,6 @@ class CommunityService {
       ..remove('scope')
       ..remove('post_type')
       ..remove('origin_church_id')
-      ..remove('circle_id')
       ..remove('metadata')
       ..remove('repost_of')
       ..remove('is_persistent');
@@ -965,7 +914,6 @@ class CommunityService {
         message.contains('scope') ||
         message.contains('post_type') ||
         message.contains('origin_church_id') ||
-        message.contains('circle_id') ||
         message.contains('metadata') ||
         message.contains('repost_of') ||
         message.contains('is_persistent') ||

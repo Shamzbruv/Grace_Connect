@@ -111,6 +111,21 @@ class AttendanceAnalysisService {
       {int? thresholdWeeks}) async {
     final threshold = thresholdWeeks ?? await getAlertThresholdWeeks(churchId);
 
+    try {
+      await _supabase.rpc('refresh_attendance_priority_list', params: {
+        'p_church_id': churchId,
+        'p_threshold_weeks': threshold,
+      });
+      return;
+    } catch (error) {
+      if (!_isMissingRefreshRpcError(error)) rethrow;
+    }
+
+    await _refreshPriorityListLegacy(churchId, threshold);
+  }
+
+  Future<void> _refreshPriorityListLegacy(
+      String churchId, int threshold) async {
     // A. Get all members of church
     final membersSnapshot =
         await _supabase.from('users').select().eq('placeId', churchId);
@@ -165,7 +180,16 @@ class AttendanceAnalysisService {
             'updatedAt': DateTime.now().toIso8601String(),
           }).eq('id', followUp.id);
         } else {
-          await _supabase.from('priority_follow_ups').insert(followUp.toMap());
+          try {
+            await _supabase
+                .from('priority_follow_ups')
+                .insert(followUp.toMap());
+          } catch (error) {
+            // Another refresh (or the scheduled finalizer) may have inserted
+            // the same partial-unique row after our read. That is a successful
+            // idempotent outcome, not a reason to blank the alerts screen.
+            if (!_isDuplicateOpenFollowUpError(error)) rethrow;
+          }
         }
       } else if (existingFlags.isNotEmpty) {
         await _supabase.from('priority_follow_ups').update({
@@ -176,6 +200,21 @@ class AttendanceAnalysisService {
         }).eq('id', existingFlags.first['id']);
       }
     }
+  }
+
+  bool _isMissingRefreshRpcError(Object error) {
+    final text = error.toString().toLowerCase();
+    return text.contains('refresh_attendance_priority_list') &&
+        (text.contains('pgrst202') ||
+            text.contains('42883') ||
+            text.contains('function') && text.contains('not found'));
+  }
+
+  bool _isDuplicateOpenFollowUpError(Object error) {
+    final text = error.toString().toLowerCase();
+    return text.contains('23505') ||
+        text.contains('priority_follow_ups_one_open_per_member_idx') ||
+        text.contains('duplicate key');
   }
 
   Future<DateTime?> _lastPresentDate(String userId, String churchId) async {

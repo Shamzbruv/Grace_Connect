@@ -8,7 +8,6 @@ import {
   hasReachedJamaicaHour,
   jamaicaDateString,
   jsonResponse,
-  nextJamaicaRefresh,
   profileQuizChurchId,
   sendTopicPush,
   serviceClient,
@@ -33,10 +32,21 @@ type GenerationIssue = {
   message: string;
 };
 
-async function hashQuestion(question: string): Promise<string> {
+function canonicalFact(question: QuizQuestion): string {
+  const references = question.scripture_references
+    .map((reference) => reference.toLowerCase().replace(/[^a-z0-9]/g, ""))
+    .sort()
+    .join("|");
+  const answer = question.correct_answer.toLowerCase().replace(/[^a-z0-9]/g, "");
+  // A paraphrased question about the same answer and passage is still a
+  // repeated fact. This fingerprint catches that without relying on wording.
+  return `${references}:${answer}`;
+}
+
+async function hashQuestion(question: QuizQuestion): Promise<string> {
   const hash = await crypto.subtle.digest(
     "SHA-256",
-    new TextEncoder().encode(question.trim().toLowerCase()),
+    new TextEncoder().encode(canonicalFact(question)),
   );
   return Array.from(new Uint8Array(hash))
     .map((byte) => byte.toString(16).padStart(2, "0"))
@@ -86,16 +96,21 @@ async function seededQuestionSet(
   seed: string,
   blockedHashes: Set<string>,
 ): Promise<{ questions: QuizQuestion[]; reusedRecent: boolean }> {
-  const annotated = [];
+  const uniqueByFact = new Map<
+    string,
+    { question: QuizQuestion; hash: string; index: number }
+  >();
   for (let index = 0; index < questions.length; index++) {
     const question = questions[index];
-    annotated.push({
-      question,
-      hash: await hashQuestion(question.question),
-      index,
-    });
+    const hash = await hashQuestion(question);
+    // AI can phrase the same Bible fact several ways in one response. Keep one
+    // candidate per reference+answer fingerprint for both AI and fallback sets.
+    if (!uniqueByFact.has(hash)) {
+      uniqueByFact.set(hash, { question, hash, index });
+    }
   }
 
+  const annotated = Array.from(uniqueByFact.values());
   const fresh = annotated.filter((item) => !blockedHashes.has(item.hash));
   const pool = fresh.length >= 5 ? fresh : annotated;
   const decorated = pool.map((item) => ({
@@ -122,41 +137,37 @@ async function selectFiveQuestions(
     ? (aiResponse as AiQuizResponse).questions ?? []
     : [];
   const valid = candidates.map(validateQuestion).filter((q): q is QuizQuestion => q != null);
-  const unique = new Map<string, QuizQuestion>();
-  for (const question of valid) {
-    unique.set(question.question.toLowerCase(), question);
-  }
-  if (unique.size >= 5) {
+  if (valid.length >= 5) {
     const selected = await seededQuestionSet(
-      Array.from(unique.values()),
+      valid,
       seed,
       recentQuestionHashes,
     );
-    if (!selected.reusedRecent) return { ...selected, source: "ai" };
+    if (selected.questions.length === 5 && !selected.reusedRecent) {
+      return { ...selected, source: "ai" };
+    }
   }
   const selected = await seededQuestionSet(
     fallbackQuizQuestions,
     seed,
     recentQuestionHashes,
   );
+  if (selected.questions.length !== 5) {
+    throw new Error("The curated Bible quiz bank does not contain five unique facts.");
+  }
   return { ...selected, source: "fallback" };
 }
 
-async function existingQuizHasFiveFreshQuestions(
+async function quizHasExactlyFiveQuestions(
   client: ReturnType<typeof serviceClient>,
   quizId: string,
-  recentHashes: Set<string>,
 ): Promise<boolean> {
   try {
     const { data: rows, error } = await client
       .from("daily_bible_quiz_questions")
-      .select("question_hash")
+      .select("id")
       .eq("quiz_id", quizId);
-    if (error || !rows || rows.length !== 5) return false;
-    return rows.every((row) => {
-      const hash = String(row.question_hash ?? "").trim();
-      return hash.length > 0 && !recentHashes.has(hash);
-    });
+    return !error && rows?.length === 5;
   } catch (_) {
     return false;
   }
@@ -191,18 +202,41 @@ async function recentQuestionHashes(
 
     const { data: rows } = await client
       .from("daily_bible_quiz_questions")
-      .select("question_hash")
+      .select("question_hash, question_text, correct_answer, scripture_references, category, difficulty, option_a, option_b, option_c, option_d, correct_option_index, explanation")
       .in("quiz_id", quizIds)
       .limit(500);
 
-    return new Set(
-      (rows ?? [])
-        .map((row) => String(row.question_hash ?? "").trim())
-        .filter(Boolean),
-    );
+    const hashes = new Set<string>();
+    for (const row of rows ?? []) {
+      const storedHash = String(row.question_hash ?? "").trim();
+      if (storedHash) hashes.add(storedHash);
+      const candidate = validateQuestion({
+        question: row.question_text,
+        options: [row.option_a, row.option_b, row.option_c, row.option_d],
+        correct_option_index: row.correct_option_index,
+        correct_answer: row.correct_answer,
+        explanation: row.explanation,
+        scripture_references: row.scripture_references,
+        category: row.category,
+        difficulty: row.difficulty,
+      });
+      if (candidate) hashes.add(await hashQuestion(candidate));
+    }
+    return hashes;
   } catch (_) {
     return new Set();
   }
+}
+
+function dateOffset(dateKey: string, days: number): string {
+  const value = new Date(`${dateKey}T12:00:00.000Z`);
+  value.setUTCDate(value.getUTCDate() + days);
+  return value.toISOString().slice(0, 10);
+}
+
+function quizReleaseAt(dateKey: string): Date {
+  // Jamaica is UTC-5 year-round; 7:00 AM is 12:00 UTC.
+  return new Date(`${dateKey}T12:00:00.000Z`);
 }
 
 async function createGenerationRun(
@@ -240,34 +274,171 @@ async function updateGenerationRun(
   }
 }
 
+const scheduledQuizMutationRoles = new Set([
+  "super_developer",
+  "support_developer",
+  "content_moderator",
+  "security_admin",
+]);
+
+async function canRegenerateScheduledQuiz(
+  client: ReturnType<typeof serviceClient>,
+  request: Request,
+): Promise<boolean> {
+  try {
+    const user = await authenticatedUser(request);
+    const { data: linkedAccount } = await client
+      .from("developer_accounts")
+      .select("developer_role")
+      .eq("status", "active")
+      .eq("user_id", user.id)
+      .maybeSingle();
+    if (linkedAccount) {
+      return scheduledQuizMutationRoles.has(
+        String(linkedAccount.developer_role ?? "").trim().toLowerCase(),
+      );
+    }
+    if (!user.email) return false;
+    const { data: emailAccount } = await client
+      .from("developer_accounts")
+      .select("developer_role")
+      .eq("status", "active")
+      .eq("email", user.email.toLowerCase())
+      .maybeSingle();
+    return scheduledQuizMutationRoles.has(
+      String(emailAccount?.developer_role ?? "").trim().toLowerCase(),
+    );
+  } catch (_) {
+    return false;
+  }
+}
+
+async function publishQuiz(
+  client: ReturnType<typeof serviceClient>,
+  quiz: Record<string, unknown>,
+  churchId: string,
+  issues: GenerationIssue[],
+): Promise<void> {
+  const quizId = String(quiz.id);
+  await client.from("daily_bible_quizzes").update({ status: "published" }).eq("id", quizId);
+  if (quiz.notification_sent_at) return;
+  if (churchId === GLOBAL_VISITOR_CHURCH_ID) {
+    await client
+      .from("daily_bible_quizzes")
+      .update({
+        notification_sent_at: new Date().toISOString(),
+        notification_claimed_at: null,
+      })
+      .eq("id", quizId)
+      .is("notification_sent_at", null);
+    return;
+  }
+
+  // Claim a short delivery lease. Failed or crashed invocations can be
+  // reclaimed, while the shared in-app/outbox guards make that retry
+  // idempotent after either side of delivery already succeeded.
+  const claimedAt = new Date().toISOString();
+  const staleBefore = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  const { data: claimed } = await client
+    .from("daily_bible_quizzes")
+    .update({ notification_claimed_at: claimedAt })
+    .eq("id", quizId)
+    .is("notification_sent_at", null)
+    .or(
+      `notification_claimed_at.is.null,notification_claimed_at.lt.${staleBefore}`,
+    )
+    .select("id")
+    .maybeSingle();
+  if (!claimed) return;
+
+  const title = "Daily Bible Quiz Is Ready";
+  const body = "Today’s 5-question Bible challenge is now live. Can you earn 100 points?";
+  const route = `/daily_bible_quiz?quizId=${quizId}`;
+  await createInAppNotifications(client, {
+    churchId,
+    title,
+    body,
+    type: "daily_bible_quiz",
+    route,
+    entityTable: "daily_bible_quizzes",
+    entityId: quizId,
+    preferenceColumn: "notifyDailyQuiz",
+  });
+  const push = await sendTopicPush(client, {
+    topic: `church_${churchId}_quiz`,
+    title,
+    body,
+    route,
+    type: "daily_bible_quiz",
+    entityTable: "daily_bible_quizzes",
+    entityId: quizId,
+  });
+  if (push.sent) {
+    await client
+      .from("daily_bible_quizzes")
+      .update({
+        notification_sent_at: new Date().toISOString(),
+        notification_claimed_at: null,
+      })
+      .eq("id", quizId)
+      .eq("notification_claimed_at", claimedAt);
+  } else {
+    await client
+      .from("daily_bible_quizzes")
+      .update({ notification_claimed_at: null })
+      .eq("id", quizId)
+      .eq("notification_claimed_at", claimedAt);
+    issues.push({
+      church_id: churchId,
+      stage: "push_notification",
+      message: push.reason ?? "Quiz push notification was not sent.",
+    });
+  }
+}
+
 Deno.serve(async (request) => {
   const options = handleOptions(request);
   if (options) return options;
   if (request.method !== "POST") return jsonResponse({ error: "POST required." }, 405);
 
   const client = serviceClient();
+  const requestBody = await request.json().catch(() => ({}));
+  const action = String(requestBody.action ?? "release");
+  const preparing = action === "prepare";
+  const regenerating = action === "regenerate_scheduled";
+  const shouldPublish = !preparing && !regenerating;
   const cronAuthorized = hasCronSecret(request, "DAILY_QUIZ_CRON_SECRET");
-  const quizDate = jamaicaDateString();
-  const runId = await createGenerationRun(
-    client,
-    quizDate,
-    cronAuthorized ? "cron" : "user",
-  );
-  const availableAt = nextJamaicaRefresh(7, new Date(Date.now() - 24 * 60 * 60 * 1000));
-  const expiresAt = nextJamaicaRefresh(7);
+  const today = jamaicaDateString();
+  let quizDate = preparing ? dateOffset(today, 1) : today;
   let churchIds: string[] = [];
+  let requestedQuiz: Record<string, unknown> | null = null;
 
-  if (cronAuthorized) {
+  if (regenerating) {
+    if (!(await canRegenerateScheduledQuiz(client, request))) {
+      return jsonResponse({ error: "Quiz refresh permission is required." }, 403);
+    }
+    const quizId = String(requestBody.quiz_id ?? "").trim();
+    if (!quizId) return jsonResponse({ error: "Quiz ID is required." }, 400);
+    const { data: quiz } = await client
+      .from("daily_bible_quizzes")
+      .select("*")
+      .eq("id", quizId)
+      .maybeSingle();
+    if (!quiz || quiz.status !== "scheduled" || new Date(quiz.available_at) <= new Date()) {
+      return jsonResponse({ error: "Only an upcoming scheduled quiz can be refreshed." }, 409);
+    }
+    requestedQuiz = quiz;
+    quizDate = String(quiz.quiz_date);
+    churchIds = [String(quiz.church_id)];
+  } else if (cronAuthorized) {
     const { data: churchRows } = await client
       .from("users")
       .select("placeId")
       .not("placeId", "is", null);
-    churchIds = Array.from(
-      new Set([
-        GLOBAL_VISITOR_CHURCH_ID,
-        ...(churchRows ?? []).map((row) => String(row.placeId ?? "").trim()).filter(Boolean),
-      ]),
-    );
+    churchIds = Array.from(new Set([
+      GLOBAL_VISITOR_CHURCH_ID,
+      ...(churchRows ?? []).map((row) => String(row.placeId ?? "").trim()).filter(Boolean),
+    ]));
   } else {
     let userId = "";
     try {
@@ -275,233 +446,188 @@ Deno.serve(async (request) => {
     } catch (_) {
       return jsonResponse({ error: "Forbidden." }, 403);
     }
+    if (preparing) return jsonResponse({ error: "Forbidden." }, 403);
     if (!hasReachedJamaicaHour(7)) {
       return jsonResponse({ error: "Today's quiz opens at 7:00 AM Jamaica time." }, 425);
     }
-    const profile = await userProfile(client, userId);
-    const churchId = profileQuizChurchId(profile);
-    churchIds = [churchId];
+    churchIds = [profileQuizChurchId(await userProfile(client, userId))];
   }
 
+  const runId = await createGenerationRun(
+    client,
+    quizDate,
+    regenerating ? "developer_refresh" : preparing ? "cron_prepare" : cronAuthorized ? "cron_release" : "user",
+  );
+  const availableAt = quizReleaseAt(quizDate);
+  const expiresAt = quizReleaseAt(dateOffset(quizDate, 1));
   const prompt = `You are creating Bible Quiz questions for Grace Connect, a Christian church app.
-Generate 20 fact-based, respectful, clear multiple-choice questions strictly grounded in Scripture.
-Today’s Jamaica date key is ${quizDate}; avoid repeating common starter questions from previous days.
-Use a varied mix of Old Testament, Gospels, Acts, Epistles, wisdom literature, prophets, parables, miracles, women and men of faith, and Christian living.
-Do not generate the same five-question format each day. Vary the books, people, events, and categories heavily.
-Each question must have four options and one unambiguous correct answer.
-Provide a concise explanation and one or more accurate Bible references supporting the answer.
-Avoid denomination-specific interpretations, trick questions, unclear wording, prophecy-date predictions, prosperity claims, and copyrighted Bible quotations.
-Use broadly accepted Bible facts that can be verified against a Bible text.
+Generate 12 varied, fact-based, respectful multiple-choice questions strictly grounded in Scripture.
+The Jamaica release date is ${quizDate}. Avoid famous starter questions and paraphrases of the same fact.
+Mix Old Testament, Gospels, Acts, Epistles, wisdom, prophets, parables, miracles, women and men of faith, and Christian living.
+Each question needs four distinct options, one unambiguous correct answer, a concise explanation, and accurate references.
+Avoid denomination-specific interpretations, tricks, prophecy-date predictions, prosperity claims, and copyrighted quotations.
 Return valid JSON only in this shape:
 {"questions":[{"question":"string","options":["string","string","string","string"],"correct_option_index":0,"correct_answer":"string","explanation":"string","scripture_references":["Book Chapter:Verse"],"category":"string","difficulty":"easy"}]}`;
 
   let aiResponse: unknown = null;
   let aiStatus = "not_called";
-  try {
-    aiResponse = await callHuggingFaceJson(prompt);
-    aiStatus = Array.isArray((aiResponse as AiQuizResponse | null)?.questions)
-      ? "received"
-      : "invalid";
-  } catch (_) {
-    aiResponse = null;
-    aiStatus = "failed";
-  }
+  let aiAttempted = false;
+  const ensureAiResponse = async () => {
+    if (aiAttempted) return;
+    aiAttempted = true;
+    try {
+      aiResponse = await callHuggingFaceJson(prompt, 1800);
+      aiStatus = Array.isArray((aiResponse as AiQuizResponse | null)?.questions)
+        ? "received"
+        : "invalid";
+    } catch (_) {
+      aiStatus = "failed";
+    }
+  };
   await updateGenerationRun(client, runId, {
     churches_checked: churchIds.length,
     ai_status: aiStatus,
   });
 
   let published = 0;
-  const sources = new Set<string>();
+  let scheduled = 0;
   let skippedExisting = 0;
   let failedChurches = 0;
+  const sources = new Set<string>();
   const issues: GenerationIssue[] = [];
+
   for (const churchId of churchIds) {
-    const existing = await client
-      .from("daily_bible_quizzes")
-      .select("id, status, notification_sent_at")
-      .eq("church_id", churchId)
-      .eq("quiz_date", quizDate)
-      .maybeSingle();
+    const existingResult = requestedQuiz
+      ? { data: requestedQuiz }
+      : await client
+        .from("daily_bible_quizzes")
+        .select("*")
+        .eq("church_id", churchId)
+        .eq("quiz_date", quizDate)
+        .maybeSingle();
+    const existing = existingResult.data as Record<string, unknown> | null;
+
+    if (existing?.status === "published") {
+      if (shouldPublish) await publishQuiz(client, existing, churchId, issues);
+      skippedExisting++;
+      continue;
+    }
+
+    const existingReady = existing?.id
+      ? await quizHasExactlyFiveQuestions(client, String(existing.id))
+      : false;
+    if (!regenerating && existingReady && existing?.status === "scheduled") {
+      if (shouldPublish) {
+        await publishQuiz(client, existing, churchId, issues);
+        published++;
+      } else {
+        scheduled++;
+      }
+      skippedExisting++;
+      continue;
+    }
 
     const recentHashes = await recentQuestionHashes(client, churchId, quizDate);
-    if (existing.data?.status === "published" && existing.data?.notification_sent_at) {
-      const existingIsFresh = await existingQuizHasFiveFreshQuestions(
-        client,
-        String(existing.data.id),
-        recentHashes,
-      );
-      if (existingIsFresh) {
-        skippedExisting++;
-        continue;
+    if (regenerating && existing?.id) {
+      const { data: currentRows } = await client
+        .from("daily_bible_quiz_questions")
+        .select("question_hash, question_text, correct_answer, scripture_references, category, difficulty, option_a, option_b, option_c, option_d, correct_option_index, explanation")
+        .eq("quiz_id", existing.id);
+      for (const row of currentRows ?? []) {
+        const hash = String(row.question_hash ?? "").trim();
+        if (hash) recentHashes.add(hash);
+        const candidate = validateQuestion({
+          question: row.question_text,
+          options: [row.option_a, row.option_b, row.option_c, row.option_d],
+          correct_option_index: row.correct_option_index,
+          correct_answer: row.correct_answer,
+          explanation: row.explanation,
+          scripture_references: row.scripture_references,
+          category: row.category,
+          difficulty: row.difficulty,
+        });
+        if (candidate) recentHashes.add(await hashQuestion(candidate));
       }
     }
+
+    // Scheduled quizzes publish exactly as reviewed. AI is only called when a
+    // quiz really needs to be generated or deliberately refreshed.
+    await ensureAiResponse();
     const selected = await selectFiveQuestions(
       aiResponse,
-      `${quizDate}:${churchId}`,
+      `${quizDate}:${churchId}:${regenerating ? crypto.randomUUID() : "scheduled"}`,
       recentHashes,
     );
     sources.add(selected.source);
     const validationNotes = selected.source === "fallback"
       ? selected.reusedRecent
-        ? "AI response unavailable/invalid. Curated bank used; recent repeats were avoided where possible."
-        : "AI response unavailable/invalid. Varied curated bank used."
+        ? "AI response was unavailable or invalid; curated questions were used and recent repeats were avoided where possible."
+        : "AI response was unavailable or invalid; a varied curated set was used."
       : selected.reusedRecent
-        ? "AI generated the quiz. Recent repeats were avoided where possible."
+        ? "AI generated the quiz; recent semantic repeats were avoided where possible."
         : null;
 
-    const { data: quiz, error: quizError } = await client
-      .from("daily_bible_quizzes")
-      .upsert({
-        id: existing.data?.id,
-        church_id: churchId,
-        quiz_date: quizDate,
-        available_at: availableAt.toISOString(),
-        expires_at: expiresAt.toISOString(),
-        status: "draft",
-        generation_source: selected.source,
-        generation_status: "pending",
-        notification_sent_at: null,
-        validation_notes: validationNotes,
-      }, { onConflict: "church_id,quiz_date" })
-      .select("id")
-      .single();
-
+    let quiz = existing;
+    let quizError: { message: string } | null = null;
+    if (!quiz) {
+      const inserted = await client
+        .from("daily_bible_quizzes")
+        .insert({
+          church_id: churchId,
+          quiz_date: quizDate,
+          available_at: availableAt.toISOString(),
+          expires_at: expiresAt.toISOString(),
+          status: "draft",
+          generation_source: selected.source,
+          generation_status: "pending",
+          notification_sent_at: null,
+          validation_notes: validationNotes,
+        })
+        .select("*")
+        .single();
+      quiz = inserted.data;
+      quizError = inserted.error;
+    }
     if (quizError || !quiz) {
       failedChurches++;
-      issues.push({
-        church_id: churchId,
-        stage: "quiz_upsert",
-        message: quizError?.message ?? "Quiz row could not be saved.",
-      });
+      issues.push({ church_id: churchId, stage: "quiz_upsert", message: quizError?.message ?? "Quiz row could not be saved." });
       continue;
     }
 
-    await client
-      .from("daily_bible_quizzes")
-      .update({
-        status: "draft",
-        notification_sent_at: null,
-      })
-      .eq("id", quiz.id);
-
-    await client.from("daily_bible_quiz_questions").delete().eq("quiz_id", quiz.id);
-    const questionRows = [];
-    for (let index = 0; index < selected.questions.length; index++) {
-      const question = selected.questions[index];
-      questionRows.push({
-        quiz_id: quiz.id,
-        question_order: index + 1,
-        question_text: question.question,
-        option_a: question.options[0],
-        option_b: question.options[1],
-        option_c: question.options[2],
-        option_d: question.options[3],
-        correct_option_index: question.correct_option_index,
-        correct_answer: question.correct_answer,
-        explanation: question.explanation,
-        scripture_references: question.scripture_references,
-        category: question.category,
-        difficulty: question.difficulty,
-        question_hash: await hashQuestion(question.question),
+    const questions = [];
+    for (const question of selected.questions) {
+      questions.push({
+        ...question,
+        question_hash: await hashQuestion(question),
       });
     }
-    const { error: questionError } = await client
-      .from("daily_bible_quiz_questions")
-      .insert(questionRows);
-    if (questionError) {
+    const targetStatus = shouldPublish ? "published" : "scheduled";
+    const { error: replacementError } = await client.rpc(
+      "replace_daily_bible_quiz_questions",
+      {
+        p_quiz_id: quiz.id,
+        p_questions: questions,
+        p_generation_source: selected.source,
+        p_generation_status: selected.source === "ai" ? "generated" : "fallback",
+        p_validation_notes: validationNotes,
+        p_status: targetStatus,
+      },
+    );
+    if (replacementError) {
       failedChurches++;
-      issues.push({
-        church_id: churchId,
-        stage: "question_insert",
-        message: questionError.message,
-      });
-      await client
-        .from("daily_bible_quizzes")
-        .update({
-          status: "failed",
-          generation_status: "failed",
-          validation_notes: `Question insert failed: ${questionError.message}`,
-        })
-        .eq("id", quiz.id);
-      continue;
-    }
-
-    const { count: questionCount, error: countError } = await client
-      .from("daily_bible_quiz_questions")
-      .select("id", { count: "exact", head: true })
-      .eq("quiz_id", quiz.id);
-    if (countError || questionCount !== 5) {
-      failedChurches++;
-      issues.push({
-        church_id: churchId,
-        stage: "question_validation",
-        message: countError?.message ?? `Expected 5 questions, found ${questionCount ?? 0}.`,
-      });
-      await client
-        .from("daily_bible_quizzes")
-        .update({
-          status: "failed",
-          generation_status: "failed",
-          validation_notes: countError?.message ?? `Expected 5 questions, found ${questionCount ?? 0}.`,
-        })
-        .eq("id", quiz.id);
-      continue;
-    }
-
-    await client
-      .from("daily_bible_quizzes")
-      .update({
-        status: "published",
-        generation_status: selected.source === "ai" ? "generated" : "fallback",
-      })
-      .eq("id", quiz.id);
-
-    const title = "Daily Bible Quiz Is Ready";
-    const body = "Today’s 5-question Bible challenge is now live. Can you earn 100 points?";
-    const route = `/daily_bible_quiz?quizId=${quiz.id}`;
-
-    if (churchId !== GLOBAL_VISITOR_CHURCH_ID) {
-      await createInAppNotifications(client, {
-        churchId,
-        title,
-        body,
-        type: "daily_bible_quiz",
-        route,
-        entityTable: "daily_bible_quizzes",
-        entityId: quiz.id,
-        preferenceColumn: "notifyDailyQuiz",
-      });
-
-      const pushResult = await sendTopicPush(client, {
-        topic: `church_${churchId}_quiz`,
-        title,
-        body,
-        route,
-        type: "daily_bible_quiz",
-        entityTable: "daily_bible_quizzes",
-        entityId: quiz.id,
-      });
-
-      if (pushResult.sent) {
-        await client
-          .from("daily_bible_quizzes")
-          .update({ notification_sent_at: new Date().toISOString() })
-          .eq("id", quiz.id);
-      } else {
-        issues.push({
-          church_id: churchId,
-          stage: "push_notification",
-          message: pushResult.reason ?? "Quiz push notification was not sent.",
-        });
+      issues.push({ church_id: churchId, stage: "atomic_question_replace", message: replacementError.message });
+      if (!regenerating) {
+        await client.from("daily_bible_quizzes").update({ status: "failed", generation_status: "failed" }).eq("id", quiz.id);
       }
-    } else {
-      await client
-        .from("daily_bible_quizzes")
-        .update({ notification_sent_at: new Date().toISOString() })
-        .eq("id", quiz.id);
+      continue;
     }
-    published++;
+
+    if (shouldPublish) {
+      await publishQuiz(client, { ...quiz, status: "published", notification_sent_at: null }, churchId, issues);
+      published++;
+    } else {
+      scheduled++;
+    }
   }
 
   await updateGenerationRun(client, runId, {
@@ -513,18 +639,19 @@ Return valid JSON only in this shape:
     error_message: issues.length
       ? issues.map((issue) => `${issue.church_id}:${issue.stage}:${issue.message}`).slice(0, 5).join(" | ")
       : null,
-    metadata: {
-      skipped_existing: skippedExisting,
-      failed_churches: failedChurches,
-      issues,
-    },
+    metadata: { action, scheduled, skipped_existing: skippedExisting, failed_churches: failedChurches, issues },
   });
 
+  if (regenerating && failedChurches > 0) {
+    return jsonResponse({ error: issues[0]?.message ?? "Unable to refresh scheduled quiz." }, 500);
+  }
   return jsonResponse({
     ok: true,
+    action,
     quiz_date: quizDate,
     churches_checked: churchIds.length,
     quizzes_published: published,
-    source: Array.from(sources).join(",") || "none",
+    quizzes_scheduled: scheduled,
+    source: Array.from(sources).join(",") || "existing",
   });
 });

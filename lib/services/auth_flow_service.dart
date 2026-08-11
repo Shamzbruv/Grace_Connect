@@ -183,49 +183,34 @@ class AuthFlowService {
     );
   }
 
-  static Future<void> sendPasswordResetEmail(String email) {
-    return _sendBrandedPasswordResetEmail(email).catchError((error) {
-      debugPrint(
-          'Branded password reset email unavailable; using Supabase default. $error');
-      return _withRedirectFallback<void>(
-        purpose: AuthRedirectPurpose.passwordReset,
-        withRedirect: (redirectTo) =>
-            Supabase.instance.client.auth.resetPasswordForEmail(
-          email,
-          redirectTo: redirectTo,
-        ),
-        withoutRedirect: () =>
-            Supabase.instance.client.auth.resetPasswordForEmail(email),
-      );
-    });
+  static Future<void> sendPasswordResetEmail(
+    String email, {
+    String? captchaToken,
+  }) {
+    return _sendBrandedPasswordResetEmail(
+      email,
+      captchaToken: captchaToken,
+    );
   }
 
-  static Future<void> _sendBrandedPasswordResetEmail(String email) async {
+  static Future<void> _sendBrandedPasswordResetEmail(
+    String email, {
+    String? captchaToken,
+  }) async {
     final response = await Supabase.instance.client.functions.invoke(
       'grace-mailer',
       body: {
         'action': 'password-reset',
         'email': email,
         'redirectTo': redirectUrl(AuthRedirectPurpose.passwordReset),
+        if (captchaToken?.trim().isNotEmpty ?? false)
+          'captchaToken': captchaToken!.trim(),
       },
     );
     final data = response.data;
     if (data is Map && data['ok'] == true) return;
     throw AuthException(
       'Grace Connect mailer did not confirm password reset delivery.',
-    );
-  }
-
-  static Future<void> sendDefaultPasswordResetEmail(String email) {
-    return _withRedirectFallback<void>(
-      purpose: AuthRedirectPurpose.passwordReset,
-      withRedirect: (redirectTo) =>
-          Supabase.instance.client.auth.resetPasswordForEmail(
-        email,
-        redirectTo: redirectTo,
-      ),
-      withoutRedirect: () =>
-          Supabase.instance.client.auth.resetPasswordForEmail(email),
     );
   }
 

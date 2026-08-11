@@ -10,6 +10,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import '../models/church_location.dart';
 import '../models/service_schedule.dart';
 import '../models/attendance_record.dart';
+import 'attendance_dwell_session.dart';
 import 'supabase_resilience.dart';
 
 class AttendanceSetupStatus {
@@ -67,7 +68,7 @@ class AttendanceCheckInPrompt {
     this.distanceMeters,
     this.radiusMeters,
     this.requiredDwellMinutes = 10,
-    this.currentDwellMinutes = 0,
+    this.currentDwellSeconds = 0,
   });
 
   final bool hasActiveService;
@@ -80,10 +81,14 @@ class AttendanceCheckInPrompt {
   final double? distanceMeters;
   final double? radiusMeters;
   final int requiredDwellMinutes;
-  final int currentDwellMinutes;
+  final int currentDwellSeconds;
 
-  int get remainingDwellMinutes =>
-      (requiredDwellMinutes - currentDwellMinutes).clamp(0, 999).toInt();
+  int get currentDwellMinutes => currentDwellSeconds ~/ 60;
+
+  int get remainingDwellSeconds =>
+      (requiredDwellMinutes * 60 - currentDwellSeconds).clamp(0, 59940).toInt();
+
+  int get remainingDwellMinutes => (remainingDwellSeconds + 59) ~/ 60;
 }
 
 class AttendanceService {
@@ -94,13 +99,19 @@ class AttendanceService {
   StreamSubscription<Position>? _positionStreamSubscription;
   StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
   Timer? _activeServicePollTimer;
-  DateTime? _entryTime;
+  Timer? _monitoringRestartTimer;
+  Future<void>? _initializationFuture;
   String? _currentServiceId;
   bool _isMonitoring = false;
+  bool _monitoringRequested = false;
   bool _isPollingLocation = false;
+  bool _isProcessingLocation = false;
+  int _monitoringRestartAttempts = 0;
   String _lastDebugStatus = 'Auto-attendance has not started yet.';
   static const String _pendingAttendanceQueueKey =
       'pending_attendance_records_v1';
+  static const Duration _requiredClearOutsideDuration = Duration(minutes: 2);
+  static const Duration _maximumClearOutsideEvidenceGap = Duration(seconds: 90);
 
   // Singleton pattern for continuous monitoring
   static final AttendanceService _instance = AttendanceService._internal();
@@ -118,19 +129,32 @@ class AttendanceService {
     await _notificationsPlugin.initialize(settings);
   }
 
-  Future<void> initialize() async {
+  Future<void> initialize() {
+    return _initializationFuture ??=
+        _initialize().whenComplete(() => _initializationFuture = null);
+  }
+
+  Future<void> _initialize() async {
     final prefs = await SharedPreferences.getInstance();
     final autoCheckInEnabled = prefs.getBool('auto_check_in') ?? false;
     _startPendingAttendanceSync();
     unawaited(flushPendingAttendance());
     if (!autoCheckInEnabled) {
+      _monitoringRequested = false;
       stopMonitoring();
       _updateDebugStatus('Auto check-in disabled in settings.');
       return;
     }
+    _monitoringRequested = true;
 
-    // Prevent duplicate listeners
-    stopMonitoring();
+    // Several screens initialize this singleton. Keep the existing listener so
+    // navigating or tapping Recheck cannot restart the dwell countdown.
+    if (_isMonitoring && _positionStreamSubscription != null) {
+      unawaited(_pollCurrentLocationForAttendance());
+      return;
+    }
+
+    _clearMonitoringState(resetRestartAttempts: false);
 
     final serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
@@ -183,16 +207,39 @@ class AttendanceService {
   }
 
   void _startMonitoring() {
+    _monitoringRestartTimer?.cancel();
+    _monitoringRestartTimer = null;
+    _monitoringRequested = true;
     _setMonitoring(true);
     _updateDebugStatus('Starting monitoring...');
-    const LocationSettings locationSettings = LocationSettings(
-      accuracy: LocationAccuracy.high,
-      distanceFilter: 20, // Check every 20 meters
-    );
+    final LocationSettings locationSettings = defaultTargetPlatform ==
+            TargetPlatform.android
+        ? AndroidSettings(
+            accuracy: LocationAccuracy.high,
+            distanceFilter: 20,
+            intervalDuration: const Duration(seconds: 30),
+            foregroundNotificationConfig: const ForegroundNotificationConfig(
+              notificationTitle: 'Grace Connect auto-attendance',
+              notificationText:
+                  'Checking your church location while auto-attendance is enabled.',
+              notificationChannelName: 'Auto-attendance',
+              notificationIcon: AndroidResource(
+                name: 'ic_stat_grace_connect',
+                defType: 'drawable',
+              ),
+              enableWakeLock: true,
+              setOngoing: true,
+            ),
+          )
+        : const LocationSettings(
+            accuracy: LocationAccuracy.high,
+            distanceFilter: 20,
+          );
 
     _positionStreamSubscription =
         Geolocator.getPositionStream(locationSettings: locationSettings).listen(
             (Position position) async {
+      _monitoringRestartAttempts = 0;
       try {
         await _checkLocationLogic(position);
       } catch (e) {
@@ -201,16 +248,51 @@ class AttendanceService {
       }
     }, onError: (e) {
       debugPrint('Location stream error: $e');
-      _setMonitoring(false);
-      _updateDebugStatus('Error: $e');
+      _recoverFromLocationStreamError(e);
     });
 
     unawaited(_pollCurrentLocationForAttendance());
     _activeServicePollTimer?.cancel();
     _activeServicePollTimer = Timer.periodic(
-      const Duration(seconds: 60),
+      const Duration(seconds: 30),
       (_) => unawaited(_pollCurrentLocationForAttendance()),
     );
+  }
+
+  void _recoverFromLocationStreamError(Object error) {
+    unawaited(_positionStreamSubscription?.cancel());
+    _positionStreamSubscription = null;
+    _activeServicePollTimer?.cancel();
+    _activeServicePollTimer = null;
+    _isPollingLocation = false;
+    _setMonitoring(false);
+
+    if (!_monitoringRequested || _monitoringRestartTimer != null) {
+      _updateDebugStatus('Auto-attendance location monitoring paused.');
+      return;
+    }
+
+    const delays = <Duration>[
+      Duration(seconds: 5),
+      Duration(seconds: 15),
+      Duration(seconds: 30),
+      Duration(minutes: 1),
+    ];
+    final delay = delays[_monitoringRestartAttempts
+        .clamp(0, delays.length - 1)
+        .toInt()];
+    _monitoringRestartAttempts++;
+    _updateDebugStatus(
+      'Location monitoring was interrupted. Retrying automatically in ${delay.inSeconds} seconds.',
+    );
+    _monitoringRestartTimer = Timer(delay, () {
+      _monitoringRestartTimer = null;
+      if (!_monitoringRequested) return;
+      unawaited(initialize().catchError((Object restartError) {
+        debugPrint('Auto-attendance restart failed: $restartError');
+        _recoverFromLocationStreamError(restartError);
+      }));
+    });
   }
 
   Future<void> _pollCurrentLocationForAttendance() async {
@@ -218,11 +300,8 @@ class AttendanceService {
 
     _isPollingLocation = true;
     try {
-      final position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-        ),
-      );
+      final position = await _getReliablePosition();
+      _monitoringRestartAttempts = 0;
       await _checkLocationLogic(position);
     } catch (error) {
       debugPrint('Auto-attendance polling failed: $error');
@@ -234,20 +313,26 @@ class AttendanceService {
   }
 
   Future<void> _checkLocationLogic(Position position) async {
+    if (_isProcessingLocation) return;
+    _isProcessingLocation = true;
+    try {
+      await _processLocationLogic(position);
+    } finally {
+      _isProcessingLocation = false;
+    }
+  }
+
+  Future<void> _processLocationLogic(Position position) async {
     final user = _supabase.auth.currentUser;
     if (user == null) {
       _updateDebugStatus('User not logged in');
       return;
     }
 
-    // 1. Fetch User's Church Location
-    // We get placeId from Firestore 'users' collection for now, as that's where church assignment might be living.
-    final userDoc = await _supabase
-        .from('users')
-        .select('placeId')
-        .eq('uid', user.id)
-        .maybeSingle();
-    final placeId = userDoc?['placeId']?.toString();
+    // Profiles created during different migrations may identify the same auth
+    // user through either users.id or users.uid. Active membership is the
+    // canonical fallback, so those profiles still receive auto-attendance.
+    final placeId = await _getCurrentUserChurchId(user.id);
     if (placeId == null || placeId.isEmpty) {
       _updateDebugStatus('No church configured for user');
       return;
@@ -273,11 +358,50 @@ class AttendanceService {
           'Inside Geofence (${distanceInMeters.toStringAsFixed(1)}m)');
       await _handleInsideGeofence(user.id, placeId);
     } else {
-      // Outside Geofence
-      _updateDebugStatus(
-          'Outside Geofence (${distanceInMeters.toStringAsFixed(1)}m)');
-      _entryTime = null;
-      _currentServiceId = null;
+      final accuracyBuffer = position.accuracy.clamp(25, 150).toDouble();
+      final clearlyOutside =
+          distanceInMeters > churchLocation.radiusMeters + accuracyBuffer;
+      final activeService = await getActiveService(placeId);
+      final serviceId = activeService?['id']?.toString() ?? _currentServiceId;
+      final dwellExpired = serviceId == null
+          ? true
+          : await _recordOutsideObservation(
+              user.id,
+              serviceId,
+              clearlyOutside: clearlyOutside,
+            );
+
+      if (dwellExpired) {
+        _currentServiceId = null;
+        _updateDebugStatus(
+          'Outside Geofence (${distanceInMeters.toStringAsFixed(1)}m)',
+        );
+      } else {
+        _updateDebugStatus(
+          clearlyOutside
+              ? 'Outside geofence; waiting for a stable GPS reading before resetting dwell.'
+              : 'GPS accuracy is near the geofence edge; preserving the dwell timer.',
+        );
+      }
+    }
+  }
+
+  Future<Position> _getReliablePosition() async {
+    try {
+      return await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 20),
+        ),
+      );
+    } catch (error) {
+      final lastKnown = await Geolocator.getLastKnownPosition();
+      final timestamp = lastKnown?.timestamp;
+      final isRecent = timestamp != null &&
+          DateTime.now().difference(timestamp).abs() <=
+              const Duration(minutes: 5);
+      if (lastKnown != null && isRecent) return lastKnown;
+      rethrow;
     }
   }
 
@@ -316,6 +440,29 @@ class AttendanceService {
 
   Future<ChurchLocation?> getChurchLocation(String churchId) {
     return _getChurchLocation(churchId);
+  }
+
+  Future<String?> _getCurrentUserChurchId(String userId) async {
+    final users = await _supabase
+        .from('users')
+        .select('placeId')
+        .or('uid.eq.$userId,id.eq.$userId')
+        .limit(1);
+    final profileChurchId =
+        users.isEmpty ? '' : users.first['placeId']?.toString().trim() ?? '';
+    if (profileChurchId.isNotEmpty) return profileChurchId;
+
+    final memberships = await _supabase
+        .from('church_memberships')
+        .select('church_id')
+        .eq('user_id', userId)
+        .eq('membership_status', 'active')
+        .order('reviewed_at', ascending: false)
+        .limit(1);
+    if (memberships.isEmpty) return null;
+    final membershipChurchId =
+        memberships.first['church_id']?.toString().trim() ?? '';
+    return membershipChurchId.isEmpty ? null : membershipChurchId;
   }
 
   Future<void> saveChurchLocation({
@@ -370,7 +517,6 @@ class AttendanceService {
     final activeService = await getActiveService(churchId);
 
     if (activeService == null) {
-      _entryTime = null;
       _updateDebugStatus('Inside, but no active service.');
       return;
     }
@@ -381,34 +527,30 @@ class AttendanceService {
     final requiredDwellMinutes =
         activeService['minimumDwellMinutes'] as int? ?? 10;
 
-    // 4. Dwell Logic
-    if (_entryTime == null) {
-      _entryTime = DateTime.now();
-      _currentServiceId = activeServiceId;
-      _updateDebugStatus('Entered zone. Waiting for dwell...');
-      await _saveDwellEntry(userId, activeServiceId, _entryTime!);
-      debugPrint('Entered church geofence for service: $activeServiceId');
-    } else if (_currentServiceId == activeServiceId) {
-      final dwellDuration = DateTime.now().difference(_entryTime!);
-      _updateDebugStatus(
-          'Dwelling: ${dwellDuration.inMinutes}m / ${requiredDwellMinutes}m');
-      if (dwellDuration.inMinutes >= requiredDwellMinutes) {
-        // 5. Mark Present
-        _updateDebugStatus('Marking present...');
-        await _markPresent(
-          userId,
-          churchId,
-          activeServiceId,
-          activeServiceStartTime,
-          activeServiceName,
-        );
-      }
-    } else {
-      // Service changed while inside? Reset
-      _entryTime = DateTime.now();
-      _currentServiceId = activeServiceId;
-      await _saveDwellEntry(userId, activeServiceId, _entryTime!);
-      _updateDebugStatus('Service changed. Resetting dwell.');
+    // Always restore the durable session before calculating dwell. The app has
+    // several legitimate initialization entry points, and none of them should
+    // be able to overwrite a countdown that is already in progress.
+    final observedAt = DateTime.now();
+    final entryTime = await _readOrStartDwellEntry(
+      userId,
+      activeServiceId,
+      observedAt: observedAt,
+    );
+    _currentServiceId = activeServiceId;
+    final dwellDuration = observedAt.difference(entryTime);
+    final requiredDwellSeconds = requiredDwellMinutes * 60;
+    _updateDebugStatus(
+        'Dwelling: ${_formatDwellCountdown((requiredDwellSeconds - dwellDuration.inSeconds).clamp(0, 59940).toInt())} remaining');
+
+    if (dwellDuration.inSeconds >= requiredDwellSeconds) {
+      _updateDebugStatus('Marking present...');
+      await _markPresent(
+        userId,
+        churchId,
+        activeServiceId,
+        activeServiceStartTime,
+        activeServiceName,
+      );
     }
   }
 
@@ -478,6 +620,13 @@ class AttendanceService {
     return [hour, minute];
   }
 
+  String _formatDwellCountdown(int seconds) {
+    final safeSeconds = seconds.clamp(0, 59940).toInt();
+    final minutes = safeSeconds ~/ 60;
+    final remainder = safeSeconds % 60;
+    return '$minutes:${remainder.toString().padLeft(2, '0')}';
+  }
+
   Future<void> _markPresent(
     String userId,
     String churchId,
@@ -486,20 +635,14 @@ class AttendanceService {
     String? serviceName, {
     String method = 'auto_geofence',
   }) async {
-    // Check duplication
-    final todayStart = _jamaicaDayStartUtc(DateTime.now());
-    final tomorrowStart = todayStart.add(const Duration(days: 1));
-
-    final existingQuery = await _supabase
-        .from('attendance')
-        .select('id')
-        .eq('user_id', userId)
-        .eq('service_id', serviceId)
-        .gte('timestamp', todayStart.toIso8601String())
-        .lt('timestamp', tomorrowStart.toIso8601String())
-        .limit(1);
-
-    if ((existingQuery as List).isNotEmpty) {
+    // A failed duplicate-check must not prevent the offline queue from saving
+    // attendance when the dwell countdown completes.
+    if (await _hasAttendanceForToday(
+      userId,
+      churchId,
+      serviceId,
+      continueWhenOffline: true,
+    )) {
       _updateDebugStatus('Already marked present for today.');
       return;
     }
@@ -578,7 +721,7 @@ class AttendanceService {
     final requiredDwellMinutes =
         activeService['minimumDwellMinutes'] as int? ?? 10;
 
-    if (await _hasAttendanceForToday(user.id, serviceId)) {
+    if (await _hasAttendanceForToday(user.id, churchId, serviceId)) {
       return AttendanceCheckInPrompt(
         hasActiveService: true,
         canMarkPresent: false,
@@ -619,11 +762,7 @@ class AttendanceService {
       );
     }
 
-    final position = await Geolocator.getCurrentPosition(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.high,
-      ),
-    );
+    final position = await _getReliablePosition();
     final distance = Geolocator.distanceBetween(
       position.latitude,
       position.longitude,
@@ -633,7 +772,12 @@ class AttendanceService {
     final isInside = distance <= churchLocation.radiusMeters;
 
     if (!isInside) {
-      await _clearDwellEntry(user.id, serviceId);
+      final accuracyBuffer = position.accuracy.clamp(25, 150).toDouble();
+      await _recordOutsideObservation(
+        user.id,
+        serviceId,
+        clearlyOutside: distance > churchLocation.radiusMeters + accuracyBuffer,
+      );
       return AttendanceCheckInPrompt(
         hasActiveService: true,
         canMarkPresent: false,
@@ -649,9 +793,17 @@ class AttendanceService {
       );
     }
 
-    final entryTime = await _readOrStartDwellEntry(user.id, serviceId);
-    final currentDwell = DateTime.now().difference(entryTime).inMinutes;
-    final canMarkPresent = currentDwell >= requiredDwellMinutes;
+    final observedAt = DateTime.now();
+    final entryTime = await _readOrStartDwellEntry(
+      user.id,
+      serviceId,
+      observedAt: observedAt,
+    );
+    final currentDwellSeconds = observedAt.difference(entryTime).inSeconds;
+    final requiredDwellSeconds = requiredDwellMinutes * 60;
+    final remainingDwellSeconds =
+        (requiredDwellSeconds - currentDwellSeconds).clamp(0, 59940).toInt();
+    final canMarkPresent = currentDwellSeconds >= requiredDwellSeconds;
 
     return AttendanceCheckInPrompt(
       hasActiveService: true,
@@ -660,13 +812,13 @@ class AttendanceService {
       alreadyMarked: false,
       message: canMarkPresent
           ? 'You are verified on-site for $serviceName.'
-          : 'Stay on property for ${requiredDwellMinutes - currentDwell} more minute(s) to unlock check-in.',
+          : 'Stay on property for ${_formatDwellCountdown(remainingDwellSeconds)} to unlock automatic check-in.',
       serviceId: serviceId,
       serviceName: serviceName,
       distanceMeters: distance,
       radiusMeters: churchLocation.radiusMeters,
       requiredDwellMinutes: requiredDwellMinutes,
-      currentDwellMinutes: currentDwell,
+      currentDwellSeconds: currentDwellSeconds,
     );
   }
 
@@ -724,7 +876,7 @@ class AttendanceService {
 
     final serviceId = activeService['id'] as String;
     final serviceName = activeService['name'] as String;
-    if (await _hasAttendanceForToday(user.id, serviceId)) {
+    if (await _hasAttendanceForToday(user.id, churchId, serviceId)) {
       return AttendanceCheckInPrompt(
         hasActiveService: true,
         canMarkPresent: false,
@@ -762,11 +914,7 @@ class AttendanceService {
       );
     }
 
-    final position = await Geolocator.getCurrentPosition(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.high,
-      ),
-    );
+    final position = await _getReliablePosition();
     final distance = Geolocator.distanceBetween(
       position.latitude,
       position.longitude,
@@ -775,9 +923,18 @@ class AttendanceService {
     );
     final isInside = distance <= churchLocation.radiusMeters;
     if (isInside) {
-      await _readOrStartDwellEntry(user.id, serviceId);
+      await _readOrStartDwellEntry(
+        user.id,
+        serviceId,
+        observedAt: DateTime.now(),
+      );
     } else {
-      await _clearDwellEntry(user.id, serviceId);
+      final accuracyBuffer = position.accuracy.clamp(25, 150).toDouble();
+      await _recordOutsideObservation(
+        user.id,
+        serviceId,
+        clearlyOutside: distance > churchLocation.radiusMeters + accuracyBuffer,
+      );
     }
 
     return AttendanceCheckInPrompt(
@@ -793,7 +950,7 @@ class AttendanceService {
       distanceMeters: distance,
       radiusMeters: churchLocation.radiusMeters,
       requiredDwellMinutes: 0,
-      currentDwellMinutes: isInside ? 0 : 0,
+      currentDwellSeconds: 0,
     );
   }
 
@@ -839,20 +996,14 @@ class AttendanceService {
     final finalServiceId = activeService['id']! as String;
     final finalServiceName = activeService['name']! as String;
 
-    // 2. Check if already marked present for this service (or today broadly if ad-hoc)
-    final todayStart = _jamaicaDayStartUtc(DateTime.now());
-    final tomorrowStart = todayStart.add(const Duration(days: 1));
-
-    final existingQuery = await _supabase
-        .from('attendance')
-        .select('id')
-        .eq('user_id', userId)
-        .eq('service_id', finalServiceId)
-        .gte('timestamp', todayStart.toIso8601String())
-        .lt('timestamp', tomorrowStart.toIso8601String())
-        .limit(1);
-
-    if ((existingQuery as List).isNotEmpty) {
+    // 2. Check if already marked present for this service. Continue into the
+    // offline queue if only the read check is unavailable.
+    if (await _hasAttendanceForToday(
+      userId,
+      churchId,
+      finalServiceId,
+      continueWhenOffline: true,
+    )) {
       throw Exception('You have already checked in for this service.');
     }
 
@@ -880,9 +1031,13 @@ class AttendanceService {
 
   Future<void> _insertAttendanceRecord(AttendanceRecord record) async {
     try {
-      await _supabase.from('attendance').insert(record.toMap());
+      await _writeAttendanceRecord(record.toMap());
       unawaited(flushPendingAttendance());
     } catch (error) {
+      if (_isDuplicateAttendanceError(error)) {
+        _updateDebugStatus('Already marked present for today.');
+        return;
+      }
       if (!_isRetryableAttendanceWriteError(error)) {
         _updateDebugStatus(
             'Attendance could not be saved. Please refresh and try again.');
@@ -893,6 +1048,28 @@ class AttendanceService {
       _updateDebugStatus(
           'Attendance saved on this device and will sync when online.');
       debugPrint('Attendance queued for sync: $error');
+    }
+  }
+
+  Future<void> _writeAttendanceRecord(Map<String, dynamic> record) async {
+    try {
+      await _supabase.rpc('record_my_attendance', params: {
+        'p_church_id': record['church_id'],
+        'p_service_id': record['service_id'],
+        'p_timestamp': record['timestamp'],
+        'p_method': record['method'],
+        'p_present': record['present'],
+        'p_status': record['status'],
+        'p_minutes_late': record['minutes_late'],
+        'p_reason_for_absence': record['reason_for_absence'],
+        'p_engagement_answer': record['engagement_answer'],
+        'p_service_name': record['service_name'],
+      });
+    } catch (error) {
+      if (!_isMissingAttendanceRpcError(error)) rethrow;
+      // Forward-compatible fallback while the app and database migration roll
+      // out independently.
+      await _supabase.from('attendance').insert(record);
     }
   }
 
@@ -926,11 +1103,12 @@ class AttendanceService {
         final record = Map<String, dynamic>.from(decoded);
         final exists = await _queuedAttendanceAlreadySynced(record);
         if (!exists) {
-          await _supabase.from('attendance').insert(record);
+          await _writeAttendanceRecord(record);
         }
       } catch (error) {
         debugPrint('Pending attendance sync failed: $error');
-        if (_isRetryableAttendanceWriteError(error)) {
+        if (_isRetryableAttendanceWriteError(error) &&
+            !_isDuplicateAttendanceError(error)) {
           remaining.add(encoded);
         }
       }
@@ -945,21 +1123,28 @@ class AttendanceService {
   Future<bool> _queuedAttendanceAlreadySynced(
       Map<String, dynamic> record) async {
     final userId = record['user_id']?.toString() ?? '';
+    final churchId = record['church_id']?.toString() ?? '';
     final serviceId = record['service_id']?.toString() ?? '';
     final timestamp = DateTime.tryParse(record['timestamp']?.toString() ?? '');
-    if (userId.isEmpty || serviceId.isEmpty || timestamp == null) return false;
+    if (userId.isEmpty ||
+        churchId.isEmpty ||
+        serviceId.isEmpty ||
+        timestamp == null) {
+      return false;
+    }
 
     final dayStart = _jamaicaDayStartUtc(timestamp);
     final nextDayStart = dayStart.add(const Duration(days: 1));
     final rows = await _supabase
         .from('attendance')
-        .select('id')
+        .select('id, present')
         .eq('user_id', userId)
+        .eq('church_id', churchId)
         .eq('service_id', serviceId)
         .gte('timestamp', dayStart.toIso8601String())
         .lt('timestamp', nextDayStart.toIso8601String())
-        .limit(1);
-    return rows.isNotEmpty;
+        .limit(5);
+    return rows.any((row) => row['present'] == true);
   }
 
   String _attendanceDedupeKey(Map<dynamic, dynamic> record) {
@@ -968,6 +1153,7 @@ class AttendanceService {
         ? _jamaicaDateKey(DateTime.now())
         : _jamaicaDateKey(timestamp);
     return [
+      record['church_id'] ?? '',
       record['user_id'] ?? '',
       record['service_id'] ?? '',
       record['status'] ?? '',
@@ -1008,6 +1194,21 @@ class AttendanceService {
         text.contains('502') ||
         text.contains('503') ||
         text.contains('504');
+  }
+
+  bool _isMissingAttendanceRpcError(Object error) {
+    final text = error.toString().toLowerCase();
+    return text.contains('record_my_attendance') &&
+        (text.contains('pgrst202') ||
+            text.contains('42883') ||
+            text.contains('function') && text.contains('not found'));
+  }
+
+  bool _isDuplicateAttendanceError(Object error) {
+    final text = error.toString().toLowerCase();
+    return text.contains('23505') ||
+        text.contains('duplicate key') ||
+        text.contains('attendance_one_record_per_member_service_day_idx');
   }
 
   Future<void> _showPostServiceNotification(String status) async {
@@ -1052,20 +1253,63 @@ class AttendanceService {
         permission == LocationPermission.whileInUse;
   }
 
-  Future<bool> _hasAttendanceForToday(String userId, String serviceId) async {
+  Future<bool> _hasAttendanceForToday(
+    String userId,
+    String churchId,
+    String serviceId, {
+    bool continueWhenOffline = false,
+  }) async {
+    if (await _hasQueuedAttendanceForToday(userId, churchId, serviceId)) {
+      return true;
+    }
+
     final todayStart = _jamaicaDayStartUtc(DateTime.now());
     final tomorrowStart = todayStart.add(const Duration(days: 1));
 
-    final existingQuery = await _supabase
-        .from('attendance')
-        .select('id')
-        .eq('user_id', userId)
-        .eq('service_id', serviceId)
-        .gte('timestamp', todayStart.toIso8601String())
-        .lt('timestamp', tomorrowStart.toIso8601String())
-        .limit(1);
+    try {
+      final existingQuery = await _supabase
+          .from('attendance')
+          .select('id, present')
+          .eq('user_id', userId)
+          .eq('church_id', churchId)
+          .eq('service_id', serviceId)
+          .gte('timestamp', todayStart.toIso8601String())
+          .lt('timestamp', tomorrowStart.toIso8601String())
+          .limit(5);
 
-    return (existingQuery as List).isNotEmpty;
+      return existingQuery.any((row) => row['present'] == true);
+    } catch (error) {
+      if (continueWhenOffline && _isRetryableAttendanceWriteError(error)) {
+        return false;
+      }
+      rethrow;
+    }
+  }
+
+  Future<bool> _hasQueuedAttendanceForToday(
+      String userId, String churchId, String serviceId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final queue = prefs.getStringList(_pendingAttendanceQueueKey) ?? const [];
+    final todayKey = _jamaicaDateKey(DateTime.now());
+    for (final encoded in queue) {
+      try {
+        final decoded = jsonDecode(encoded);
+        if (decoded is! Map) continue;
+        final timestamp =
+            DateTime.tryParse(decoded['timestamp']?.toString() ?? '');
+        if (decoded['user_id']?.toString() == userId &&
+            decoded['church_id']?.toString() == churchId &&
+            decoded['service_id']?.toString() == serviceId &&
+            decoded['present'] == true &&
+            timestamp != null &&
+            _jamaicaDateKey(timestamp) == todayKey) {
+          return true;
+        }
+      } catch (_) {
+        // A corrupt queue entry is discarded during the next flush.
+      }
+    }
+    return false;
   }
 
   Future<bool> hasAttendanceForActiveService(
@@ -1081,29 +1325,70 @@ class AttendanceService {
         effectiveUserId.isEmpty) {
       return false;
     }
-    return _hasAttendanceForToday(effectiveUserId, serviceId);
+    return _hasAttendanceForToday(effectiveUserId, churchId, serviceId);
   }
 
   Future<DateTime> _readOrStartDwellEntry(
-      String userId, String serviceId) async {
+    String userId,
+    String serviceId, {
+    required DateTime observedAt,
+  }) async {
     final prefs = await SharedPreferences.getInstance();
     final key = _dwellKey(userId, serviceId);
     final stored = prefs.getString(key);
-    final parsed = stored == null ? null : DateTime.tryParse(stored);
-    if (parsed != null) return parsed;
+    final parsed = AttendanceDwellSession.tryParse(
+      stored,
+      legacyObservedAt: observedAt,
+    );
+    final session = (parsed ??
+            AttendanceDwellSession(
+              startedAt: observedAt,
+              lastInsideAt: observedAt,
+            ))
+        .observedInsideAt(observedAt);
 
-    final now = DateTime.now();
-    await prefs.setString(key, now.toIso8601String());
-    _entryTime = now;
+    await prefs.setString(key, session.encode());
     _currentServiceId = serviceId;
-    return now;
+    return session.startedAt;
   }
 
-  Future<void> _saveDwellEntry(
-      String userId, String serviceId, DateTime entryTime) async {
+  Future<bool> _recordOutsideObservation(
+    String userId,
+    String serviceId, {
+    required bool clearlyOutside,
+    DateTime? observedAt,
+  }) async {
+    // Poor-accuracy readings near the radius are not proof that somebody left
+    // church. Preserve the countdown until multiple reliable fixes establish
+    // that they remained clearly outside.
+    if (!clearlyOutside) return false;
+
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
-        _dwellKey(userId, serviceId), entryTime.toIso8601String());
+    final key = _dwellKey(userId, serviceId);
+    final now = observedAt ?? DateTime.now();
+    final session = AttendanceDwellSession.tryParse(
+      prefs.getString(key),
+      legacyObservedAt: now,
+    );
+    if (session == null) return true;
+    if (!session.isValidAt(now)) {
+      await prefs.remove(key);
+      return true;
+    }
+
+    final observed = session.observedClearlyOutsideAt(
+      now,
+      maximumEvidenceGap: _maximumClearOutsideEvidenceGap,
+    );
+    if (observed.hasSustainedClearOutsideEvidence(
+      _requiredClearOutsideDuration,
+    )) {
+      await prefs.remove(key);
+      return true;
+    }
+
+    await prefs.setString(key, observed.encode());
+    return false;
   }
 
   Future<void> _clearDwellEntry(String userId, String serviceId) async {
@@ -1112,7 +1397,7 @@ class AttendanceService {
   }
 
   String _dwellKey(String userId, String serviceId) {
-    final now = DateTime.now();
+    final now = _jamaicaWallClock(DateTime.now());
     final dateKey = '${now.year}-${now.month}-${now.day}';
     return 'attendance_dwell_${userId}_${serviceId}_$dateKey';
   }
@@ -1212,11 +1497,7 @@ class AttendanceService {
           'Location permission is required to set church location.');
     }
 
-    final position = await Geolocator.getCurrentPosition(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.high,
-      ),
-    );
+    final position = await _getReliablePosition();
 
     await saveChurchLocation(
       churchId: churchId,
@@ -1239,12 +1520,7 @@ class AttendanceService {
     String churchId;
     String churchName = 'Test Church';
 
-    final userDoc = await _supabase
-        .from('users')
-        .select('placeId')
-        .eq('uid', user.id)
-        .maybeSingle();
-    final userChurchId = userDoc?['placeId']?.toString();
+    final userChurchId = await _getCurrentUserChurchId(user.id);
 
     if (userChurchId != null) {
       churchId = userChurchId;
@@ -1286,15 +1562,23 @@ class AttendanceService {
     return 'Success! Created location & schedules for $churchName.\nPlace ID: $churchId';
   }
 
-  void stopMonitoring() {
+  void _clearMonitoringState({required bool resetRestartAttempts}) {
     _positionStreamSubscription?.cancel();
     _activeServicePollTimer?.cancel();
+    _monitoringRestartTimer?.cancel();
     _positionStreamSubscription = null;
     _activeServicePollTimer = null;
+    _monitoringRestartTimer = null;
     _isPollingLocation = false;
-    _entryTime = null;
+    _isProcessingLocation = false;
     _currentServiceId = null;
+    if (resetRestartAttempts) _monitoringRestartAttempts = 0;
     _setMonitoring(false);
+  }
+
+  void stopMonitoring() {
+    _monitoringRequested = false;
+    _clearMonitoringState(resetRestartAttempts: true);
     _updateDebugStatus('Monitoring stopped');
   }
 

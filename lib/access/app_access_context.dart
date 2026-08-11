@@ -48,7 +48,6 @@ class AppAccessContext {
       case AppFeature.dailyWord:
       case AppFeature.notifications:
       case AppFeature.savedItems:
-      case AppFeature.graceCircles:
       case AppFeature.graceRooms:
       case AppFeature.socialConnectionRequests:
       case AppFeature.directMessages:
@@ -78,14 +77,14 @@ class AppAccessContext {
 
   String unavailableMessageFor(AppFeature feature) {
     if (!hasActiveChurchMembership) {
-      return '${feature.label} is connected to a church workspace. You can keep using Community, Bible, public events, Grace Rooms, Grace Circles, Saved, and church discovery while you connect with a church.';
+      return '${feature.label} is connected to a church workspace. You can keep using Community, Bible, public events, Grace Rooms, Saved, and church discovery while you connect with a church.';
     }
 
     if (!hasActiveChurchSubscription) {
       final name = churchName?.trim().isNotEmpty == true
           ? churchName!.trim()
           : 'your church';
-      return '$name does not currently have an active Grace Connect subscription. Community, public events, Bible, Grace Rooms, Grace Circles, Saved, profile, notifications, and church transfer remain available, but church workspace tools are paused.';
+      return '$name does not currently have an active Grace Connect subscription. Community, public events, Bible, Grace Rooms, Saved, profile, notifications, and church transfer remain available, but church workspace tools are paused.';
     }
 
     return '${feature.label} is not available for this account right now.';

@@ -1,5 +1,64 @@
 project_id = "nimgsgnkcvddomrgkawb"
 
+[auth.email.template.invite]
+subject = "You are invited to Grace Connect"
+content_path = "./supabase/templates/invite.html"
+
+[auth.email.template.confirmation]
+subject = "Confirm your Grace Connect email"
+content_path = "./supabase/templates/confirmation.html"
+
+[auth.email.template.recovery]
+subject = "Reset your Grace Connect password"
+content_path = "./supabase/templates/recovery.html"
+
+[auth.email.template.magic_link]
+subject = "Your Grace Connect sign-in link"
+content_path = "./supabase/templates/magic_link.html"
+
+[auth.email.template.email_change]
+subject = "Confirm your new Grace Connect email"
+content_path = "./supabase/templates/email_change.html"
+
+[auth.email.template.reauthentication]
+subject = "Your Grace Connect verification code"
+content_path = "./supabase/templates/reauthentication.html"
+
+[auth.email.notification.password_changed]
+enabled = true
+subject = "Your Grace Connect password was changed"
+content_path = "./templates/password_changed_notification.html"
+
+[auth.email.notification.email_changed]
+enabled = true
+subject = "Your Grace Connect email was changed"
+content_path = "./templates/email_changed_notification.html"
+
+[auth.email.notification.phone_changed]
+enabled = true
+subject = "Your Grace Connect phone number was changed"
+content_path = "./templates/phone_changed_notification.html"
+
+[auth.email.notification.mfa_factor_enrolled]
+enabled = true
+subject = "A verification method was added to Grace Connect"
+content_path = "./templates/mfa_factor_enrolled_notification.html"
+
+[auth.email.notification.mfa_factor_unenrolled]
+enabled = true
+subject = "A verification method was removed from Grace Connect"
+content_path = "./templates/mfa_factor_unenrolled_notification.html"
+
+[auth.email.notification.identity_linked]
+enabled = true
+subject = "A sign-in method was linked to Grace Connect"
+content_path = "./templates/identity_linked_notification.html"
+
+[auth.email.notification.identity_unlinked]
+enabled = true
+subject = "A sign-in method was removed from Grace Connect"
+content_path = "./templates/identity_unlinked_notification.html"
+
 [functions.generate-daily-motivation]
 verify_jwt = false
 
@@ -7,6 +66,9 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.cleanup-daily-bible-quiz-attempts]
+verify_jwt = false
+
+[functions.send-bible-streak-reminders]
 verify_jwt = false
 
 [functions.finalize-monthly-quiz-winners]
@@ -19,4 +81,7 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.send-membership-request-push]
+verify_jwt = false
+
+[functions.send-grace-room-invitations]
 verify_jwt = false

@@ -752,7 +752,14 @@ class _LiveStreamingScreenState extends State<LiveStreamingScreen>
                             _buildViewerCountBadge(context),
                             const SizedBox(height: 12),
                             _buildEngagementCard(context),
-                            if (_isVisitorStream) ...[
+                            if (_isVisitorStream &&
+                                (context
+                                        .watch<UserRoleProvider>()
+                                        .userProfile
+                                        ?.placeId
+                                        .trim()
+                                        .isEmpty ??
+                                    true)) ...[
                               const SizedBox(height: 12),
                               _buildVisitRequestCard(context),
                             ],

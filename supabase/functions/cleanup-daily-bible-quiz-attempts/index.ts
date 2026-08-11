@@ -14,7 +14,9 @@ Deno.serve(async (request) => {
   if (forbidden) return forbidden;
 
   const client = serviceClient();
-  const cutoff = new Date(Date.now() - 10000).toISOString();
+  // Active attempts are resumable for the quiz day. The old ten-second cutoff
+  // regularly consumed attempts during ordinary mobile network jitter.
+  const cutoff = new Date(Date.now() - 26 * 60 * 60 * 1000).toISOString();
   const { data: stale } = await client
     .from("quiz_attempts")
     .select("id, member_id, church_id")
@@ -26,18 +28,18 @@ Deno.serve(async (request) => {
     await client
       .from("quiz_attempts")
       .update({
-        status: "abandoned",
+        status: "expired",
         failed_at: new Date().toISOString(),
-        failure_reason: "Heartbeat expired while quiz was active.",
+        failure_reason: "The Daily Bible Quiz release window expired.",
       })
       .eq("id", attempt.id);
     await client.from("quiz_security_events").insert({
       attempt_id: attempt.id,
       member_id: attempt.member_id,
       church_id: attempt.church_id,
-      event_type: "heartbeat_expired",
+      event_type: "quiz_window_expired",
     });
   }
 
-  return jsonResponse({ ok: true, abandoned: attempts.length });
+  return jsonResponse({ ok: true, expired: attempts.length });
 });

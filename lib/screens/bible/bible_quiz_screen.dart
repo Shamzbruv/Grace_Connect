@@ -34,6 +34,7 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
   bool _leaderboardLoading = false;
   String? _selectedQuizMonth;
   DateTime? _nextRefreshAt;
+  DateTime? _questionDeadlineAt;
   Timer? _questionTimer;
   Timer? _heartbeatTimer;
   Timer? _countdownTimer;
@@ -72,15 +73,17 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      if (!_active) _loadStatus();
+      if (_active && !_submitting) {
+        unawaited(_resumeActiveQuiz());
+      } else if (!_active) {
+        _loadStatus();
+      }
       return;
     }
-    if (!_active) return;
-    final attemptId = _attempt?['id']?.toString();
-    if (attemptId != null && attemptId.isNotEmpty) {
-      unawaited(_service.abandon(attemptId));
-    }
-    _failLocally();
+    // Pausing a phone, opening the notification shade, or switching apps is
+    // not a forfeiture. The server keeps the same question deadline and the
+    // attempt is restored on resume.
+    _stopQuizTimers();
   }
 
   void _loadStatus() {
@@ -92,6 +95,7 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
       _lastFeedback = null;
       _pendingCompletion = null;
       _completion = null;
+      _questionDeadlineAt = null;
       _lastCountdownAutoRefreshAt = null;
       _statusFuture = _service.status(generateIfMissing: true);
     });
@@ -104,8 +108,7 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
       message: 'You get one attempt each day.\n'
           'You have 30 seconds for every question.\n'
           'Each correct answer earns 20 points, up to 100 points.\n'
-          'Keep Grace Connect open while playing.\n'
-          'Leaving or backgrounding the app will end your quiz attempt.\n'
+          'If the app or connection is interrupted, you can resume the same question.\n'
           'Your church leaderboard updates after you finish.\n'
           'A new quiz becomes available every day at 7:00 AM.',
       confirmLabel: 'Start Quiz',
@@ -117,6 +120,18 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
   Future<void> _startQuiz() async {
     try {
       final data = await _service.start();
+      if (data['completed'] == true) {
+        final completedAttempt =
+            Map<String, dynamic>.from(data['attempt'] as Map);
+        setState(() {
+          _attempt = completedAttempt;
+          _question = null;
+          _active = false;
+          _completion = completedAttempt;
+        });
+        _stopQuizTimers();
+        return;
+      }
       final quizId = data['quiz_id']?.toString();
       setState(() {
         _activeQuizId = quizId ?? _activeQuizId;
@@ -124,6 +139,8 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
         _question = Map<String, dynamic>.from(data['question'] as Map);
         _nextRefreshAt =
             DateTime.tryParse(data['next_refresh_at']?.toString() ?? '');
+        _questionDeadlineAt =
+            DateTime.tryParse(data['question_deadline_at']?.toString() ?? '');
         _lastFeedback = null;
         _pendingCompletion = null;
         _completion = null;
@@ -132,6 +149,7 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
       _startQuestionTimers();
     } catch (error) {
       if (mounted) {
+        setState(() => _submitting = false);
         AppFeedback.show(
           context,
           error.toString().replaceFirst('Exception: ', ''),
@@ -145,7 +163,16 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
   void _startQuestionTimers() {
     _questionTimer?.cancel();
     _heartbeatTimer?.cancel();
-    _secondsLeft = 30;
+    final deadline = _questionDeadlineAt;
+    _secondsLeft = deadline == null
+        ? 30
+        : ((deadline.difference(DateTime.now()).inMilliseconds + 999) ~/ 1000)
+            .clamp(0, 30)
+            .toInt();
+    if (_secondsLeft <= 0) {
+      unawaited(_submitAnswer(-1));
+      return;
+    }
     _questionTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted || !_active) return;
       setState(() => _secondsLeft--);
@@ -185,6 +212,8 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
             : Map<String, dynamic>.from(data['next_question'] as Map);
         _nextRefreshAt =
             DateTime.tryParse(data['next_refresh_at']?.toString() ?? '');
+        _questionDeadlineAt =
+            DateTime.tryParse(data['question_deadline_at']?.toString() ?? '');
         _active = !completed;
       });
       if (completed) {
@@ -199,10 +228,10 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
       if (mounted) {
         AppFeedback.show(
           context,
-          error.toString().replaceFirst('Exception: ', ''),
-          type: AppFeedbackType.error,
+          'Connection interrupted. Restoring the same quiz question…',
+          type: AppFeedbackType.warning,
         );
-        _loadStatus();
+        await _resumeActiveQuiz();
       }
     } finally {
       if (mounted) setState(() => _submitting = false);
@@ -220,8 +249,48 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
       return;
     }
 
-    setState(() => _lastFeedback = null);
-    _startQuestionTimers();
+    // The server activates the next question here, after the member has read
+    // the explanation, and returns its authoritative 30-second deadline.
+    await _resumeActiveQuiz();
+  }
+
+  Future<void> _resumeActiveQuiz() async {
+    if (!mounted) return;
+    try {
+      final data = await _service.start();
+      if (!mounted) return;
+      if (data['completed'] == true) {
+        final completedAttempt =
+            Map<String, dynamic>.from(data['attempt'] as Map);
+        setState(() {
+          _attempt = completedAttempt;
+          _question = null;
+          _lastFeedback = null;
+          _pendingCompletion = null;
+          _completion = completedAttempt;
+          _active = false;
+        });
+        _stopQuizTimers();
+        await _loadLeaderboard();
+        return;
+      }
+      setState(() {
+        _activeQuizId = data['quiz_id']?.toString() ?? _activeQuizId;
+        _attempt = Map<String, dynamic>.from(data['attempt'] as Map);
+        _question = Map<String, dynamic>.from(data['question'] as Map);
+        _questionDeadlineAt =
+            DateTime.tryParse(data['question_deadline_at']?.toString() ?? '');
+        _nextRefreshAt =
+            DateTime.tryParse(data['next_refresh_at']?.toString() ?? '');
+        _lastFeedback = null;
+        _pendingCompletion = null;
+        _completion = null;
+        _active = true;
+      });
+      _startQuestionTimers();
+    } catch (_) {
+      if (mounted) _loadStatus();
+    }
   }
 
   Future<void> _loadLeaderboard({String? quizMonth}) async {
@@ -247,21 +316,6 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
         };
       });
     }
-  }
-
-  void _failLocally() {
-    _stopQuizTimers();
-    setState(() {
-      _active = false;
-      _question = null;
-      _lastFeedback = null;
-      _pendingCompletion = null;
-      _completion = {
-        'abandoned': true,
-        'total_score': _attempt?['total_score'] ?? 0,
-        'correct_answers': _attempt?['correct_answers'] ?? 0,
-      };
-    });
   }
 
   void _stopQuizTimers() {
@@ -380,6 +434,7 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
         if (attempt is Map && attempt.isNotEmpty) {
           return _AttemptStatusView(
             attempt: Map<String, dynamic>.from(attempt),
+            onResume: _resumeActiveQuiz,
             leaderboardData: _leaderboardData,
             leaderboardLoading: _leaderboardLoading,
             onMonthChanged: (month) => _loadLeaderboard(quizMonth: month),
@@ -753,6 +808,7 @@ class _CompletionView extends StatelessWidget {
 class _AttemptStatusView extends StatelessWidget {
   const _AttemptStatusView({
     required this.attempt,
+    required this.onResume,
     required this.leaderboardData,
     required this.leaderboardLoading,
     required this.onMonthChanged,
@@ -760,6 +816,7 @@ class _AttemptStatusView extends StatelessWidget {
   });
 
   final Map<String, dynamic> attempt;
+  final VoidCallback onResume;
   final Map<String, dynamic> leaderboardData;
   final bool leaderboardLoading;
   final ValueChanged<String> onMonthChanged;
@@ -768,6 +825,43 @@ class _AttemptStatusView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final status = attempt['status']?.toString() ?? 'completed';
+    if (status != 'completed') {
+      return ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                children: [
+                  const Icon(Icons.restore, size: 56),
+                  const SizedBox(height: 14),
+                  Text(
+                    'Your quiz is still available',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.outfit(
+                      fontSize: 26,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'A connection or app interruption paused the screen. Continue from the same question—your daily attempt was not lost.',
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 18),
+                  FilledButton.icon(
+                    onPressed: onResume,
+                    icon: const Icon(Icons.play_arrow_rounded),
+                    label: const Text('Resume Quiz'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      );
+    }
     return _CompletionView(
       completion: {
         'abandoned': status != 'completed',
