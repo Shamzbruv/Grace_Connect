@@ -157,6 +157,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         builder: (_) => _PostMediaViewerScreen(
           mediaUrl: mediaUrl,
           mediaType: post.mediaType ?? 'image',
+          mediaThumbnailUrl: post.mediaThumbnailUrl,
         ),
       ),
     );
@@ -294,6 +295,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                     borderRadius: BorderRadius.circular(8),
                                     child: CommunityVideoPlayer(
                                       mediaUrl: post.mediaUrl!,
+                                      thumbnailUrl: post.mediaThumbnailUrl,
                                       fit: boxFitForMedia(post.mediaFit),
                                     ),
                                   ),
@@ -468,10 +470,12 @@ class _PostMediaViewerScreen extends StatelessWidget {
   const _PostMediaViewerScreen({
     required this.mediaUrl,
     required this.mediaType,
+    this.mediaThumbnailUrl,
   });
 
   final String mediaUrl;
   final String mediaType;
+  final String? mediaThumbnailUrl;
 
   @override
   Widget build(BuildContext context) {
@@ -490,6 +494,7 @@ class _PostMediaViewerScreen extends StatelessWidget {
               ? SizedBox.expand(
                   child: CommunityVideoPlayer(
                     mediaUrl: mediaUrl,
+                    thumbnailUrl: mediaThumbnailUrl,
                     fit: BoxFit.contain,
                   ),
                 )

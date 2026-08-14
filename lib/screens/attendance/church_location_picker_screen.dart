@@ -37,6 +37,7 @@ class _ChurchLocationPickerScreenState
   final TextEditingController _radiusController = TextEditingController();
 
   GoogleMapController? _mapController;
+  Timer? _mapLoadTimeout;
   LatLng _selectedPosition = _jamaicaCenter;
   double _radiusMeters = 150;
   String? _selectedAddress;
@@ -48,6 +49,7 @@ class _ChurchLocationPickerScreenState
   bool _mapLoadFailed = false;
   bool? _androidMapsApiKeyPresent;
   String? _mapFailureDetail;
+  String? _androidMapBuildIdentity;
   int _mapRetryToken = 0;
   List<GooglePlaceResult> _searchResults = const [];
 
@@ -66,6 +68,7 @@ class _ChurchLocationPickerScreenState
     _latitudeController.dispose();
     _longitudeController.dispose();
     _radiusController.dispose();
+    _mapLoadTimeout?.cancel();
     _mapController?.dispose();
     super.dispose();
   }
@@ -185,9 +188,17 @@ class _ChurchLocationPickerScreenState
         final status = await _configChannel
             .invokeMapMethod<String, dynamic>('getAndroidMapsConfigStatus');
         final hasKey = status?['hasKey'] == true;
+        final packageName = status?['packageName']?.toString().trim() ?? '';
+        final certificate =
+            status?['signingCertificateSha1']?.toString().trim() ?? '';
+        final certificateSuffix = certificate.length > 8
+            ? certificate.substring(certificate.length - 8)
+            : certificate;
         if (!mounted) return;
         setState(() {
           _androidMapsApiKeyPresent = hasKey;
+          _androidMapBuildIdentity =
+              packageName.isEmpty ? null : '$packageName / …$certificateSuffix';
           _mapLoadFailed = !hasKey;
           _mapFailureDetail = hasKey
               ? null
@@ -205,8 +216,26 @@ class _ChurchLocationPickerScreenState
         });
       }
     } finally {
-      if (mounted) setState(() => _isCheckingMap = false);
+      if (mounted) {
+        setState(() => _isCheckingMap = false);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _armMapCreationTimeout();
+        });
+      }
     }
+  }
+
+  void _armMapCreationTimeout() {
+    _mapLoadTimeout?.cancel();
+    if (!_canRenderInteractiveMap || _mapController != null) return;
+    _mapLoadTimeout = Timer(const Duration(seconds: 25), () {
+      if (!mounted || _mapController != null) return;
+      setState(() {
+        _mapLoadFailed = true;
+        _mapFailureDetail =
+            'Google Maps did not initialize. The release key is present${_androidMapBuildIdentity == null ? '' : ' for $_androidMapBuildIdentity'}. Retry on a stable connection; manual coordinates remain available.';
+      });
+    });
   }
 
   Future<void> _searchPlaces() async {
@@ -344,6 +373,7 @@ class _ChurchLocationPickerScreenState
   }
 
   void _retryMap() {
+    _mapLoadTimeout?.cancel();
     _mapController?.dispose();
     _mapController = null;
     setState(() {
@@ -569,6 +599,7 @@ class _ChurchLocationPickerScreenState
                             });
                           },
                           onMapCreated: (controller) {
+                            _mapLoadTimeout?.cancel();
                             _mapController = controller;
                             unawaited(_moveCameraToSelectedPosition());
                           },

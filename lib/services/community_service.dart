@@ -119,8 +119,11 @@ class CommunityService {
       if (!_isMissingMediaDisplayColumn(error)) rethrow;
       final fallbackData = Map<String, dynamic>.from(data)
         ..remove('media_fit')
-        ..remove('media_aspect_ratio');
+        ..remove('media_aspect_ratio')
+        ..remove('media_thumbnail_url')
+        ..remove('media_thumbnail_path');
       await _supabase.from(_storiesTable).insert(fallbackData);
+      await removeUploadedMediaObjects([story.mediaThumbnailPath]);
     }
   }
 
@@ -146,11 +149,18 @@ class CommunityService {
 
     await _supabase.from(_storiesTable).delete().eq('id', story.id);
 
-    final mediaPath =
-        story.mediaPath ?? _storagePathFromPublicUrl(story.mediaUrl);
-    if (mediaPath != null) {
+    final paths = <String>{
+      if ((story.mediaPath ?? _storagePathFromPublicUrl(story.mediaUrl))
+          case final String path)
+        path,
+      if ((story.mediaThumbnailPath ??
+              _storagePathFromPublicUrl(story.mediaThumbnailUrl))
+          case final String path)
+        path,
+    };
+    if (paths.isNotEmpty) {
       try {
-        await _supabase.storage.from(_bucketName).remove([mediaPath]);
+        await _supabase.storage.from(_bucketName).remove(paths.toList());
       } catch (error) {
         debugPrint('Status deleted, but media cleanup failed: $error');
       }
@@ -623,6 +633,7 @@ class CommunityService {
       if (!_isLegacyCommunityPostSchemaIssue(error)) rethrow;
       final fallbackData = _legacyPostInsertData(data, post);
       await _supabase.from(_postsTable).insert(fallbackData);
+      await removeUploadedMediaObjects([post.mediaThumbnailPath]);
     }
   }
 
@@ -630,11 +641,18 @@ class CommunityService {
     await _supabase.from(_commentsTable).delete().eq('post_id', post.id);
     await _supabase.from(_postsTable).delete().eq('id', post.id);
 
-    final mediaPath =
-        post.mediaPath ?? _storagePathFromPublicUrl(post.mediaUrl);
-    if (mediaPath != null) {
+    final paths = <String>{
+      if ((post.mediaPath ?? _storagePathFromPublicUrl(post.mediaUrl))
+          case final String path)
+        path,
+      if ((post.mediaThumbnailPath ??
+              _storagePathFromPublicUrl(post.mediaThumbnailUrl))
+          case final String path)
+        path,
+    };
+    if (paths.isNotEmpty) {
       try {
-        await _supabase.storage.from(_bucketName).remove([mediaPath]);
+        await _supabase.storage.from(_bucketName).remove(paths.toList());
       } catch (e) {
         debugPrint('Post deleted, but media cleanup failed: $e');
       }
@@ -650,7 +668,9 @@ class CommunityService {
           path,
           file,
           fileOptions: FileOptions(
-            cacheControl: '3600',
+            // Community media paths are immutable timestamped objects. A long
+            // edge/CDN cache keeps repeat playback from redownloading them.
+            cacheControl: '31536000',
             contentType: contentType,
             upsert: false,
           ),
@@ -667,12 +687,26 @@ class CommunityService {
           path,
           bytes,
           fileOptions: FileOptions(
-            cacheControl: '3600',
+            cacheControl: '31536000',
             contentType: contentType,
             upsert: false,
           ),
         );
     return _supabase.storage.from(_bucketName).getPublicUrl(path);
+  }
+
+  Future<void> removeUploadedMediaObjects(Iterable<String?> paths) async {
+    final cleanPaths = paths
+        .map((path) => path?.trim() ?? '')
+        .where((path) => path.isNotEmpty)
+        .toSet()
+        .toList(growable: false);
+    if (cleanPaths.isEmpty) return;
+    try {
+      await _supabase.storage.from(_bucketName).remove(cleanPaths);
+    } catch (error) {
+      debugPrint('Could not roll back uncommitted community media: $error');
+    }
   }
 
   Future<Post?> toggleLike(String postId, String userId) async {
@@ -881,6 +915,8 @@ class CommunityService {
     final fallbackData = Map<String, dynamic>.from(data)
       ..remove('media_fit')
       ..remove('media_aspect_ratio')
+      ..remove('media_thumbnail_url')
+      ..remove('media_thumbnail_path')
       ..remove('scope')
       ..remove('post_type')
       ..remove('origin_church_id')
@@ -911,6 +947,8 @@ class CommunityService {
     final message = error.message.toLowerCase();
     return message.contains('media_fit') ||
         message.contains('media_aspect_ratio') ||
+        message.contains('media_thumbnail_url') ||
+        message.contains('media_thumbnail_path') ||
         message.contains('scope') ||
         message.contains('post_type') ||
         message.contains('origin_church_id') ||
@@ -926,6 +964,8 @@ class CommunityService {
     final message = error.message.toLowerCase();
     return message.contains('media_fit') ||
         message.contains('media_aspect_ratio') ||
+        message.contains('media_thumbnail_url') ||
+        message.contains('media_thumbnail_path') ||
         message.contains('schema cache') ||
         error.code == 'PGRST204' ||
         error.code == '42703';

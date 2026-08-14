@@ -9,6 +9,7 @@ enum AppPermission {
   viewFinanceDashboard,
   manageFinances, // enter/edit records
   approveFinanceReports,
+  manageChurchSubscription,
 
   // Content / Community
   createAnnouncement,
@@ -41,6 +42,7 @@ class RBACConfig {
       AppPermission.viewOperationalAnalytics,
       AppPermission.viewFinanceDashboard,
       AppPermission.approveFinanceReports,
+      AppPermission.manageChurchSubscription,
       AppPermission.createAnnouncement,
       AppPermission.sendPushNotification,
       AppPermission.moderateCommunity,
@@ -58,6 +60,7 @@ class RBACConfig {
       AppPermission.viewOperationalAnalytics,
       AppPermission.viewFinanceDashboard,
       AppPermission.approveFinanceReports,
+      AppPermission.manageChurchSubscription,
       AppPermission.createAnnouncement,
       AppPermission.sendPushNotification,
       AppPermission.moderateCommunity,
@@ -73,6 +76,7 @@ class RBACConfig {
       AppPermission.manageChurchSettings,
       AppPermission.manageRoles,
       AppPermission.viewOperationalAnalytics,
+      AppPermission.manageChurchSubscription,
       AppPermission.createAnnouncement,
       AppPermission.createEvents,
       AppPermission.moderateCommunity,
@@ -86,6 +90,7 @@ class RBACConfig {
       AppPermission.manageChurchSettings,
       AppPermission.manageRoles,
       AppPermission.viewOperationalAnalytics,
+      AppPermission.manageChurchSubscription,
       AppPermission.createAnnouncement,
       AppPermission.createEvents,
       AppPermission.moderateCommunity,
@@ -105,6 +110,7 @@ class RBACConfig {
       AppPermission.viewAttendanceInsights,
       AppPermission.viewPriorityList,
       AppPermission.manageSchedule,
+      AppPermission.manageChurchSubscription,
     ],
     'church_admin': [
       AppPermission.approveMembers,
@@ -115,6 +121,7 @@ class RBACConfig {
       AppPermission.viewAttendanceInsights,
       AppPermission.viewPriorityList,
       AppPermission.manageSchedule,
+      AppPermission.manageChurchSubscription,
     ],
     'secretary': [
       AppPermission.createAnnouncement,
@@ -134,6 +141,32 @@ class RBACConfig {
     'treasurer': [
       AppPermission.viewFinanceDashboard,
       AppPermission.manageFinances,
+      AppPermission.manageChurchSubscription,
+    ],
+    'financial_secretary': [
+      AppPermission.viewFinanceDashboard,
+      AppPermission.manageFinances,
+      AppPermission.manageChurchSubscription,
+    ],
+    'finance': [
+      AppPermission.viewFinanceDashboard,
+      AppPermission.manageChurchSubscription,
+    ],
+    'finance_officer': [
+      AppPermission.viewFinanceDashboard,
+      AppPermission.manageChurchSubscription,
+    ],
+    'accountant': [
+      AppPermission.viewFinanceDashboard,
+      AppPermission.manageChurchSubscription,
+    ],
+    'administrator': [
+      AppPermission.manageChurchSettings,
+      AppPermission.manageChurchSubscription,
+    ],
+    'church_administrator': [
+      AppPermission.manageChurchSettings,
+      AppPermission.manageChurchSubscription,
     ],
     'sunday_school_lead': [
       AppPermission.manageSundaySchool,

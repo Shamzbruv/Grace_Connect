@@ -1,6 +1,5 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/user_profile.dart';
-import 'church_subscription_service.dart';
 
 class DeveloperService {
   final SupabaseClient _supabase = Supabase.instance.client;
@@ -107,18 +106,32 @@ class DeveloperService {
     }
   }
 
-  Future<ChurchSubscriptionContext> grantFreeSubscription({
-    required String churchId,
-    required int months,
-  }) {
-    return ChurchSubscriptionService(client: _supabase)
-        .grantManualSubscription(churchId: churchId, months: months);
+  Future<void> regenerateScheduledDailyWord(String motivationId) async {
+    final response = await _supabase.functions.invoke(
+      'generate-daily-motivation',
+      body: {
+        'action': 'regenerate_scheduled',
+        'motivation_id': motivationId,
+      },
+    );
+    if (response.data is Map && response.data['error'] != null) {
+      throw Exception(response.data['error']);
+    }
   }
 
-  Future<ChurchSubscriptionContext> clearSubscription({
-    required String churchId,
-  }) {
-    return ChurchSubscriptionService(client: _supabase)
-        .clearManualSubscription(churchId: churchId);
+  Future<Map<String, dynamic>> updateQuizUniquenessSettings({
+    required bool guaranteeUnique,
+    int relaxedHistoryDays = 60,
+  }) async {
+    final data = await _supabase.rpc(
+      'developer_update_quiz_uniqueness_settings',
+      params: {
+        'p_guarantee_unique': guaranteeUnique,
+        'p_relaxed_history_days': relaxedHistoryDays,
+      },
+    );
+    if (data is Map<String, dynamic>) return data;
+    if (data is Map) return Map<String, dynamic>.from(data);
+    throw StateError('The quiz uniqueness setting was not returned.');
   }
 }

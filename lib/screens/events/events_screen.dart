@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:grace_connect/widgets/ui/app_skeleton_list_item.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:uuid/uuid.dart';
 import '../../providers/user_role_provider.dart';
 import '../../widgets/ui/app_scaffold.dart';
 import '../../widgets/ui/app_card.dart';
@@ -12,9 +16,12 @@ import '../../widgets/ui/app_loader.dart';
 import '../../widgets/ui/app_feedback.dart';
 import '../../services/church_service.dart';
 import '../../services/event_service.dart';
+import '../../services/event_calendar_service.dart';
 import '../../services/ministry_service.dart';
+import '../../services/notification_service.dart';
 import '../../models/event_model.dart';
 import '../../models/ministry.dart';
+import '../../utils/event_link.dart';
 
 class EventsScreen extends StatefulWidget {
   const EventsScreen({
@@ -36,11 +43,13 @@ class EventsScreen extends StatefulWidget {
 
 class _EventsScreenState extends State<EventsScreen> {
   final EventService _eventService = EventService();
+  final EventCalendarService _eventCalendarService = EventCalendarService();
   final MinistryService _ministryService = MinistryService();
   final ChurchService _churchService = ChurchService();
   final TextEditingController _titleController = TextEditingController();
   final TextEditingController _descriptionController = TextEditingController();
   final TextEditingController _locationController = TextEditingController();
+  final TextEditingController _eventUrlController = TextEditingController();
 
   String? _churchId;
   User? _currentUser;
@@ -55,6 +64,12 @@ class _EventsScreenState extends State<EventsScreen> {
   TimeOfDay _selectedTime = TimeOfDay.now();
   bool _showSharedEvents = false;
   bool _eventVisibleToAllChurches = false;
+  int _eventDurationMinutes = 60;
+  String? _eventCreationRequestId;
+  final Set<String> _rsvpEventIds = <String>{};
+  final Set<String> _calendarSyncEventIds = <String>{};
+  bool _calendarAutoSyncRunning = false;
+  List<EventModel>? _pendingCalendarSyncEvents;
   bool _openedInitialComposer = false;
 
   @override
@@ -122,22 +137,196 @@ class _EventsScreenState extends State<EventsScreen> {
     _titleController.dispose();
     _descriptionController.dispose();
     _locationController.dispose();
+    _eventUrlController.dispose();
     super.dispose();
   }
 
   Future<void> _handleRSVP(EventModel event) async {
-    if (_currentUser == null) return;
+    final user = _currentUser;
+    if (user == null || _rsvpEventIds.contains(event.id)) return;
 
-    final isGoing = event.attendees.contains(_currentUser!.id);
-    await _eventService.rsvpToEvent(event.id, _currentUser!.id, !isGoing);
+    final isGoing = event.attendees.contains(user.id);
+    _RsvpOptions? options;
+    if (!isGoing) {
+      options = await _showRsvpOptions(event);
+      if (options == null || !mounted) return;
+    }
 
-    if (mounted) {
+    setState(() => _rsvpEventIds.add(event.id));
+    try {
+      if (!isGoing) {
+        // The RSVP is still saved if OS push permission is declined: the
+        // reminder also appears in Grace Connect's notification inbox.
+        try {
+          await NotificationService().ensurePushPermission();
+        } catch (_) {
+          // A device notification-services failure must not block the RSVP or
+          // its in-app reminder.
+        }
+      }
+      await _eventService.rsvpToEvent(
+        event.id,
+        !isGoing,
+        reminderMinutes: options?.reminderMinutes ?? 1440,
+      );
+
+      var calendarMessage = '';
+      if (!isGoing && options!.syncCalendar) {
+        final status = await _eventCalendarService.sync(
+          event,
+          userId: user.id,
+          reminderMinutes: options.reminderMinutes,
+        );
+        calendarMessage = switch (status) {
+          EventCalendarSyncStatus.created => ' Added to your calendar.',
+          EventCalendarSyncStatus.updated => ' Calendar reminder updated.',
+          EventCalendarSyncStatus.unchanged => ' Calendar is already synced.',
+          EventCalendarSyncStatus.permissionDenied =>
+            ' RSVP saved, but calendar access was not enabled.',
+          EventCalendarSyncStatus.unavailable =>
+            ' RSVP saved, but the device calendar was unavailable.',
+        };
+      }
+
+      if (isGoing &&
+          await _eventCalendarService.hasCalendarCopy(
+            user.id,
+            event.id,
+          )) {
+        calendarMessage = await _offerCalendarRemoval(event, user.id);
+      }
+
+      if (mounted) {
+        AppFeedback.show(
+          context,
+          isGoing
+              ? 'RSVP cancelled.$calendarMessage'
+              : 'RSVP confirmed. App reminder scheduled.$calendarMessage',
+          type: isGoing ? AppFeedbackType.info : AppFeedbackType.success,
+        );
+      }
+    } catch (error) {
+      if (!mounted) return;
       AppFeedback.show(
         context,
-        isGoing ? 'RSVP cancelled.' : 'RSVP confirmed.',
-        type: isGoing ? AppFeedbackType.info : AppFeedbackType.success,
+        'Could not update RSVP: $error',
+        type: AppFeedbackType.error,
       );
+    } finally {
+      if (mounted) setState(() => _rsvpEventIds.remove(event.id));
     }
+  }
+
+  Future<_RsvpOptions?> _showRsvpOptions(EventModel event) {
+    var reminderMinutes = 1440;
+    var syncCalendar = false;
+    return showDialog<_RsvpOptions>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Confirm RSVP'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Grace Connect will remind you before “${event.title}”.'),
+              const SizedBox(height: 16),
+              DropdownButtonFormField<int>(
+                // ignore: deprecated_member_use
+                value: reminderMinutes,
+                decoration: const InputDecoration(
+                  labelText: 'App reminder',
+                  prefixIcon: Icon(Icons.notifications_active_outlined),
+                ),
+                items: const [
+                  DropdownMenuItem(value: 1440, child: Text('1 day before')),
+                  DropdownMenuItem(value: 120, child: Text('2 hours before')),
+                  DropdownMenuItem(value: 30, child: Text('30 minutes before')),
+                ],
+                onChanged: (value) {
+                  if (value != null) {
+                    setDialogState(() => reminderMinutes = value);
+                  }
+                },
+              ),
+              const SizedBox(height: 12),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                value: syncCalendar,
+                onChanged: (value) {
+                  setDialogState(() => syncCalendar = value ?? false);
+                },
+                title: const Text('Sync to my device calendar'),
+                subtitle: const Text(
+                  'If selected, Grace Connect will ask for calendar access '
+                  'to add this event, set the reminder, and keep the saved '
+                  'calendar entry current when event details change.',
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Not now'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(
+                dialogContext,
+                _RsvpOptions(
+                  reminderMinutes: reminderMinutes,
+                  syncCalendar: syncCalendar,
+                ),
+              ),
+              child: const Text('Confirm RSVP'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<String> _offerCalendarRemoval(
+    EventModel event,
+    String userId,
+  ) async {
+    if (!mounted) return '';
+    final remove = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Remove calendar copy?'),
+        content: const Text(
+          'Your RSVP is cancelled. You can also remove the copy Grace Connect '
+          'added to your device calendar.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Keep it'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (remove == true) {
+      final status = await _eventCalendarService.remove(
+        event.id,
+        userId: userId,
+      );
+      return switch (status) {
+        EventCalendarSyncStatus.updated => ' Calendar copy removed.',
+        EventCalendarSyncStatus.unchanged => ' No calendar copy was found.',
+        EventCalendarSyncStatus.permissionDenied =>
+          ' Calendar copy remains because calendar access is disabled.',
+        EventCalendarSyncStatus.unavailable =>
+          ' Calendar copy could not be removed on this device.',
+        EventCalendarSyncStatus.created => '',
+      };
+    }
+    return '';
   }
 
   MinistryManager? _selectedMinistryForEvent() {
@@ -183,6 +372,17 @@ class _EventsScreenState extends State<EventsScreen> {
 
     if (_churchId == null || _currentUser == null) return;
 
+    final rawEventUrl = _eventUrlController.text.trim();
+    final normalizedEventUrl = EventLink.normalize(rawEventUrl);
+    if (rawEventUrl.isNotEmpty && normalizedEventUrl == null) {
+      AppFeedback.show(
+        context,
+        'Add a public HTTPS event link (for example, https://zoom.us/...).',
+        type: AppFeedbackType.warning,
+      );
+      return;
+    }
+
     setState(() => _isAddingEvent = true);
     final roleProvider = Provider.of<UserRoleProvider>(context, listen: false);
     final selectedMinistry = _selectedMinistryForEvent();
@@ -218,6 +418,8 @@ class _EventsScreenState extends State<EventsScreen> {
       ),
       time: _selectedTime.format(context),
       location: _locationController.text.trim(),
+      eventUrl: normalizedEventUrl,
+      durationMinutes: _eventDurationMinutes,
       churchId: _churchId!,
       organizerId: existingEvent?.organizerId ?? _currentUser!.id,
       sourceLabel: selectedMinistryId != null
@@ -231,24 +433,34 @@ class _EventsScreenState extends State<EventsScreen> {
     );
 
     try {
+      EventMutationResult result;
       if (existingEvent == null) {
-        await _eventService.addEvent(event);
+        _eventCreationRequestId ??= const Uuid().v4();
+        result = await _eventService.addEvent(
+          event,
+          requestId: _eventCreationRequestId,
+        );
       } else {
-        await _eventService.updateEvent(event);
+        result = await _eventService.updateEvent(event);
       }
 
       _titleController.clear();
       _descriptionController.clear();
       _locationController.clear();
+      _eventUrlController.clear();
       _selectedMinistryId = null;
       _eventVisibleToAllChurches = false;
+      _eventDurationMinutes = 60;
+      _eventCreationRequestId = null;
 
       if (mounted) {
         Navigator.pop(context);
         AppFeedback.show(
           context,
           existingEvent == null
-              ? 'Event added successfully.'
+              ? result.reusedExisting
+                  ? 'Event was already posted. The existing copy is shown.'
+                  : 'Event added successfully.'
               : 'Event updated successfully.',
           type: AppFeedbackType.success,
         );
@@ -283,11 +495,14 @@ class _EventsScreenState extends State<EventsScreen> {
     _titleController.text = existingEvent?.title ?? '';
     _descriptionController.text = existingEvent?.description ?? '';
     _locationController.text = existingEvent?.location ?? '';
-    _selectedDate = existingEvent?.date ?? DateTime.now();
+    _eventUrlController.text = existingEvent?.eventUrl ?? '';
+    _selectedDate = existingEvent?.date.toLocal() ?? DateTime.now();
     _selectedTime = existingEvent != null
-        ? TimeOfDay.fromDateTime(existingEvent.date)
+        ? TimeOfDay.fromDateTime(existingEvent.date.toLocal())
         : TimeOfDay.now();
     _eventVisibleToAllChurches = existingEvent?.visibleToAllChurches ?? false;
+    _eventDurationMinutes = existingEvent?.durationMinutes ?? 60;
+    _eventCreationRequestId = isEditing ? null : (const Uuid().v4());
     final roleProvider = Provider.of<UserRoleProvider>(context, listen: false);
     final ministryEventAccess =
         _managedMinistries.where((manager) => manager.canCreateEvents).toList();
@@ -363,6 +578,14 @@ class _EventsScreenState extends State<EventsScreen> {
                   label: 'Location',
                   hint: 'Main sanctuary, online, etc.',
                 ),
+                const SizedBox(height: 16),
+                AppTextField(
+                  controller: _eventUrlController,
+                  label: 'Event link (optional)',
+                  hint: 'https://zoom.us/... or registration page',
+                  prefixIcon: Icons.link_outlined,
+                  keyboardType: TextInputType.url,
+                ),
                 if (showSourcePicker) ...[
                   const SizedBox(height: 16),
                   DropdownButtonFormField<String>(
@@ -428,6 +651,27 @@ class _EventsScreenState extends State<EventsScreen> {
                       ),
                     ),
                   ],
+                ),
+                const SizedBox(height: 16),
+                DropdownButtonFormField<int>(
+                  // ignore: deprecated_member_use
+                  value: _eventDurationMinutes,
+                  decoration: const InputDecoration(
+                    labelText: 'Duration',
+                    prefixIcon: Icon(Icons.timelapse_outlined),
+                  ),
+                  items: const [
+                    DropdownMenuItem(value: 30, child: Text('30 minutes')),
+                    DropdownMenuItem(value: 60, child: Text('1 hour')),
+                    DropdownMenuItem(value: 120, child: Text('2 hours')),
+                    DropdownMenuItem(value: 180, child: Text('3 hours')),
+                    DropdownMenuItem(value: 240, child: Text('4 hours')),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) {
+                      setDialogState(() => _eventDurationMinutes = value);
+                    }
+                  },
                 ),
               ],
             ),
@@ -515,6 +759,113 @@ class _EventsScreenState extends State<EventsScreen> {
     }
   }
 
+  Future<void> _syncEventCalendar(EventModel event) async {
+    final user = _currentUser;
+    if (user == null || _calendarSyncEventIds.contains(event.id)) return;
+
+    final reminderMinutes = await _eventCalendarService.savedReminderMinutes(
+      user.id,
+      event.id,
+    );
+    final reminderLabel = switch (reminderMinutes) {
+      30 => '30-minute',
+      120 => 'two-hour',
+      _ => 'one-day',
+    };
+    if (!mounted) return;
+
+    final proceed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Sync this event?'),
+        content: Text(
+          'Grace Connect will request calendar access so it can add this '
+          'event, set a $reminderLabel reminder, and update that same calendar entry '
+          'if the organizer changes the details. Calendar access is never used '
+          'unless you choose this option.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
+    if (proceed != true || !mounted) return;
+
+    setState(() => _calendarSyncEventIds.add(event.id));
+    final status = await _eventCalendarService.sync(
+      event,
+      userId: user.id,
+      reminderMinutes: reminderMinutes,
+    );
+    if (mounted) {
+      setState(() => _calendarSyncEventIds.remove(event.id));
+      final (message, type) = switch (status) {
+        EventCalendarSyncStatus.created => (
+            'Event added to your calendar.',
+            AppFeedbackType.success
+          ),
+        EventCalendarSyncStatus.updated => (
+            'Calendar event updated.',
+            AppFeedbackType.success
+          ),
+        EventCalendarSyncStatus.unchanged => (
+            'Your calendar is already up to date.',
+            AppFeedbackType.info
+          ),
+        EventCalendarSyncStatus.permissionDenied => (
+            'Calendar access was not enabled.',
+            AppFeedbackType.warning
+          ),
+        EventCalendarSyncStatus.unavailable => (
+            'The device calendar is unavailable.',
+            AppFeedbackType.error
+          ),
+      };
+      AppFeedback.show(context, message, type: type);
+    }
+  }
+
+  Future<void> _openEventLink(String link) async {
+    final uri = EventLink.parse(link);
+    if (uri == null ||
+        !await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+      if (!mounted) return;
+      AppFeedback.show(
+        context,
+        'Could not open this event link.',
+        type: AppFeedbackType.error,
+      );
+    }
+  }
+
+  void _queueCalendarRefresh(List<EventModel> events) {
+    final user = _currentUser;
+    if (user == null) return;
+    _pendingCalendarSyncEvents = List<EventModel>.unmodifiable(events);
+    if (_calendarAutoSyncRunning) return;
+    _calendarAutoSyncRunning = true;
+    unawaited(_drainCalendarRefreshes(user.id));
+  }
+
+  Future<void> _drainCalendarRefreshes(String userId) async {
+    try {
+      while (_pendingCalendarSyncEvents != null) {
+        final events = _pendingCalendarSyncEvents!;
+        _pendingCalendarSyncEvents = null;
+        await _eventCalendarService.syncOutdated(events, userId: userId);
+      }
+    } finally {
+      _calendarAutoSyncRunning = false;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final roleProvider = Provider.of<UserRoleProvider>(context);
@@ -571,6 +922,7 @@ class _EventsScreenState extends State<EventsScreen> {
 
                       final events = snapshot.data ?? [];
                       _queueChurchNameLoads(events);
+                      _queueCalendarRefresh(events);
 
                       if (events.isEmpty) {
                         return Center(
@@ -602,7 +954,16 @@ class _EventsScreenState extends State<EventsScreen> {
                             isRsvped: isRsvped,
                             canViewRsvps: canViewRsvps,
                             canManageEvent: canManageEvent,
+                            isRsvpBusy: _rsvpEventIds.contains(event.id),
+                            isCalendarBusy:
+                                _calendarSyncEventIds.contains(event.id),
                             onRsvp: () => _handleRSVP(event),
+                            onCalendar: isRsvped
+                                ? () => _syncEventCalendar(event)
+                                : null,
+                            onOpenLink: event.eventUrl == null
+                                ? null
+                                : () => _openEventLink(event.eventUrl!),
                             onViewRsvps: canViewRsvps
                                 ? () => _showRsvpDetails(event)
                                 : null,
@@ -892,7 +1253,11 @@ class _EventCard extends StatelessWidget {
     required this.isRsvped,
     required this.canViewRsvps,
     required this.canManageEvent,
+    required this.isRsvpBusy,
+    required this.isCalendarBusy,
     required this.onRsvp,
+    this.onCalendar,
+    this.onOpenLink,
     this.onViewRsvps,
     this.onEdit,
     this.onDelete,
@@ -904,7 +1269,11 @@ class _EventCard extends StatelessWidget {
   final bool isRsvped;
   final bool canViewRsvps;
   final bool canManageEvent;
+  final bool isRsvpBusy;
+  final bool isCalendarBusy;
   final VoidCallback onRsvp;
+  final VoidCallback? onCalendar;
+  final VoidCallback? onOpenLink;
   final VoidCallback? onViewRsvps;
   final VoidCallback? onEdit;
   final VoidCallback? onDelete;
@@ -912,7 +1281,7 @@ class _EventCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final date = DateFormat('EEEE, MMMM d, yyyy').format(event.date);
+    final date = DateFormat('EEEE, MMMM d, yyyy').format(event.date.toLocal());
     final isOtherChurch = event.churchId.trim().isNotEmpty &&
         event.churchId.trim() != viewerChurchId.trim();
     final displayChurchName = churchName?.trim().isNotEmpty == true
@@ -961,7 +1330,7 @@ class _EventCard extends StatelessWidget {
                       ),
                     if (isRsvped)
                       const Chip(
-                        label: Text('Going'),
+                        label: Text('Going · reminder on'),
                         avatar: Icon(Icons.check_circle_outline, size: 18),
                         visualDensity: VisualDensity.compact,
                       ),
@@ -1018,6 +1387,18 @@ class _EventCard extends StatelessWidget {
               label: event.location.trim(),
             ),
           ],
+          if (event.eventUrl?.trim().isNotEmpty == true) ...[
+            const SizedBox(height: 6),
+            TextButton.icon(
+              onPressed: onOpenLink,
+              icon: const Icon(Icons.open_in_new, size: 18),
+              label: const Text('Open event link'),
+              style: TextButton.styleFrom(
+                padding: EdgeInsets.zero,
+                alignment: Alignment.centerLeft,
+              ),
+            ),
+          ],
           const SizedBox(height: 16),
           Row(
             children: [
@@ -1025,8 +1406,9 @@ class _EventCard extends StatelessWidget {
                 child: AppButton(
                   text: isRsvped ? 'Cancel RSVP' : 'RSVP Now',
                   isSecondary: isRsvped,
+                  isLoading: isRsvpBusy,
                   isFullWidth: true,
-                  onPressed: onRsvp,
+                  onPressed: isRsvpBusy ? null : onRsvp,
                   backgroundColor:
                       isRsvped ? Colors.transparent : theme.colorScheme.primary,
                   textColor: isRsvped
@@ -1034,6 +1416,20 @@ class _EventCard extends StatelessWidget {
                       : theme.colorScheme.onPrimary,
                 ),
               ),
+              if (isRsvped && onCalendar != null) ...[
+                const SizedBox(width: 10),
+                IconButton.filledTonal(
+                  tooltip: 'Add or update device calendar',
+                  onPressed: isCalendarBusy ? null : onCalendar,
+                  icon: isCalendarBusy
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.event_available),
+                ),
+              ],
               if (canViewRsvps && onViewRsvps != null) ...[
                 const SizedBox(width: 10),
                 IconButton.filledTonal(
@@ -1166,4 +1562,14 @@ String _initialFor(String name) {
   final trimmed = name.trim();
   if (trimmed.isEmpty) return '?';
   return trimmed.characters.first.toUpperCase();
+}
+
+class _RsvpOptions {
+  const _RsvpOptions({
+    required this.reminderMinutes,
+    required this.syncCalendar,
+  });
+
+  final int reminderMinutes;
+  final bool syncCalendar;
 }

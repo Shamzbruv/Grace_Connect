@@ -11,6 +11,8 @@ class Post {
   final String? mediaUrl;
   final String? mediaPath;
   final String? mediaType;
+  final String? mediaThumbnailUrl;
+  final String? mediaThumbnailPath;
   final String mediaFit;
   final double? mediaAspectRatio;
   final DateTime? expiresAt;
@@ -35,6 +37,8 @@ class Post {
     this.mediaUrl,
     this.mediaPath,
     this.mediaType,
+    this.mediaThumbnailUrl,
+    this.mediaThumbnailPath,
     this.mediaFit = 'cover',
     this.mediaAspectRatio,
     this.expiresAt,
@@ -64,6 +68,10 @@ class Post {
       mediaUrl: data['media_url'],
       mediaPath: data['media_path'] ?? data['mediaPath'],
       mediaType: data['media_type'],
+      mediaThumbnailUrl:
+          data['media_thumbnail_url'] ?? data['mediaThumbnailUrl'],
+      mediaThumbnailPath:
+          data['media_thumbnail_path'] ?? data['mediaThumbnailPath'],
       mediaFit: (data['media_fit'] ?? data['mediaFit'] ?? 'cover').toString(),
       mediaAspectRatio: _nullableDouble(
           data['media_aspect_ratio'] ?? data['mediaAspectRatio']),
@@ -95,6 +103,8 @@ class Post {
       'media_url': mediaUrl,
       'media_path': mediaPath,
       'media_type': mediaType,
+      'media_thumbnail_url': mediaThumbnailUrl,
+      'media_thumbnail_path': mediaThumbnailPath,
       'media_fit': mediaFit,
       'media_aspect_ratio': mediaAspectRatio,
       'expires_at': expiresAt?.toUtc().toIso8601String(),

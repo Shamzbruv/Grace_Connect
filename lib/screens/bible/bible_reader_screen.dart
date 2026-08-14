@@ -19,11 +19,15 @@ import '../messages/message_thread_screen.dart';
 class BibleReaderScreen extends StatefulWidget {
   final BibleBook book;
   final int chapter;
+  final int? initialVerse;
+  final int? initialVerseEnd;
 
   const BibleReaderScreen({
     super.key,
     required this.book,
     required this.chapter,
+    this.initialVerse,
+    this.initialVerseEnd,
   });
 
   @override
@@ -43,6 +47,8 @@ class _BibleReaderScreenState extends State<BibleReaderScreen>
   String _translation = 'web';
   Set<String> _highlightedVerses = {};
   final Set<int> _selectedVerses = {};
+  final GlobalKey _initialVerseKey = GlobalKey();
+  bool _didRevealInitialVerse = false;
 
   @override
   void initState() {
@@ -65,11 +71,28 @@ class _BibleReaderScreenState extends State<BibleReaderScreen>
     // API expects "John 3", implies we might need to handle spaces or standard names
     // BibleService handles the query formatting
     _chapterReady = false;
+    _didRevealInitialVerse = false;
     _chapterFuture = BibleService()
         .getChapter(widget.book.name, widget.chapter)
         .then((chapter) {
       _chapterReady = true;
       return chapter;
+    });
+  }
+
+  void _scheduleInitialVerseReveal() {
+    if (_didRevealInitialVerse || widget.initialVerse == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted || _didRevealInitialVerse) return;
+      final targetContext = _initialVerseKey.currentContext;
+      if (targetContext == null) return;
+      _didRevealInitialVerse = true;
+      await Scrollable.ensureVisible(
+        targetContext,
+        duration: const Duration(milliseconds: 420),
+        curve: Curves.easeOutCubic,
+        alignment: 0.22,
+      );
     });
   }
 
@@ -256,6 +279,8 @@ class _BibleReaderScreenState extends State<BibleReaderScreen>
             );
           }
 
+          _scheduleInitialVerseReveal();
+
           return Column(
             children: [
               Expanded(
@@ -287,8 +312,16 @@ class _BibleReaderScreenState extends State<BibleReaderScreen>
                           final isHighlighted =
                               _highlightedVerses.contains(verseKey);
                           final isSelected = _selectedVerses.contains(verseInt);
+                          final linkedStart = widget.initialVerse;
+                          final linkedEnd =
+                              widget.initialVerseEnd ?? linkedStart;
+                          final isLinkedVerse = linkedStart != null &&
+                              verseInt >= linkedStart &&
+                              verseInt <= (linkedEnd ?? linkedStart);
+                          final isLinkedStart = linkedStart == verseInt;
 
                           return Padding(
+                            key: isLinkedStart ? _initialVerseKey : null,
                             padding: const EdgeInsets.only(bottom: 18.0),
                             child: InkWell(
                               borderRadius: BorderRadius.circular(12),
@@ -322,11 +355,19 @@ class _BibleReaderScreenState extends State<BibleReaderScreen>
                                       : isHighlighted
                                           ? AppColors.gold
                                               .withValues(alpha: 0.22)
-                                          : Colors.transparent,
+                                          : isLinkedVerse
+                                              ? AppColors.gold
+                                                  .withValues(alpha: 0.13)
+                                              : Colors.transparent,
                                   borderRadius: BorderRadius.circular(12),
                                   border: isSelected
                                       ? Border.all(color: AppColors.secondary)
-                                      : null,
+                                      : isLinkedVerse
+                                          ? Border.all(
+                                              color: AppColors.gold
+                                                  .withValues(alpha: 0.7),
+                                            )
+                                          : null,
                                 ),
                                 child: Row(
                                   crossAxisAlignment: CrossAxisAlignment.start,

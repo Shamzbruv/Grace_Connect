@@ -3,7 +3,20 @@ import 'dart:async';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 import '../models/event_model.dart';
+import '../utils/event_link.dart';
 import 'supabase_resilience.dart';
+
+class EventMutationResult {
+  const EventMutationResult({
+    required this.event,
+    required this.created,
+    required this.reusedExisting,
+  });
+
+  final EventModel event;
+  final bool created;
+  final bool reusedExisting;
+}
 
 class EventService {
   final SupabaseClient _supabase = Supabase.instance.client;
@@ -87,18 +100,8 @@ class EventService {
     return _normalizePublicEvents(data);
   }
 
-  Future<void> updateEvent(EventModel event) async {
-    await _supabase.from(_collection).update({
-      'title': event.title,
-      'description': event.description,
-      'date': event.date.toIso8601String(),
-      'time': event.time,
-      'location': event.location,
-      'sourceLabel': event.sourceLabel,
-      'ministry_id': event.ministryId,
-      'ministry_name': event.ministryName,
-      'visible_to_all_churches': event.visibleToAllChurches,
-    }).eq('id', event.id);
+  Future<EventMutationResult> updateEvent(EventModel event) async {
+    return _writeEvent(event, eventId: event.id);
   }
 
   Future<void> deleteEvent(String eventId) async {
@@ -124,10 +127,11 @@ class EventService {
           .stream(primaryKey: ['id'])
           .eq('churchId', churchId)
           .order('date', ascending: true)
-          .map((docs) => docs
-              .map((doc) => EventModel.fromMap(doc))
-              .where((event) => !_isPastEvent(event))
-              .toList())
+          .map((docs) => deduplicateEvents(
+                docs
+                    .map((doc) => EventModel.fromMap(doc))
+                    .where((event) => !_isPastEvent(event)),
+              )..sort((a, b) => a.date.compareTo(b.date)))
           .map((events) => events.take(limit).toList()),
     );
   }
@@ -141,45 +145,70 @@ class EventService {
     }
   }
 
-  // Add a new event
-  Future<void> addEvent(EventModel event) async {
-    final String docId = event.id.isEmpty ? const Uuid().v4() : event.id;
-
-    final newEvent = EventModel(
-      id: docId,
-      title: event.title,
-      description: event.description,
-      date: event.date,
-      time: event.time,
-      location: event.location,
-      churchId: event.churchId,
-      organizerId: event.organizerId,
-      sourceLabel: event.sourceLabel,
-      ministryId: event.ministryId,
-      ministryName: event.ministryName,
-      visibleToAllChurches: event.visibleToAllChurches,
-      createdAt: event.createdAt,
-      attendees: event.attendees,
+  // Add a new event through the server-authoritative idempotent mutation RPC.
+  // Reusing [requestId] after a timeout returns the original event instead of
+  // inserting a second row.
+  Future<EventMutationResult> addEvent(
+    EventModel event, {
+    String? requestId,
+  }) async {
+    return _writeEvent(
+      event,
+      requestId: requestId ?? const Uuid().v4(),
     );
+  }
 
-    if (event.id.isEmpty) {
-      await _supabase.from(_collection).insert(newEvent.toMap());
-    } else {
-      await _supabase
-          .from(_collection)
-          .update(newEvent.toMap())
-          .eq('id', docId);
+  Future<EventMutationResult> _writeEvent(
+    EventModel event, {
+    String? eventId,
+    String? requestId,
+  }) async {
+    final normalizedUrl = EventLink.normalize(event.eventUrl);
+    if (event.eventUrl?.trim().isNotEmpty == true && normalizedUrl == null) {
+      throw const FormatException('Event links must be public HTTPS links.');
     }
+
+    final response = await _supabase.rpc(
+      'save_event_idempotent',
+      params: {
+        'p_request_id': requestId,
+        'p_event_id': eventId,
+        'p_church_id': event.churchId,
+        'p_title': event.title,
+        'p_description': event.description,
+        'p_start_at': event.date.toUtc().toIso8601String(),
+        'p_time_label': event.time,
+        'p_location': event.location,
+        'p_event_url': normalizedUrl,
+        'p_duration_minutes': event.durationMinutes,
+        'p_source_label': event.sourceLabel,
+        'p_ministry_id': event.ministryId,
+        'p_ministry_name': event.ministryName,
+        'p_visible_to_all_churches': event.visibleToAllChurches,
+      },
+    );
+    final payload = Map<String, dynamic>.from(response as Map);
+    return EventMutationResult(
+      event: EventModel.fromMap(
+        Map<String, dynamic>.from(payload['event'] as Map),
+      ),
+      created: payload['created'] == true,
+      reusedExisting: payload['reused_existing'] == true,
+    );
   }
 
   // RSVP to an event
   Future<void> rsvpToEvent(
-      String eventId, String userId, bool isJoining) async {
+    String eventId,
+    bool isJoining, {
+    int reminderMinutes = 1440,
+  }) async {
     await _supabase.rpc(
-      'rsvp_event',
+      'rsvp_event_with_reminder',
       params: {
         'target_event_id': eventId,
         'is_joining': isJoining,
+        'reminder_minutes': reminderMinutes,
       },
     );
   }
@@ -209,25 +238,60 @@ class EventService {
           ? !isOwnChurch && event.visibleToAllChurches
           : isOwnChurch;
       return canShow && !_isPastEvent(event);
-    }).toList()
+    }).toList();
+    final deduplicated = deduplicateEvents(events)
       ..sort((a, b) => a.date.compareTo(b.date));
-    return events;
+    return deduplicated;
   }
 
   List<EventModel> _normalizePublicEvents(List<dynamic> data) {
     final events = data
         .map((doc) => EventModel.fromMap(Map<String, dynamic>.from(doc)))
         .where((event) => event.visibleToAllChurches && !_isPastEvent(event))
-        .toList()
+        .toList();
+    final deduplicated = deduplicateEvents(events)
       ..sort((a, b) => a.date.compareTo(b.date));
-    return events;
+    return deduplicated;
+  }
+
+  static List<EventModel> deduplicateEvents(Iterable<EventModel> source) {
+    final byId = <String, EventModel>{};
+    for (final event in source) {
+      final existing = byId[event.id];
+      if (existing == null || event.updatedAt.isAfter(existing.updatedAt)) {
+        byId[event.id] = event;
+      }
+    }
+
+    final byFingerprint = <String, EventModel>{};
+    for (final event in byId.values) {
+      final title = event.title.trim().toLowerCase().replaceAll(
+            RegExp(r'\s+'),
+            ' ',
+          );
+      final key = [
+        event.churchId.trim(),
+        event.ministryId?.trim() ?? '',
+        title,
+        event.date.toUtc().toIso8601String(),
+      ].join('|');
+      final existing = byFingerprint[key];
+      if (existing == null || event.createdAt.isBefore(existing.createdAt)) {
+        byFingerprint[key] = event;
+      }
+    }
+    return byFingerprint.values.toList();
   }
 
   bool _isPastEvent(EventModel event) {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
-    final eventDay =
-        DateTime(event.date.year, event.date.month, event.date.day);
+    final localEventDate = event.date.toLocal();
+    final eventDay = DateTime(
+      localEventDate.year,
+      localEventDate.month,
+      localEventDate.day,
+    );
     return eventDay.isBefore(today);
   }
 }

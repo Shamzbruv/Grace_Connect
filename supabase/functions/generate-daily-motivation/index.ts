@@ -1,4 +1,6 @@
 import {
+  accessTokenFromRequest,
+  anonClient,
   authenticatedUser,
   callHuggingFaceJson,
   createInAppNotifications,
@@ -14,6 +16,15 @@ import {
   userProfile,
   wordCount,
 } from "../_shared/grace.ts";
+import {
+  BibleChapter,
+  bibleChapterFromKey,
+  bibleChapterFromReference,
+  BibleChapterText,
+  fetchBibleChapter,
+  isChapterStudyDate,
+  shuffledBibleChapters,
+} from "../_shared/bible_chapters.ts";
 
 type DailyMotivationAiResponse = {
   title?: string;
@@ -22,121 +33,38 @@ type DailyMotivationAiResponse = {
   topic?: string;
 };
 
-const fallbackMotivations: Required<DailyMotivationAiResponse>[] = [
-  {
-    title: "Walk With Grace Today",
-    message:
-      "Let today be shaped by faithfulness, patience, and love. Even small acts of obedience can strengthen your witness and encourage someone nearby. Keep your heart steady in God’s Word and take the next right step with grace.",
-    scripture_reference: "Galatians 6:9",
-    topic: "faithfulness",
-  },
-  {
-    title: "Strength For The Step Ahead",
-    message:
-      "You do not have to carry today in your own strength. Pause, pray, and let God guide your words, choices, and attitude. A surrendered heart can find peace even when the day feels full.",
-    scripture_reference: "Psalm 46:1",
-    topic: "strength",
-  },
-  {
-    title: "Choose Peace And Purpose",
-    message:
-      "Begin today with a quiet confidence that God sees you. Let peace rule your responses, let wisdom guide your pace, and let kindness show others the character of Christ through you.",
-    scripture_reference: "Colossians 3:15",
-    topic: "peace",
-  },
-  {
-    title: "Courage For Today",
-    message:
-      "Move through today with courage rooted in God’s presence. You may not know every step ahead, but you can answer this moment with trust, humility, and obedience. Let faith steady your words and give your heart strength to keep going.",
-    scripture_reference: "Joshua 1:9",
-    topic: "courage",
-  },
-  {
-    title: "Wisdom For Each Step",
-    message:
-      "Before the day becomes crowded, ask God for wisdom. He is able to guide your choices, soften your tone, and help you notice what matters most. A listening heart can walk with patience even when the path feels busy.",
-    scripture_reference: "James 1:5",
-    topic: "wisdom",
-  },
-  {
-    title: "Renewed In The Lord",
-    message:
-      "When your strength feels small, remember that God is not weary. Bring Him your pressure, your questions, and your responsibilities. Let Him renew your spirit so you can serve with grace instead of moving only by exhaustion.",
-    scripture_reference: "Isaiah 40:31",
-    topic: "renewal",
-  },
-  {
-    title: "Rooted And Steady",
-    message:
-      "Stay rooted in what is true today. The noise around you does not have to rule your spirit. Let Christ shape your attitude, your speech, and your decisions so your life carries the quiet strength of faith.",
-    scripture_reference: "Colossians 2:6-7",
-    topic: "steadfastness",
-  },
-  {
-    title: "Mercy In Motion",
-    message:
-      "Look for one way to show mercy today. A patient answer, a helping hand, or a quiet prayer can reflect the heart of Christ. God can use ordinary kindness to remind someone that they are seen and loved.",
-    scripture_reference: "Micah 6:8",
-    topic: "mercy",
-  },
-  {
-    title: "Peace That Guards",
-    message:
-      "Invite God into every concern before anxiety takes the lead. Prayer does not mean pretending everything is easy; it means placing the weight in faithful hands. Let His peace guard your heart as you walk through today.",
-    scripture_reference: "Philippians 4:6-7",
-    topic: "prayer",
-  },
-  {
-    title: "Faith That Works",
-    message:
-      "Let your faith become visible through love today. Small acts of service matter when they are offered with a sincere heart. Ask God to make your belief active, compassionate, and useful to the people around you.",
-    scripture_reference: "James 2:17",
-    topic: "service",
-  },
-  {
-    title: "Light For Your Path",
-    message:
-      "God’s Word can steady the next step even when the whole road is unclear. Take time to listen, reflect, and obey what He has already shown. A faithful step today can become light for tomorrow.",
-    scripture_reference: "Psalm 119:105",
-    topic: "guidance",
-  },
-  {
-    title: "Love That Builds",
-    message:
-      "Choose words that build up today. Encouragement can carry more weight than you realize, especially when someone is tired or discouraged. Let love guide your conversations so your presence strengthens the people God places near you.",
-    scripture_reference: "Ephesians 4:29",
-    topic: "encouragement",
-  },
-  {
-    title: "Hope Held Firm",
-    message:
-      "Hold tightly to hope today, not because circumstances are perfect, but because God is faithful. Let your confidence rest in His character. Keep doing good, keep praying, and keep trusting Him with what you cannot control.",
-    scripture_reference: "Hebrews 10:23",
-    topic: "hope",
-  },
-  {
-    title: "Serve With Gladness",
-    message:
-      "Whatever responsibility is in front of you, offer it with a willing heart. Service done in love honors God and blesses people. Let gratitude shape your effort, and allow joy to rise even in simple tasks.",
-    scripture_reference: "Psalm 100:2",
-    topic: "service",
-  },
-  {
-    title: "Grace For The Moment",
-    message:
-      "You do not need tomorrow’s strength before tomorrow arrives. Receive grace for this moment and answer it faithfully. God can meet you in ordinary places, giving patience for the next conversation and courage for the next step.",
-    scripture_reference: "2 Corinthians 12:9",
-    topic: "grace",
-  },
-];
+type DailyWordHistoryItem = {
+  title: string;
+  message: string;
+};
 
-function normalizeReference(reference: string): string {
-  return reference.toLowerCase().replace(/\s+/g, " ").trim();
+const scheduledContentMutationRoles = new Set([
+  "super_developer",
+  "support_developer",
+  "content_moderator",
+  "security_admin",
+]);
+
+function normalizedWords(value: string): Set<string> {
+  return new Set(
+    value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().split(/\s+/)
+      .filter((word) => word.length > 2),
+  );
+}
+
+function wordSetSimilarity(left: string, right: string): number {
+  const leftWords = normalizedWords(left);
+  const rightWords = normalizedWords(right);
+  if (leftWords.size === 0 || rightWords.size === 0) return 0;
+  let overlap = 0;
+  for (const word of leftWords) if (rightWords.has(word)) overlap++;
+  return overlap / (leftWords.size + rightWords.size - overlap);
 }
 
 function validateMotivation(
   value: unknown,
-  blockedReferences = new Set<string>(),
+  chapter: BibleChapter,
+  history: DailyWordHistoryItem[],
 ): DailyMotivationAiResponse | null {
   const data = value as DailyMotivationAiResponse | null;
   if (!data) return null;
@@ -147,59 +75,154 @@ function validateMotivation(
   const words = wordCount(message);
   if (!title || !message || !scripture) return null;
   if (words < 35 || words > 70) return null;
-  if (!/^[1-3]?\s?[A-Za-z]+(?:\s[A-Za-z]+)*\s+\d{1,3}:\d{1,3}/.test(scripture)) {
-    return null;
-  }
-  if (blockedReferences.has(normalizeReference(scripture))) return null;
+  if (bibleChapterFromReference(scripture)?.key !== chapter.key) return null;
+  const candidate = `${title} ${message}`;
+  if (
+    history.some((item) =>
+      wordSetSimilarity(candidate, `${item.title} ${item.message}`) >= 0.68
+    )
+  ) return null;
   return { title, message, scripture_reference: scripture, topic };
 }
 
-function seedScore(seed: string): number {
-  let hash = 2166136261;
-  for (let index = 0; index < seed.length; index++) {
-    hash ^= seed.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
+async function usedChapterOwners(
+  client: ReturnType<typeof serviceClient>,
+): Promise<Map<string, string>> {
+  const owners = new Map<string, string>();
+  for (let start = 0;; start += 1000) {
+    const { data, error } = await client
+      .from("daily_word_chapter_history")
+      .select("chapter_key,first_daily_motivation_id")
+      .order("chapter_key")
+      .range(start, start + 999);
+    if (error) {
+      throw new Error(
+        `Daily Word chapter history could not be verified: ${error.message}`,
+      );
+    }
+    for (const row of data ?? []) {
+      const key = String(row.chapter_key ?? "").trim();
+      if (key) owners.set(key, String(row.first_daily_motivation_id ?? ""));
+    }
+    if ((data ?? []).length < 1000) break;
   }
-  return hash >>> 0;
+  return owners;
 }
 
-async function recentScriptureReferences(
+async function dailyWordHistory(
   client: ReturnType<typeof serviceClient>,
-  publishDate: string,
-): Promise<Set<string>> {
+): Promise<DailyWordHistoryItem[]> {
+  const history: DailyWordHistoryItem[] = [];
+  for (let start = 0;; start += 500) {
+    const { data, error } = await client
+      .from("daily_word_content_history")
+      .select("title,message")
+      .order("first_seen_at", { ascending: false })
+      .range(start, start + 499);
+    if (error) {
+      throw new Error(
+        `Daily Word wording history could not be verified: ${error.message}`,
+      );
+    }
+    for (const row of data ?? []) {
+      history.push({
+        title: String(row.title ?? ""),
+        message: String(row.message ?? ""),
+      });
+    }
+    if ((data ?? []).length < 500) break;
+  }
+  return history;
+}
+
+async function canRegenerateScheduledContent(
+  request: Request,
+): Promise<boolean> {
   try {
-    const cutoff = new Date(`${publishDate}T00:00:00.000Z`);
-    cutoff.setUTCDate(cutoff.getUTCDate() - 120);
-    const { data } = await client
-      .from("daily_motivations")
-      .select("scripture_reference")
-      .neq("publish_date", publishDate)
-      .gte("publish_date", cutoff.toISOString().slice(0, 10))
-      .eq("is_published", true)
-      .order("publish_date", { ascending: false })
-      .limit(120);
-    return new Set(
-      (data ?? [])
-        .map((row) => normalizeReference(String(row.scripture_reference ?? "")))
-        .filter(Boolean),
+    await authenticatedUser(request);
+    const accessToken = accessTokenFromRequest(request);
+    if (!accessToken) return false;
+    const { data, error } = await anonClient(accessToken).rpc(
+      "current_developer_role",
+    );
+    if (error) return false;
+    return scheduledContentMutationRoles.has(
+      String(data ?? "").trim().toLowerCase(),
     );
   } catch (_) {
-    return new Set();
+    return false;
   }
 }
 
-function selectFallbackMotivation(
-  publishDate: string,
-  blockedReferences: Set<string>,
-): Required<DailyMotivationAiResponse> {
-  const fresh = fallbackMotivations.filter(
-    (item) => !blockedReferences.has(normalizeReference(item.scripture_reference)),
+async function usableChapter(
+  existingKey: string,
+  excluded: Set<string>,
+): Promise<BibleChapterText> {
+  if (existingKey) {
+    const existing = bibleChapterFromKey(existingKey);
+    if (!existing) {
+      throw new Error("The scheduled Daily Word chapter is invalid.");
+    }
+    return await fetchBibleChapter(existing);
+  }
+  let providerError = "No unused Bible chapter is available.";
+  for (const chapter of shuffledBibleChapters(excluded).slice(0, 30)) {
+    try {
+      const loaded = await fetchBibleChapter(chapter);
+      if (loaded.verses.length >= 8 && loaded.text.length >= 350) return loaded;
+      providerError =
+        `${chapter.book} ${chapter.chapter} was too short for a five-question study.`;
+    } catch (error) {
+      providerError = error instanceof Error
+        ? error.message
+        : "Bible chapter could not be loaded.";
+    }
+  }
+  throw new Error(
+    `A fresh study-ready Bible chapter could not be loaded: ${providerError}`,
   );
-  const pool = fresh.length > 0 ? fresh : fallbackMotivations;
-  return [...pool].sort((left, right) =>
-    seedScore(`${publishDate}:${left.scripture_reference}:${left.title}`) -
-    seedScore(`${publishDate}:${right.scripture_reference}:${right.title}`)
-  )[0];
+}
+
+function dailyWordPrompt(
+  chapter: BibleChapterText,
+  history: DailyWordHistoryItem[],
+  attempt: number,
+): string {
+  const recentExamples = history.slice(0, 35).map((item) =>
+    `${item.title}: ${item.message}`
+  ).join("\n---\n");
+  return `You are preparing a fresh Christian Daily Word for Grace Connect.
+Use only the supplied public-domain World English Bible chapter as your factual context.
+Chapter: ${chapter.book} ${chapter.chapter}
+Chapter text:
+${chapter.text}
+
+Write a warm, original 35-70 word reflection for a broad Christian audience. Accurately summarize or apply a distinct idea from this chapter in natural English suitable for a Jamaican church audience. Choose one accurate verse or verse range from this same chapter as scripture_reference. This is generation variation ${attempt}; use different imagery, structure, title, and application from prior content.
+Do not copy or closely paraphrase prior Daily Words below, and do not recycle generic encouragement wording:
+${recentExamples || "No prior Daily Words."}
+Do not make medical, legal, financial, personal-prophecy, or prosperity claims. Do not quote a copyrighted translation.
+Return JSON only with title, message, scripture_reference, and topic.`;
+}
+
+async function generateFreshDailyWord(
+  chapter: BibleChapterText,
+  history: DailyWordHistoryItem[],
+): Promise<DailyMotivationAiResponse> {
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    try {
+      const value = await callHuggingFaceJson(
+        dailyWordPrompt(chapter, history, attempt),
+        1000,
+      );
+      const validated = validateMotivation(value, chapter, history);
+      if (validated) return validated;
+    } catch (_) {
+      // A later variation may recover from an unavailable or malformed reply.
+    }
+  }
+  throw new Error(
+    "AI could not create a distinct, chapter-grounded Daily Word. The scheduled slot was left unchanged and will retry.",
+  );
 }
 
 function dateOffset(dateKey: string, days: number): string {
@@ -208,70 +231,128 @@ function dateOffset(dateKey: string, days: number): string {
   return value.toISOString().slice(0, 10);
 }
 
+function dailyWordReleaseAt(dateKey: string): Date {
+  // Jamaica is UTC-5 year-round; 5:00 AM is 10:00 UTC.
+  return new Date(`${dateKey}T10:00:00.000Z`);
+}
+
 Deno.serve(async (request) => {
   const options = handleOptions(request);
   if (options) return options;
-  if (request.method !== "POST") return jsonResponse({ error: "POST required." }, 405);
+  if (request.method !== "POST") {
+    return jsonResponse({ error: "POST required." }, 405);
+  }
 
   const client = serviceClient();
   const requestBody = await request.json().catch(() => ({}));
-  const preparing = String(requestBody.action ?? "release") === "prepare";
+  const action = String(requestBody.action ?? "release");
+  if (!["prepare", "release", "regenerate_scheduled"].includes(action)) {
+    return jsonResponse({ error: "Unsupported Daily Word action." }, 400);
+  }
+  const preparing = action === "prepare";
+  const regenerating = action === "regenerate_scheduled";
   const cronAuthorized = hasCronSecret(request, "DAILY_MOTIVATION_CRON_SECRET");
-  if (!cronAuthorized) {
+  if (regenerating) {
+    if (!(await canRegenerateScheduledContent(request))) {
+      return jsonResponse({
+        error: "Daily Word refresh permission is required.",
+      }, 403);
+    }
+  } else if (preparing && !cronAuthorized) {
+    return jsonResponse({ error: "Forbidden." }, 403);
+  } else if (!cronAuthorized) {
     let userId = "";
     try {
       userId = (await authenticatedUser(request)).id;
     } catch (_) {
       return jsonResponse({ error: "Forbidden." }, 403);
     }
-    if (preparing) return jsonResponse({ error: "Forbidden." }, 403);
     if (!hasReachedJamaicaHour(5)) {
-      return jsonResponse({ error: "Today's Daily Word opens at 5:00 AM Jamaica time." }, 425);
+      return jsonResponse({
+        error: "Today's Daily Word opens at 5:00 AM Jamaica time.",
+      }, 425);
     }
     const profile = await userProfile(client, userId);
-    if (!profileChurchId(profile)) return jsonResponse({ error: "Church membership required." }, 403);
+    if (!profileChurchId(profile)) {
+      return jsonResponse({ error: "Church membership required." }, 403);
+    }
   }
 
   const today = jamaicaDateString();
-  const publishDate = preparing ? dateOffset(today, 1) : today;
-  const blockedReferences = await recentScriptureReferences(client, publishDate);
+  let publishDate = preparing ? dateOffset(today, 1) : today;
+  let existingResult;
+  if (regenerating) {
+    const motivationId = String(requestBody.motivation_id ?? "").trim();
+    if (!motivationId) {
+      return jsonResponse({ error: "Daily Word ID is required." }, 400);
+    }
+    existingResult = await client
+      .from("daily_motivations")
+      .select("*")
+      .eq("id", motivationId)
+      .maybeSingle();
+    if (!existingResult.data) {
+      return jsonResponse(
+        { error: "Scheduled Daily Word was not found." },
+        404,
+      );
+    }
+    publishDate = String(existingResult.data.publish_date);
+    if (
+      existingResult.data.status !== "scheduled" ||
+      dailyWordReleaseAt(publishDate) <= new Date()
+    ) {
+      return jsonResponse({
+        error: "Only a future scheduled Daily Word can be refreshed.",
+      }, 409);
+    }
+  } else {
+    existingResult = await client
+      .from("daily_motivations")
+      .select("*")
+      .eq("publish_date", publishDate)
+      .maybeSingle();
+  }
+  if (existingResult.error) {
+    return jsonResponse(
+      { error: "Daily Word schedule could not be loaded." },
+      503,
+    );
+  }
+  const existing = existingResult.data;
 
-  const existing = await client
-    .from("daily_motivations")
-    .select("*")
-    .eq("publish_date", publishDate)
-    .maybeSingle();
-
-  const existingReference = normalizeReference(String(existing.data?.scripture_reference ?? ""));
-  const existingRepeatsRecent = existingReference.length > 0 && blockedReferences.has(existingReference);
-  if (preparing && existing.data?.status === "scheduled") {
+  if (
+    preparing && existing?.status === "scheduled" &&
+    Number(existing.generation_version ?? 1) >= 2 &&
+    existing.has_study_quiz === isChapterStudyDate(publishDate)
+  ) {
     return jsonResponse({
       ok: true,
       status: "already_scheduled",
-      motivation_id: existing.data.id,
+      motivation_id: existing.id,
       publish_date: publishDate,
     });
   }
-  if (existing.data?.is_published && existing.data?.notification_sent_at && !existingRepeatsRecent) {
+  if (existing?.is_published && existing?.notification_sent_at) {
     return jsonResponse({
       ok: true,
       status: "already_exists",
-      motivation_id: existing.data.id,
+      motivation_id: existing.id,
     });
   }
 
   let saved = null;
-  let source = String(existing.data?.source ?? "ai");
+  let source = String(existing?.source ?? "ai");
 
-  if (!preparing && existing.data?.is_published) {
+  if (!preparing && !regenerating && existing?.is_published) {
     // Never rewrite content that members may already have read. If the prior
     // delivery stopped midway, only the idempotent notification step is retried.
-    saved = existing.data;
+    saved = existing;
   }
 
   // Publish the exact row the developer reviewed. Release never silently
   // regenerates scheduled content or changes its date/time slot.
-  if (!preparing && existing.data?.status === "scheduled") {
+  if (!preparing && !regenerating && existing?.status === "scheduled") {
     const released = await client
       .from("daily_motivations")
       .update({
@@ -279,77 +360,103 @@ Deno.serve(async (request) => {
         is_published: true,
         published_at: new Date().toISOString(),
       })
-      .eq("id", existing.data.id)
+      .eq("id", existing.id)
       .select("*")
       .single();
     if (released.error || !released.data) {
-      return jsonResponse({ error: "Unable to publish the scheduled Daily Word." }, 500);
+      return jsonResponse({
+        error: "Unable to publish the scheduled Daily Word.",
+      }, 500);
     }
     saved = released.data;
   }
 
   if (!saved) {
-    const prompt = `You are preparing a short Christian Daily Word for a church app called Grace Connect.
-Create a warm, encouraging, Bible-centered message for a broad Christian audience.
-Use respectful, clear English that feels natural for a Jamaican church audience.
-Keep the message between 35 and 70 words.
-Include one accurate Bible verse reference only, such as "Isaiah 41:10".
-Do not use any of these recently used scripture references: ${Array.from(blockedReferences).slice(0, 40).join(", ") || "none"}.
-Do not invent Bible passages or claim God has personally promised a specific outcome to an individual.
-Do not make medical, legal, financial, or prophetic claims.
-Do not use prosperity-gospel language.
-Do not quote a Bible translation word-for-word unless it is confirmed public-domain.
-Return valid JSON only, with title, message, scripture_reference, and topic.`;
-
-    let content: DailyMotivationAiResponse | null = null;
-    source = "ai";
+    let history: DailyWordHistoryItem[];
+    let chapterOwners: Map<string, string>;
     try {
-      content = validateMotivation(await callHuggingFaceJson(prompt), blockedReferences);
-    } catch (_) {
-      content = null;
+      [history, chapterOwners] = await Promise.all([
+        dailyWordHistory(client),
+        usedChapterOwners(client),
+      ]);
+    } catch (error) {
+      return jsonResponse({
+        error: error instanceof Error
+          ? error.message
+          : "Daily Word history could not be verified.",
+      }, 503);
     }
 
-    if (!content) {
-      content = selectFallbackMotivation(publishDate, blockedReferences);
-      source = "fallback";
+    let chapter: BibleChapterText;
+    let content: DailyMotivationAiResponse;
+    try {
+      source = "ai";
+      const currentKey = String(existing?.scripture_chapter_key ?? "").trim();
+      const retainedKey =
+        chapterOwners.get(currentKey) === String(existing?.id ?? "")
+          ? currentKey
+          : "";
+      chapter = await usableChapter(
+        retainedKey,
+        new Set(chapterOwners.keys()),
+      );
+      content = await generateFreshDailyWord(chapter, history);
+    } catch (error) {
+      return jsonResponse({
+        error: error instanceof Error
+          ? error.message
+          : "A fresh Daily Word could not be generated.",
+      }, 503);
     }
 
-    const stored = await client
-      .from("daily_motivations")
-      .upsert({
-        ...(existing.data?.id ? { id: existing.data.id } : {}),
-        publish_date: publishDate,
-        title: content.title,
-        message: content.message,
-        scripture_reference: content.scripture_reference,
-        topic: content.topic,
-        source,
-        status: preparing ? "scheduled" : "published",
-        is_published: !preparing,
-        generated_at: new Date().toISOString(),
-        published_at: preparing ? null : new Date().toISOString(),
-        notification_sent_at: null,
-        failure_reason: source === "fallback"
-          ? "AI response unavailable, repeated a recent scripture, or failed validation."
-          : existingRepeatsRecent
-            ? "Regenerated because the previous Daily Word repeated a recent scripture."
-            : null,
-      }, { onConflict: "publish_date" })
-      .select("*")
-      .single();
+    const payload = {
+      publish_date: publishDate,
+      title: content.title,
+      message: content.message,
+      scripture_reference: content.scripture_reference,
+      scripture_chapter_key: chapter.key,
+      has_study_quiz: isChapterStudyDate(publishDate),
+      topic: content.topic,
+      source,
+      status: preparing || regenerating ? "scheduled" : "published",
+      is_published: !preparing && !regenerating,
+      generated_at: new Date().toISOString(),
+      published_at: preparing || regenerating ? null : new Date().toISOString(),
+      notification_sent_at: null,
+      notification_claimed_at: null,
+      failure_reason: null,
+      generation_version: 2,
+    };
+    const stored = existing?.id
+      ? await client
+        .from("daily_motivations")
+        .update(payload)
+        .eq("id", existing.id)
+        .eq("status", existing.status)
+        .select("*")
+        .single()
+      : await client
+        .from("daily_motivations")
+        .insert(payload)
+        .select("*")
+        .single();
     if (stored.error || !stored.data) {
-      return jsonResponse({ error: "Unable to save Daily Word." }, 500);
+      return jsonResponse({
+        error: stored.error?.message ?? "Unable to save Daily Word.",
+      }, stored.error?.code === "23505" ? 409 : 500);
     }
     saved = stored.data;
   }
 
-  if (preparing) {
+  if (preparing || regenerating) {
     return jsonResponse({
       ok: true,
-      status: "scheduled",
+      status: regenerating ? "regenerated" : "scheduled",
       motivation_id: saved.id,
       publish_date: publishDate,
       source,
+      scripture_chapter_key: saved.scripture_chapter_key,
+      has_study_quiz: saved.has_study_quiz,
     });
   }
 
@@ -398,7 +505,11 @@ Return valid JSON only, with title, message, scripture_reference, and topic.`;
     .select("placeId")
     .eq("notifyDailyMotivation", true)
     .not("placeId", "is", null);
-  const churches = new Set((churchRows ?? []).map((row) => String(row.placeId ?? "").trim()).filter(Boolean));
+  const churches = new Set(
+    (churchRows ?? []).map((row) => String(row.placeId ?? "").trim()).filter(
+      Boolean,
+    ),
+  );
   let pushesSent = 0;
   let pushesFailed = 0;
   for (const churchId of churches) {

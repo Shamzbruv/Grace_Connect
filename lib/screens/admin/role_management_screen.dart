@@ -508,6 +508,7 @@ class _RoleManagementScreenState extends State<RoleManagementScreen> {
         AppPermission.viewFinanceDashboard,
         AppPermission.manageFinances,
         AppPermission.approveFinanceReports,
+        AppPermission.manageChurchSubscription,
       ],
       'Community & Content': [
         AppPermission.createAnnouncement,
@@ -544,6 +545,7 @@ class _RoleManagementScreenState extends State<RoleManagementScreen> {
       AppPermission.viewFinanceDashboard => 'View Finance Dashboard',
       AppPermission.manageFinances => 'Manage Finances',
       AppPermission.approveFinanceReports => 'Approve Finance Reports',
+      AppPermission.manageChurchSubscription => 'Manage Church Subscription',
       AppPermission.createAnnouncement => 'Create Announcements',
       AppPermission.sendPushNotification => 'Send Push Notifications',
       AppPermission.pinPost => 'Pin Posts',
@@ -572,6 +574,8 @@ class _RoleManagementScreenState extends State<RoleManagementScreen> {
         'View giving and finance summaries.',
       AppPermission.manageFinances => 'Create and edit finance records.',
       AppPermission.approveFinanceReports => 'Review finance reports.',
+      AppPermission.manageChurchSubscription =>
+        'View pricing and submit church billing or subscription requests.',
       AppPermission.createAnnouncement => 'Post official announcements.',
       AppPermission.sendPushNotification => 'Notify users about updates.',
       AppPermission.pinPost => 'Pin important community posts.',

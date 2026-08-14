@@ -4,10 +4,12 @@ Use this checklist for the Grace Connect internal testing upload.
 
 ## Release
 
-- Release name: `Grace Connect 1.0.27-beta (29)`
-- App bundle: `build/app/outputs/bundle/release/app-release.aab`
+- Release name: `Grace Connect 1.0.28-beta (30)`
+- App bundle: `build/app/outputs/bundle/release/grace-connect-1.0.28-beta+30.aab`
+- Preserved previous bundle: `build/app/outputs/bundle/release/app-release.aab`
 - Release notes: `release_notes/internal-testing-en-US.txt`
 - Package ID: `love.graceconnect`
+- Compile/target SDK: Android 16 / API 36
 - Required Android release package property: `GRACE_CONNECT_APPLICATION_ID=love.graceconnect`
 - Required Android Maps Gradle property: `GOOGLE_MAPS_API_KEY_ANDROID`
 - Android Maps manifest placeholder: `googleMapsApiKey`
@@ -33,6 +35,34 @@ Use this checklist for the Grace Connect internal testing upload.
   - the production website callback URL if using hosted auth links.
 - Google Maps Android key restriction uses package `love.graceconnect` plus the debug, upload/release, and Play App Signing SHA-1 values.
 - If locally-installed release builds are tested, also add the local/upload release keystore SHA-1 to the Android-restricted Maps key.
+
+## Android 16 And Auto-Attendance Policy
+
+- Google Play requires new apps and updates to target API 36 beginning August
+  31, 2026. This release uses `compileSdkVersion 36`, `targetSdkVersion 36`,
+  Android Gradle Plugin 8.9.2, and Android 36 build tools. See the official
+  [target API requirement](https://developer.android.com/google/play/requirements/target-sdk)
+  and [Android 16 SDK setup](https://developer.android.com/about/versions/16/setup-sdk).
+- Auto-attendance now registers a native Android Geofence API dwell transition;
+  it does not continuously stream location through a location foreground
+  service. Google removes geofencing as an approved *foreground-service* use
+  case on August 26, 2026 and directs apps to the Geofence API instead. See the
+  [Play policy preview](https://support.google.com/googleplay/android-developer/answer/16965181?hl=en)
+  and [Android geofence guide](https://developer.android.com/develop/sensors-and-location/location/geofencing).
+- The Geofence API is part of Google Play services location. It does **not**
+  require another Google Cloud API key or a separate billable “Geofencing API.”
+  It does require `ACCESS_FINE_LOCATION` and, for target API 29+, approved
+  `ACCESS_BACKGROUND_LOCATION` access.
+- In Play Console, do not declare/select a location foreground-service use case
+  for auto-attendance after this migration. The merged release manifest must not
+  contain `FOREGROUND_SERVICE_LOCATION`.
+- Complete Play Console's background-location declaration for auto-attendance,
+  provide the requested review video, keep the privacy policy accurate, and
+  show the in-app prominent disclosure before Android's permission flow. The
+  member must explicitly enable Auto-Attendance; denial leaves it off.
+- Device validation must cover: permission denied, “while using” only, “allow
+  all the time,” force-stopped/reopened app, reboot, Doze, entering/exiting the
+  saved church radius, and a full configured dwell during an active service.
 
 ## Local Verification
 

@@ -1,6 +1,9 @@
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../models/church_subscription_management.dart';
+import '../models/user_profile.dart';
+
 class ChurchSubscriptionContext {
   const ChurchSubscriptionContext({
     required this.churchId,
@@ -62,6 +65,46 @@ class ChurchSubscriptionService {
 
   final SupabaseClient _client;
 
+  static const Set<String> _managementRoles = {
+    'pastor',
+    'senior_pastor',
+    'assistant_pastor',
+    'acting_pastor',
+    'church_admin',
+    'church_administrator',
+    'admin',
+    'administrator',
+    'treasurer',
+    'financial_secretary',
+    'finance',
+    'finance_officer',
+    'accountant',
+  };
+
+  static const Set<String> _managementPrivileges = {
+    'manageChurchSubscription',
+    'manageFinances',
+  };
+
+  /// This is an advisory visibility check only. Every read and write is also
+  /// authorized server-side against the caller's active membership roles.
+  static bool canManageForProfile(UserProfile? profile) {
+    if (profile == null || profile.churchId.trim().isEmpty) return false;
+    final normalizedRoles = profile.roles.map(_normalizeRole).toSet();
+    return normalizedRoles.any(_managementRoles.contains) ||
+        profile.appPrivileges.any(_managementPrivileges.contains);
+  }
+
+  static String _normalizeRole(String role) {
+    return role
+        .trim()
+        .toLowerCase()
+        .replaceAll('&', 'and')
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+        .replaceAll(RegExp(r'_+'), '_')
+        .replaceAll(RegExp(r'^_|_$'), '');
+  }
+
   Future<ChurchSubscriptionContext> getCurrentChurchSubscription({
     String? churchId,
   }) async {
@@ -85,42 +128,59 @@ class ChurchSubscriptionService {
     }
   }
 
-  Future<ChurchSubscriptionContext> grantManualSubscription({
-    required String churchId,
-    required int months,
-    String planCode = 'manual_free',
-    String notes = 'Developer manual grant',
+  Future<ChurchSubscriptionManagement> getManagement({
+    String? churchId,
   }) async {
     final data = await _client.rpc(
-      'developer_set_church_subscription',
-      params: {
-        'p_church_id': churchId,
-        'p_status': 'active',
-        'p_plan_code': planCode,
-        'p_months': months,
-        'p_notes': notes,
-      },
+      'get_church_subscription_management',
+      params: {'p_church_id': churchId},
     );
     if (data is Map<String, dynamic>) {
-      return ChurchSubscriptionContext.fromMap(data);
+      return ChurchSubscriptionManagement.fromMap(data);
     }
-    return ChurchSubscriptionContext.fromMap(Map<String, dynamic>.from(data));
+    if (data is Map) {
+      return ChurchSubscriptionManagement.fromMap(
+        Map<String, dynamic>.from(data),
+      );
+    }
+    throw StateError('Unexpected subscription management response: $data');
   }
 
-  Future<ChurchSubscriptionContext> clearManualSubscription({
-    required String churchId,
-    String reason = 'Developer manual disable',
+  Future<ChurchSubscriptionRequest> submitRequest({
+    required String requestType,
+    required String requestedTierCode,
+    required String contactName,
+    required String contactEmail,
+    String? contactPhone,
+    String? message,
   }) async {
+    if (requestType != 'billing_support' && requestType != 'cancellation') {
+      throw ArgumentError.value(
+        requestType,
+        'requestType',
+        'The Android app only supports existing-plan account management.',
+      );
+    }
     final data = await _client.rpc(
-      'developer_clear_church_subscription',
+      'submit_church_subscription_request',
       params: {
-        'p_church_id': churchId,
-        'p_reason': reason,
+        'p_request_type': requestType,
+        'p_requested_tier_code': requestedTierCode,
+        'p_contact_name': contactName.trim(),
+        'p_contact_email': contactEmail.trim(),
+        'p_contact_phone': contactPhone?.trim(),
+        'p_message': message?.trim(),
+        'p_channel': 'android_account_management',
       },
     );
     if (data is Map<String, dynamic>) {
-      return ChurchSubscriptionContext.fromMap(data);
+      return ChurchSubscriptionRequest.fromMap(data);
     }
-    return ChurchSubscriptionContext.fromMap(Map<String, dynamic>.from(data));
+    if (data is Map) {
+      return ChurchSubscriptionRequest.fromMap(
+        Map<String, dynamic>.from(data),
+      );
+    }
+    throw StateError('Unexpected subscription request response: $data');
   }
 }

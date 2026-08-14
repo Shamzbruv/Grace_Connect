@@ -178,8 +178,6 @@ class _DeveloperConsoleScreenState extends State<DeveloperConsoleScreen>
           itemBuilder: (context, index) {
             final church = churches[index];
             final subscriptionActive = church['subscription_active'] == true;
-            final churchId =
-                (church['placeId'] ?? church['id'] ?? '').toString();
             final activeUntil =
                 _formatDate(church['subscription_active_until']);
 
@@ -201,30 +199,12 @@ class _DeveloperConsoleScreenState extends State<DeveloperConsoleScreen>
                   ].join('\n'),
                 ),
                 isThreeLine: true,
-                trailing: PopupMenuButton<String>(
-                  icon: const Icon(Icons.more_vert),
-                  onSelected: churchId.isEmpty
-                      ? null
-                      : (value) async {
-                          if (value == 'free_1') {
-                            await _updateSubscription(churchId, months: 1);
-                          }
-                          if (value == 'free_3') {
-                            await _updateSubscription(churchId, months: 3);
-                          }
-                          if (value == 'disable') {
-                            await _disableSubscription(churchId);
-                          }
-                        },
-                  itemBuilder: (context) => const [
-                    PopupMenuItem(value: 'free_1', child: Text('Free 1 month')),
-                    PopupMenuItem(
-                        value: 'free_3', child: Text('Free 3 months')),
-                    PopupMenuItem(
-                      value: 'disable',
-                      child: Text('Turn subscription off'),
-                    ),
-                  ],
+                trailing: Tooltip(
+                  message: 'Manage billing in the Developer Finance portal',
+                  child: Icon(
+                    Icons.open_in_new_outlined,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ),
             );
@@ -383,8 +363,21 @@ class _DeveloperConsoleScreenState extends State<DeveloperConsoleScreen>
           );
         }
         final data = snapshot.data ?? const {};
-        final dailyWords = _mapList(data['daily_words']);
-        final quizzes = _mapList(data['quizzes']);
+        final dailyWords = _mapList(data['daily_words'])
+            .where(_isUpcomingScheduledContent)
+            .toList();
+        final quizzes = _mapList(data['quizzes'])
+            .where(_isUpcomingScheduledContent)
+            .toList();
+        final uniquenessSettings = data['quiz_uniqueness_settings'] is Map
+            ? Map<String, dynamic>.from(
+                data['quiz_uniqueness_settings'] as Map,
+              )
+            : const <String, dynamic>{};
+        final guaranteeUnique = uniquenessSettings['guarantee_unique'] != false;
+        final canManageUniqueness =
+            data['can_manage_quiz_uniqueness_settings'] == true &&
+                _scheduledQuizMutationRoles.contains(_developerRole);
         return RefreshIndicator(
           onRefresh: _refreshScheduledContent,
           child: ListView(
@@ -412,6 +405,25 @@ class _DeveloperConsoleScreenState extends State<DeveloperConsoleScreen>
                 'Release dates and times stay fixed. Quiz answers are never shown here.',
               ),
               const SizedBox(height: 18),
+              Card(
+                child: SwitchListTile.adaptive(
+                  secondary: const Icon(Icons.verified_outlined),
+                  title: const Text('Guarantee different quiz facts'),
+                  subtitle: Text(
+                    guaranteeUnique
+                        ? 'On — upcoming scheduled facts and every ever-published fact for that church plus Grace Connect Global are excluded, even after withdrawal or archive. Monday, Wednesday, and Saturday are also locked to the never-repeated Daily Word chapter. Drafts and unrelated churches stay isolated. If five unseen facts are unavailable, generation stops safely.'
+                        : 'Off — the generator only avoids the recent history window and may reuse older facts.',
+                  ),
+                  value: guaranteeUnique,
+                  onChanged: canManageUniqueness
+                      ? (value) => _setQuizUniqueness(
+                            value,
+                            uniquenessSettings,
+                          )
+                      : null,
+                ),
+              ),
+              const SizedBox(height: 18),
               Text('Daily Word',
                   style: Theme.of(context)
                       .textTheme
@@ -424,31 +436,7 @@ class _DeveloperConsoleScreenState extends State<DeveloperConsoleScreen>
                       ListTile(title: Text('No Daily Word is scheduled yet.')),
                 )
               else
-                for (final word in dailyWords)
-                  Card(
-                    child: ExpansionTile(
-                      leading: const Icon(Icons.wb_sunny_outlined),
-                      title: Text(word['title']?.toString() ?? 'Daily Word'),
-                      subtitle: Text(
-                        '${_formatReleaseDate(word['release_at'])} • ${word['status'] ?? 'scheduled'}',
-                      ),
-                      childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                      children: [
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: Text(word['message']?.toString() ?? ''),
-                        ),
-                        const SizedBox(height: 10),
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: Text(
-                            word['scripture_reference']?.toString() ?? '',
-                            style: const TextStyle(fontWeight: FontWeight.w800),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+                for (final word in dailyWords) _scheduledDailyWordCard(word),
               const SizedBox(height: 20),
               Text('Daily Bible Quiz',
                   style: Theme.of(context)
@@ -476,7 +464,7 @@ class _DeveloperConsoleScreenState extends State<DeveloperConsoleScreen>
     return Card(
       child: ExpansionTile(
         leading: const Icon(Icons.quiz_outlined),
-        title: Text('Quiz • ${quiz['church_id'] ?? 'Global'}'),
+        title: Text('Quiz • ${quiz['church_name'] ?? 'Church'}'),
         subtitle: Text(
           '${_formatReleaseDate(quiz['release_at'])} • ${quiz['status'] ?? 'unknown'} • ${questions.length} questions',
         ),
@@ -514,6 +502,105 @@ class _DeveloperConsoleScreenState extends State<DeveloperConsoleScreen>
         ],
       ),
     );
+  }
+
+  Widget _scheduledDailyWordCard(Map<String, dynamic> word) {
+    final canReplace = _canReplaceScheduledDailyWord(word);
+    final hasStudyQuiz = word['has_study_quiz'] == true;
+    return Card(
+      child: ExpansionTile(
+        leading: const Icon(Icons.wb_sunny_outlined),
+        title: Text(word['title']?.toString() ?? 'Daily Word'),
+        subtitle: Text(
+          '${_formatReleaseDate(word['release_at'])} • ${word['status'] ?? 'scheduled'}${hasStudyQuiz ? ' • chapter-study quiz' : ''}',
+        ),
+        trailing: canReplace
+            ? IconButton(
+                tooltip:
+                    'Generate a different Daily Word for this same chapter and release slot',
+                onPressed: () => _regenerateScheduledDailyWord(word),
+                icon: const Icon(Icons.autorenew),
+              )
+            : null,
+        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        children: [
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text(word['message']?.toString() ?? ''),
+          ),
+          const SizedBox(height: 10),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              word['scripture_reference']?.toString() ?? '',
+              style: const TextStyle(fontWeight: FontWeight.w800),
+            ),
+          ),
+          if (hasStudyQuiz) ...[
+            const SizedBox(height: 8),
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Monday/Wednesday/Saturday quiz remains linked to this chapter.',
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Future<void> _setQuizUniqueness(
+    bool guaranteeUnique,
+    Map<String, dynamic> currentSettings,
+  ) async {
+    if (!guaranteeUnique) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Allow older facts to repeat?'),
+          content: const Text(
+            'Turning this off removes the all-history guarantee. The generator will still avoid recent and same-day repeats, but older facts may return.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Keep guarantee on'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Turn off'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+    }
+    final historyDays = int.tryParse(
+            currentSettings['relaxed_history_days']?.toString() ?? '') ??
+        60;
+    try {
+      await _devService.updateQuizUniquenessSettings(
+        guaranteeUnique: guaranteeUnique,
+        relaxedHistoryDays: historyDays,
+      );
+      await _refreshScheduledContent();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            guaranteeUnique
+                ? 'Strict quiz uniqueness is on.'
+                : 'Strict quiz uniqueness is off.',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not update quiz uniqueness: $error')),
+      );
+    }
   }
 
   Future<void> _refreshScheduledContent() async {
@@ -555,6 +642,41 @@ class _DeveloperConsoleScreenState extends State<DeveloperConsoleScreen>
     }
   }
 
+  Future<void> _regenerateScheduledDailyWord(
+    Map<String, dynamic> word,
+  ) async {
+    final id = word['id']?.toString() ?? '';
+    if (id.isEmpty) return;
+    if (!_canReplaceScheduledDailyWord(word)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'This Daily Word is no longer eligible for replacement, or your developer role has preview-only access.',
+          ),
+        ),
+      );
+      await _refreshScheduledContent();
+      return;
+    }
+    try {
+      await _devService.regenerateScheduledDailyWord(id);
+      await _refreshScheduledContent();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Daily Word replaced. Its release time and study chapter were kept.',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not refresh Daily Word: $error')),
+      );
+    }
+  }
+
   bool _canReplaceScheduledQuiz(Map<String, dynamic> quiz) {
     if (!_scheduledQuizMutationRoles.contains(_developerRole)) return false;
     if (quiz['status']?.toString().toLowerCase() != 'scheduled') return false;
@@ -562,41 +684,20 @@ class _DeveloperConsoleScreenState extends State<DeveloperConsoleScreen>
     return releaseAt != null && releaseAt.isAfter(DateTime.now());
   }
 
-  Future<void> _updateSubscription(String churchId,
-      {required int months}) async {
-    try {
-      await _devService.grantFreeSubscription(
-        churchId: churchId,
-        months: months,
-      );
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-            content: Text('Free subscription granted for $months month(s).')),
-      );
-      setState(() {});
-    } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not update subscription: $error')),
-      );
-    }
+  bool _canReplaceScheduledDailyWord(Map<String, dynamic> word) {
+    if (!_scheduledQuizMutationRoles.contains(_developerRole)) return false;
+    if (word['status']?.toString().toLowerCase() != 'scheduled') return false;
+    final releaseAt = DateTime.tryParse(word['release_at']?.toString() ?? '');
+    return releaseAt != null && releaseAt.isAfter(DateTime.now());
   }
 
-  Future<void> _disableSubscription(String churchId) async {
-    try {
-      await _devService.clearSubscription(churchId: churchId);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Subscription turned off.')),
-      );
-      setState(() {});
-    } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not disable subscription: $error')),
-      );
+  bool _isUpcomingScheduledContent(Map<String, dynamic> content) {
+    if (content['status']?.toString().toLowerCase() != 'scheduled') {
+      return false;
     }
+    final releaseAt =
+        DateTime.tryParse(content['release_at']?.toString() ?? '');
+    return releaseAt != null && releaseAt.isAfter(DateTime.now());
   }
 
   String _formatDate(dynamic value) {

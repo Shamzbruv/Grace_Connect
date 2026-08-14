@@ -5,6 +5,8 @@ class DailyMotivation {
     required this.title,
     required this.message,
     required this.scriptureReference,
+    this.scriptureChapterKey,
+    this.hasStudyQuiz = false,
     this.topic,
     required this.status,
     required this.isPublished,
@@ -17,6 +19,8 @@ class DailyMotivation {
   final String title;
   final String message;
   final String scriptureReference;
+  final String? scriptureChapterKey;
+  final bool hasStudyQuiz;
   final String? topic;
   final String status;
   final bool isPublished;
@@ -31,6 +35,8 @@ class DailyMotivation {
       title: data['title']?.toString() ?? 'Daily Word',
       message: data['message']?.toString() ?? '',
       scriptureReference: data['scripture_reference']?.toString() ?? '',
+      scriptureChapterKey: data['scripture_chapter_key']?.toString(),
+      hasStudyQuiz: data['has_study_quiz'] == true,
       topic: data['topic']?.toString(),
       status: data['status']?.toString() ?? 'draft',
       isPublished: data['is_published'] == true,

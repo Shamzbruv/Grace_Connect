@@ -1,9 +1,27 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:grace_connect/services/attendance_dwell_session.dart';
+import 'package:grace_connect/services/attendance_service.dart';
 
 void main() {
+  test('Android auto-attendance requires background location readiness', () {
+    const status = AttendanceSetupStatus(
+      autoCheckInEnabled: true,
+      locationServicesEnabled: true,
+      permission: LocationPermission.whileInUse,
+      hasChurchLocation: true,
+      hasServiceSchedule: true,
+      requiresBackgroundLocation: true,
+    );
+
+    expect(status.hasLocationPermission, isTrue);
+    expect(status.hasAutoAttendanceLocationPermission, isFalse);
+    expect(status.canMonitor, isFalse);
+    expect(status.blockers.single, contains('Allow location all the time'));
+  });
+
   group('durable attendance dwell', () {
     const maximumEvidenceGap = Duration(seconds: 90);
     const requiredOutsideDuration = Duration(minutes: 2);
@@ -166,11 +184,31 @@ void main() {
     final migration = File(
       'supabase/migrations/20260805180000_attendance_reliability.sql',
     ).readAsStringSync();
+    final idRepair = File(
+      'supabase/migrations/20260814150000_attendance_alert_id_repair.sql',
+    ).readAsStringSync();
+    final gradle = File('android/app/build.gradle').readAsStringSync();
 
+    expect(manifest, contains('ACCESS_BACKGROUND_LOCATION'));
+    expect(manifest, contains('NativeGeofenceBroadcastReceiver'));
     expect(
-        manifest, contains('android.permission.FOREGROUND_SERVICE_LOCATION'));
-    expect(manifest, isNot(contains('ACCESS_BACKGROUND_LOCATION')));
-    expect(service, contains('foregroundNotificationConfig'));
+      manifest,
+      isNot(contains('android.permission.FOREGROUND_SERVICE_LOCATION')),
+    );
+    expect(service, isNot(contains('foregroundNotificationConfig')));
+    expect(service, contains('NativeGeofenceManager.instance.createGeofence'));
+    expect(service, contains('attendanceGeofenceTriggered'));
+    expect(service, contains('GeofenceEvent.dwell'));
+    expect(service, contains('requestAutoAttendancePermissions'));
+    expect(service, contains('getRegisteredGeofenceIds'));
+    expect(
+      service,
+      contains('restarts Android\'s dwell countdown'),
+    );
+    expect(service, contains("select('minimumDwellMinutes')"));
+    expect(service, contains('_nativeGeofenceId(churchId, minutes)'));
+    expect(gradle, contains('compileSdkVersion 36'));
+    expect(gradle, contains('targetSdkVersion 36'));
     expect(service, contains('_recoverFromLocationStreamError(e);'));
     expect(
       service,
@@ -213,6 +251,8 @@ void main() {
       migration,
       contains('on conflict ("churchId", "userId") where status = \'open\''),
     );
+    expect(idRepair, contains('alter column id set default gen_random_uuid()'));
+    expect(idRepair, contains('where id is null'));
     expect(finalizer, contains('const targetDates = Array.from('));
     expect(finalizer, contains('{ length: 15 }'));
     expect(finalizer, contains('insert_absent_attendance_rows'));

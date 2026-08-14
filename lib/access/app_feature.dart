@@ -22,6 +22,7 @@ enum AppFeature {
   churchTransfer,
   churchPublicPage,
   churchTestimonies,
+  subscriptionManagement,
 
   memberDirectory,
   attendance,
@@ -60,6 +61,7 @@ extension AppFeatureLabel on AppFeature {
       AppFeature.churchTransfer => 'Church transfer',
       AppFeature.churchPublicPage => 'Church public page',
       AppFeature.churchTestimonies => 'Testimonies',
+      AppFeature.subscriptionManagement => 'Church subscription',
       AppFeature.memberDirectory => 'Member directory',
       AppFeature.attendance => 'Attendance',
       AppFeature.announcements => 'Announcements',

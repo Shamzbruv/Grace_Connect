@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../../providers/user_role_provider.dart';
 import '../../services/developer_service.dart';
 import '../../services/ministry_service.dart';
+import '../../services/church_subscription_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/ui/app_scaffold.dart';
 import '../../widgets/ui/app_card.dart';
@@ -20,6 +21,8 @@ class SettingsHomeScreen extends StatelessWidget {
     final roles = roleProvider.userProfile?.roles ?? const <String>[];
     final bool isFinance = capabilities?.canManageFinance == true ||
         roles.map(_normalizeRole).any({'pastor', 'senior_pastor'}.contains);
+    final canManageSubscription =
+        ChurchSubscriptionService.canManageForProfile(roleProvider.userProfile);
     final developerAccessFuture = DeveloperService().hasDeveloperAccess();
     final ministryAccessFuture = MinistryService().managesAnyMinistry();
 
@@ -132,6 +135,19 @@ class SettingsHomeScreen extends StatelessWidget {
                 );
               },
             ),
+            if (canManageSubscription) ...[
+              _buildSectionHeader(context, 'Billing & Subscription'),
+              AppCard(
+                child: _buildSettingsTile(
+                  context,
+                  Icons.account_balance_wallet_outlined,
+                  'Church Subscription',
+                  'Plan, member tier, billing requests',
+                  '/subscription',
+                ),
+              ),
+              const SizedBox(height: 24),
+            ],
             _buildSectionHeader(context, 'Support'),
             AppCard(
               child: Column(

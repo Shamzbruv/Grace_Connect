@@ -332,9 +332,9 @@ void main() {
       ).readAsStringSync();
 
       expect(gradle, contains('"love.graceconnect"'));
-      expect(gradle, contains('versionCode 29'));
-      expect(gradle, contains('versionName "1.0.27-beta"'));
-      expect(pubspec, contains('version: "1.0.27-beta+29"'));
+      expect(gradle, contains('versionCode 30'));
+      expect(gradle, contains('versionName "1.0.28-beta"'));
+      expect(pubspec, contains('version: "1.0.28-beta+30"'));
       expect(activity, contains('package love.graceconnect'));
       expect(manifest, contains('love.graceconnect.MainActivity'));
       expect(manifest, contains('default_notification_icon'));
@@ -343,16 +343,18 @@ void main() {
       expect(manifest, contains('@drawable/ic_stat_grace_connect'));
       expect(googleServices, contains('"package_name": "love.graceconnect"'));
       expect(googleServices, isNot(contains('com.example.grace_connect')));
-      // Auto-attendance starts a visible foreground location service while the
-      // member is using the app. It intentionally does not request unrestricted
-      // Android background-location access.
-      expect(manifest, contains('android.permission.FOREGROUND_SERVICE'));
+      // Auto-attendance uses Android's native Geofence API. It requests
+      // background location only after the member opts in and no longer keeps
+      // a location foreground service alive.
       expect(
         manifest,
-        contains('android.permission.FOREGROUND_SERVICE_LOCATION'),
+        isNot(contains('android.permission.FOREGROUND_SERVICE_LOCATION')),
       );
       expect(manifest, contains('android.permission.WAKE_LOCK'));
-      expect(manifest, isNot(contains('ACCESS_BACKGROUND_LOCATION')));
+      expect(manifest, contains('ACCESS_BACKGROUND_LOCATION'));
+      expect(manifest, contains('NativeGeofenceBroadcastReceiver'));
+      expect(gradle, contains('compileSdkVersion 36'));
+      expect(gradle, contains('targetSdkVersion 36'));
     });
 
     test('registration RPC and beta network crashes are hardened', () {
@@ -659,7 +661,7 @@ void main() {
 
       expect(feedSource, contains('uploadCommunityMediaXFile'));
       expect(feedSource, contains('_maxCommunityVideoBytes'));
-      expect(feedSource, contains('200MB'));
+      expect(feedSource, contains('50MB'));
       expect(feedSource, contains('CommunityVideoPlayer('));
       expect(feedSource, isNot(contains('_InlineCommunityVideoPlayer')));
       expect(playerSource, contains('VideoViewType.textureView'));

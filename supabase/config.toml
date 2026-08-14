@@ -85,3 +85,9 @@ verify_jwt = false
 
 [functions.send-grace-room-invitations]
 verify_jwt = false
+
+[functions.send-event-reminders]
+verify_jwt = false
+
+[functions.submit-web-subscription-request]
+verify_jwt = false

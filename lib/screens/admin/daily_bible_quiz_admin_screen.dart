@@ -71,9 +71,13 @@ class _DailyBibleQuizAdminScreenState extends State<DailyBibleQuizAdminScreen> {
   Future<void> _togglePublished(Map<String, dynamic> quiz) async {
     final published = quiz['status'] == 'published';
     try {
-      await _client.from('daily_bible_quizzes').update({
-        'status': published ? 'unpublished' : 'published',
-      }).eq('id', quiz['id']);
+      await _client.rpc(
+        'admin_set_daily_bible_quiz_published',
+        params: {
+          'p_quiz_id': quiz['id'],
+          'p_published': !published,
+        },
+      );
       if (mounted) {
         AppFeedback.show(
           context,
