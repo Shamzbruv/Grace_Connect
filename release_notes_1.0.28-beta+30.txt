@@ -1,0 +1,18 @@
+Grace Connect 1.0.28-beta+30
+
+- Fixed legacy attendance-alert rows whose missing ID default caused SQLSTATE 23502, and kept care-alert generation idempotent.
+- Replaced Android's continuous location foreground service with native enter/exit/dwell geofences, preserved service-specific dwell times, and prevented Recheck from restarting an active dwell timer.
+- Updated Android to compile/target API 36 and added Maps renderer warmup, diagnostics, timeout, retry, and manual-coordinate fallback.
+- Prevented duplicate event posts with a server-authoritative idempotent save contract and a canonical occurrence guard.
+- Added optional HTTPS event links, RSVP app/push reminder choices, and explicit device-calendar sync that updates one calendar entry when an event changes.
+- Added media-orientation detection with uncropped Full Media as the safe default plus Fill, Square, Portrait, and Landscape overrides.
+- Added video poster generation, poster-first rendering, visibility-bound decoder initialization, single-playback coordination, and offscreen resource release for faster perceived feed loading.
+- Added permanent Daily Word chapter and wording history so scheduled or discarded generations cannot recycle old content.
+- Linked every Monday, Wednesday, and Saturday quiz to the exact Daily Word chapter, with a non-shareable clickable study prompt; other days remain random pop quizzes.
+- Added strict Bible Quiz fact uniqueness and database publication guards that refuse to replace or release a quiz when five valid unseen facts cannot be produced.
+- Added developer controls to replace a future Daily Word or quiz without moving its release time or exposing answer keys.
+- Added church-level subscription management for authorized pastors, church administrators, treasurers, and finance staff.
+- Added the complete member-count pricing schedule in USD with bracketed approximate JMD amounts as read-only plan information.
+- Added upfront monthly-plan disclosures: Android does not sell, activate, or direct users to an outside purchase method; trials do not auto-convert; current plans do not auto-renew; and authorized leaders can request billing support or cancellation for an existing plan.
+- Added an independently accessed authenticated web intake for new/change/enterprise requests, plus audited developer finance status history, bento dashboards, and charts.
+- Preserved the Bible streak, membership approval, registered-device push, Grace Room presence/invitations, themed-email, quiz recovery, and video lifecycle reliability fixes from 1.0.27-beta.

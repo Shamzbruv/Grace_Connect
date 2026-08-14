@@ -1,13 +1,8 @@
 <en-US>
-Grace Connect 1.0.27-beta reliability update:
-- Fixes Bible streak counting and resets, adds evening streak reminders, and makes the leaderboard server-authoritative.
-- Fixes Bible Quiz resume/submission glitches and reduces repeated questions.
-- Adds scheduled Daily Word and quiz previews plus safe quiz refresh controls to the developer dashboard.
-- Repairs automatic attendance dwell/check-in, absence finalization, care alerts, and church-map recovery.
-- Fixes membership approval and strengthens background push delivery for Play-installed devices.
-- Adds live Grace Room presence counts and occasional room invitations.
-- Fixes black-screen/audio-only video failures, buffering/retry handling, and playback-position resets.
-- Sends app-themed support, membership, account, and security emails without embedding mail credentials in the APK.
-- Removes Grace Circles from the app and backend.
-- Bumps the Play version code to 29.
+Grace Connect 1.0.28-beta:
+- Fixes attendance alerts and moves Android auto-attendance to native geofencing.
+- Prevents duplicate events; adds RSVP reminders, calendar sync, and safe links.
+- Adds uncropped media suggestions, video posters, and faster feed playback.
+- Makes Daily Word chapters unique and links Mon/Wed/Sat quizzes to them; other days are pop quizzes.
+- Adds transparent subscription status/support and developer finance reporting.
 </en-US>

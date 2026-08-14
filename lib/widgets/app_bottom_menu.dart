@@ -7,6 +7,7 @@ import '../access/app_feature.dart';
 import '../models/user_profile.dart';
 import '../providers/user_role_provider.dart';
 import '../services/feed_scroll_service.dart';
+import '../services/church_subscription_service.dart';
 
 class AppBottomMenu extends StatelessWidget {
   const AppBottomMenu({
@@ -15,7 +16,7 @@ class AppBottomMenu extends StatelessWidget {
     this.onDestinationSelected,
     this.subscriptionLimited = false,
     this.limitedAllowedIndexes = const {0},
-    this.limitedAllowedRoutes = const {'/community'},
+    this.limitedAllowedRoutes = const {'/community', '/subscription'},
     this.limitedNotice,
     this.access,
   });
@@ -149,6 +150,13 @@ class AppBottomMenu extends StatelessWidget {
       icon: Icons.volunteer_activism_outlined,
       selectedIcon: Icons.volunteer_activism,
       feature: AppFeature.churchFinance,
+    ),
+    _MenuItem(
+      label: 'Subscription',
+      route: '/subscription',
+      icon: Icons.account_balance_wallet_outlined,
+      selectedIcon: Icons.account_balance_wallet,
+      feature: AppFeature.subscriptionManagement,
     ),
     _MenuItem(
       label: 'Grace Rooms',
@@ -342,6 +350,9 @@ class AppBottomMenu extends StatelessWidget {
       if (item.route == '/members') return _canViewMembers(profile);
       if (item.route == '/analytics') return _canViewAnalytics(profile);
       if (item.route == '/admin/live_stream') return _canManageLive(profile);
+      if (item.route == '/subscription') {
+        return ChurchSubscriptionService.canManageForProfile(profile);
+      }
       return true;
     }).toList(growable: false);
   }

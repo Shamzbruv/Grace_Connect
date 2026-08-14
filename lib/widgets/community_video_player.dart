@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_player/video_player.dart';
@@ -16,6 +17,7 @@ class CommunityVideoPlayer extends StatefulWidget {
   const CommunityVideoPlayer({
     super.key,
     required this.mediaUrl,
+    this.thumbnailUrl,
     this.fit = BoxFit.contain,
     this.autoPlay = false,
     this.looping = true,
@@ -23,6 +25,7 @@ class CommunityVideoPlayer extends StatefulWidget {
   });
 
   final String mediaUrl;
+  final String? thumbnailUrl;
   final BoxFit fit;
   final bool autoPlay;
   final bool looping;
@@ -35,12 +38,17 @@ class CommunityVideoPlayer extends StatefulWidget {
 class _CommunityVideoPlayerState extends State<CommunityVideoPlayer>
     with WidgetsBindingObserver {
   static const _initializeTimeout = Duration(seconds: 25);
+  static const _offscreenReleaseDelay = Duration(seconds: 18);
+  static final _initializationGate = _VideoInitializationGate(maxConcurrent: 2);
+  static final _playbackCoordinator = _VideoPlaybackCoordinator();
 
   final Key _visibilityKey = UniqueKey();
+  late final int _playbackOwnerId;
   VideoPlayerController? _controller;
   String? _controllerMediaUrl;
   Object? _error;
-  bool _initializing = true;
+  bool _initializing = false;
+  bool _posterVisible = true;
   bool _visible = false;
   bool _appActive = false;
   bool _resumeWhenVisible = false;
@@ -48,21 +56,30 @@ class _CommunityVideoPlayerState extends State<CommunityVideoPlayer>
   bool _lastBuffering = false;
   String? _lastErrorDescription;
   int _loadGeneration = 0;
+  Timer? _offscreenReleaseTimer;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _playbackOwnerId = identityHashCode(this);
+    _playbackCoordinator.register(
+      _playbackOwnerId,
+      () => _pause(rememberToResume: false),
+    );
     _appActive = WidgetsBinding.instance.lifecycleState == null ||
         WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
-    unawaited(_initialize());
   }
 
   @override
   void didUpdateWidget(covariant CommunityVideoPlayer oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.mediaUrl != widget.mediaUrl) {
-      unawaited(_initialize());
+      _posterVisible = true;
+      unawaited(() async {
+        await _releaseController();
+        if (_visible) await _initialize();
+      }());
     } else if (oldWidget.looping != widget.looping) {
       unawaited(_controller?.setLooping(widget.looping));
     }
@@ -72,7 +89,11 @@ class _CommunityVideoPlayerState extends State<CommunityVideoPlayer>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _appActive = state == AppLifecycleState.resumed;
     if (state == AppLifecycleState.resumed) {
-      if (_resumeWhenVisible && _visible) unawaited(_play());
+      if (_visible && _controller == null) {
+        unawaited(_initialize());
+      } else if (_resumeWhenVisible && _visible) {
+        unawaited(_play());
+      }
       return;
     }
     unawaited(_pause(rememberToResume: true));
@@ -81,6 +102,8 @@ class _CommunityVideoPlayerState extends State<CommunityVideoPlayer>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _playbackCoordinator.unregister(_playbackOwnerId);
+    _offscreenReleaseTimer?.cancel();
     _loadGeneration++;
     final controller = _controller;
     final controllerMediaUrl = _controllerMediaUrl;
@@ -96,8 +119,11 @@ class _CommunityVideoPlayerState extends State<CommunityVideoPlayer>
   }
 
   Future<void> _initialize() async {
+    if (_initializing ||
+        (_controller != null && _controllerMediaUrl == widget.mediaUrl)) {
+      return;
+    }
     final generation = ++_loadGeneration;
-    _resumeWhenVisible = false;
     if (mounted) {
       setState(() {
         _initializing = true;
@@ -132,7 +158,26 @@ class _CommunityVideoPlayerState extends State<CommunityVideoPlayer>
     );
 
     try {
-      await controller.initialize().timeout(_initializeTimeout);
+      final initializationStarted = await _initializationGate.run(() async {
+        // A feed card can leave the viewport while waiting for one of the two
+        // initialization slots. Recheck all state inside the gate so a stale
+        // card never starts network or decoder work when its turn arrives.
+        if (!mounted ||
+            generation != _loadGeneration ||
+            !_visible ||
+            !_appActive) {
+          return false;
+        }
+        await controller.initialize().timeout(_initializeTimeout);
+        return true;
+      });
+      if (!initializationStarted) {
+        await controller.dispose().catchError((_) {});
+        if (mounted && generation == _loadGeneration) {
+          setState(() => _initializing = false);
+        }
+        return;
+      }
       if (!mounted || generation != _loadGeneration) {
         await controller.dispose();
         return;
@@ -168,6 +213,11 @@ class _CommunityVideoPlayerState extends State<CommunityVideoPlayer>
       // Waiting until the texture is in the widget tree prevents playback from
       // beginning with audio before Android has a surface for the first frame.
       await WidgetsBinding.instance.endOfFrame;
+      // Keep the poster over an initialized, paused texture. Some Android
+      // decoders expose a black texture until playback advances; revealing it
+      // here would bring back the black-card bug even though initialization
+      // succeeded. The listener removes the poster only after playback has
+      // advanced to a real frame.
       if (widget.autoPlay && mounted && generation == _loadGeneration) {
         if (_appActive && _visible) {
           await _play();
@@ -202,9 +252,13 @@ class _CommunityVideoPlayerState extends State<CommunityVideoPlayer>
     final controller = _controller;
     if (!mounted || controller == null) return;
     final value = controller.value;
+    final canRevealPlaybackFrame = _posterVisible &&
+        value.isPlaying &&
+        value.position > const Duration(milliseconds: 30);
     if (value.isPlaying == _lastPlaying &&
         value.isBuffering == _lastBuffering &&
-        value.errorDescription == _lastErrorDescription) {
+        value.errorDescription == _lastErrorDescription &&
+        !canRevealPlaybackFrame) {
       return;
     }
     _lastPlaying = value.isPlaying;
@@ -219,6 +273,7 @@ class _CommunityVideoPlayerState extends State<CommunityVideoPlayer>
     }
     setState(() {
       if (value.hasError) _error = value.errorDescription;
+      if (canRevealPlaybackFrame) _posterVisible = false;
     });
   }
 
@@ -233,6 +288,7 @@ class _CommunityVideoPlayerState extends State<CommunityVideoPlayer>
       return;
     }
     try {
+      _playbackCoordinator.focus(_playbackOwnerId);
       final duration = controller.value.duration;
       if (duration > Duration.zero &&
           duration - controller.value.position <
@@ -252,8 +308,11 @@ class _CommunityVideoPlayerState extends State<CommunityVideoPlayer>
 
   Future<void> _pause({bool rememberToResume = false}) async {
     final controller = _controller;
-    if (controller == null || !controller.value.isInitialized) return;
-    if (rememberToResume) _resumeWhenVisible = controller.value.isPlaying;
+    if (controller == null || !controller.value.isInitialized) {
+      if (!rememberToResume) _resumeWhenVisible = false;
+      return;
+    }
+    _resumeWhenVisible = rememberToResume ? controller.value.isPlaying : false;
     _rememberPosition(controller, _controllerMediaUrl);
     await controller.pause().catchError((_) {});
   }
@@ -270,14 +329,58 @@ class _CommunityVideoPlayerState extends State<CommunityVideoPlayer>
   }
 
   void _onVisibilityChanged(VisibilityInfo info) {
-    final nextVisible = info.visibleFraction >= 0.15;
+    final nextVisible = info.visibleFraction >= 0.01;
     if (_visible == nextVisible) return;
     _visible = nextVisible;
     if (!nextVisible) {
       unawaited(_pause(rememberToResume: true));
-    } else if (_resumeWhenVisible) {
-      unawaited(_play());
+      _offscreenReleaseTimer?.cancel();
+      _offscreenReleaseTimer = Timer(
+        _offscreenReleaseDelay,
+        () => unawaited(_releaseController()),
+      );
+    } else {
+      _offscreenReleaseTimer?.cancel();
+      if (_controller == null) {
+        if (widget.autoPlay) _resumeWhenVisible = true;
+        unawaited(_initialize());
+      } else if (_resumeWhenVisible) {
+        unawaited(_play());
+      }
     }
+  }
+
+  Future<void> _releaseController() async {
+    _loadGeneration++;
+    final controller = _controller;
+    final mediaUrl = _controllerMediaUrl;
+    if (controller == null) {
+      if (mounted && _initializing) {
+        setState(() {
+          _posterVisible = true;
+          _initializing = false;
+        });
+      }
+      return;
+    }
+    _controller = null;
+    _controllerMediaUrl = null;
+    controller.removeListener(_onControllerValueChanged);
+    _rememberPosition(controller, mediaUrl);
+    await controller.pause().catchError((_) {});
+    await controller.dispose().catchError((_) {});
+    if (mounted) {
+      setState(() {
+        _posterVisible = true;
+        _initializing = false;
+      });
+    }
+  }
+
+  Future<void> _startFromPoster() async {
+    _resumeWhenVisible = true;
+    if (_controller == null) await _initialize();
+    if (_visible) await _play();
   }
 
   void _rememberPosition(
@@ -328,11 +431,33 @@ class _CommunityVideoPlayerState extends State<CommunityVideoPlayer>
                   ),
                 ),
               )
-            else
+            else if (_error != null)
               _VideoLoadState(
                 initializing: _initializing,
                 error: _error,
+                thumbnailUrl: widget.thumbnailUrl,
+                fit: widget.fit,
                 onRetry: _initialize,
+                onPlay: _startFromPoster,
+              )
+            else
+              _VideoPoster(
+                thumbnailUrl: widget.thumbnailUrl,
+                fit: widget.fit,
+                loading: _initializing,
+                onPlay: _startFromPoster,
+              ),
+            if (ready && _posterVisible)
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: _VideoPoster(
+                    thumbnailUrl: widget.thumbnailUrl,
+                    fit: widget.fit,
+                    loading: controller.value.isPlaying,
+                    onPlay: _startFromPoster,
+                    showPlayButton: false,
+                  ),
+                ),
               ),
             if (ready && widget.showControls && !controller.value.isPlaying)
               Center(
@@ -382,18 +507,28 @@ class _VideoLoadState extends StatelessWidget {
   const _VideoLoadState({
     required this.initializing,
     required this.error,
+    required this.thumbnailUrl,
+    required this.fit,
     required this.onRetry,
+    required this.onPlay,
   });
 
   final bool initializing;
   final Object? error;
+  final String? thumbnailUrl;
+  final BoxFit fit;
   final VoidCallback onRetry;
+  final VoidCallback onPlay;
 
   @override
   Widget build(BuildContext context) {
     if (initializing) {
-      return const Center(
-          child: CircularProgressIndicator(color: Colors.white));
+      return _VideoPoster(
+        thumbnailUrl: thumbnailUrl,
+        fit: fit,
+        loading: true,
+        onPlay: onPlay,
+      );
     }
     return Center(
       child: Padding(
@@ -430,6 +565,92 @@ class _VideoLoadState extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _VideoPoster extends StatelessWidget {
+  const _VideoPoster({
+    required this.thumbnailUrl,
+    required this.fit,
+    required this.loading,
+    required this.onPlay,
+    this.showPlayButton = true,
+  });
+
+  final String? thumbnailUrl;
+  final BoxFit fit;
+  final bool loading;
+  final VoidCallback onPlay;
+  final bool showPlayButton;
+
+  @override
+  Widget build(BuildContext context) {
+    final cleanThumbnailUrl = thumbnailUrl?.trim() ?? '';
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        if (cleanThumbnailUrl.isNotEmpty)
+          CachedNetworkImage(
+            imageUrl: cleanThumbnailUrl,
+            fit: fit,
+            fadeInDuration: const Duration(milliseconds: 120),
+            placeholder: (_, __) => const ColoredBox(color: Colors.black),
+            errorWidget: (_, __, ___) => const _GenericVideoPoster(),
+          )
+        else
+          const _GenericVideoPoster(),
+        const DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Colors.black12, Colors.black45],
+            ),
+          ),
+        ),
+        if (showPlayButton && !loading)
+          Center(
+            child: IconButton.filled(
+              tooltip: 'Play video',
+              style: IconButton.styleFrom(
+                backgroundColor: Colors.white.withValues(alpha: 0.92),
+                foregroundColor: Colors.black,
+                fixedSize: const Size(58, 58),
+              ),
+              onPressed: onPlay,
+              icon: const Icon(Icons.play_arrow, size: 34),
+            ),
+          ),
+        if (loading)
+          const Positioned(
+            right: 12,
+            bottom: 12,
+            child: SizedBox(
+              width: 22,
+              height: 22,
+              child: CircularProgressIndicator(
+                color: Colors.white,
+                strokeWidth: 2.5,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _GenericVideoPoster extends StatelessWidget {
+  const _GenericVideoPoster();
+
+  @override
+  Widget build(BuildContext context) {
+    return const ColoredBox(
+      color: Color(0xFF151B26),
+      child: Center(
+        child:
+            Icon(Icons.video_library_outlined, color: Colors.white54, size: 46),
       ),
     );
   }
@@ -473,5 +694,51 @@ class _VideoPlaybackPositionStore {
   static String _key(String url) {
     final encoded = base64Url.encode(utf8.encode(url)).replaceAll('=', '');
     return 'community_video_position_$encoded';
+  }
+}
+
+class _VideoInitializationGate {
+  _VideoInitializationGate({required this.maxConcurrent});
+
+  final int maxConcurrent;
+  int _active = 0;
+  final List<Completer<void>> _waiters = [];
+
+  Future<T> run<T>(Future<T> Function() action) async {
+    if (_active >= maxConcurrent) {
+      final waiter = Completer<void>();
+      _waiters.add(waiter);
+      await waiter.future;
+    } else {
+      _active++;
+    }
+    try {
+      return await action();
+    } finally {
+      if (_waiters.isNotEmpty) {
+        // Hand the occupied slot directly to the oldest waiter.
+        _waiters.removeAt(0).complete();
+      } else {
+        _active--;
+      }
+    }
+  }
+}
+
+class _VideoPlaybackCoordinator {
+  final Map<int, Future<void> Function()> _pauseCallbacks = {};
+
+  void register(int ownerId, Future<void> Function() pause) {
+    _pauseCallbacks[ownerId] = pause;
+  }
+
+  void unregister(int ownerId) {
+    _pauseCallbacks.remove(ownerId);
+  }
+
+  void focus(int ownerId) {
+    for (final entry in _pauseCallbacks.entries.toList(growable: false)) {
+      if (entry.key != ownerId) unawaited(entry.value());
+    }
   }
 }

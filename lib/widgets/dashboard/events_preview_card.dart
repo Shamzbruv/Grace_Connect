@@ -90,8 +90,9 @@ class EventsPreviewCard extends StatelessWidget {
     // Parse date (Timestamp) to DateTime
     // Check if event.date is Timestamp or DateTime (Model definition usually Timestamp in Firestore, converted in fromFirestore)
     // Assuming EventModel has DateTime date.
-    final day = DateFormat('d').format(event.date);
-    final month = DateFormat('MMM').format(event.date);
+    final localDate = event.date.toLocal();
+    final day = DateFormat('d').format(localDate);
+    final month = DateFormat('MMM').format(localDate);
 
     return AppCard(
       margin: const EdgeInsets.only(bottom: 12),

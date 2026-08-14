@@ -2,7 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:flutter/widgets.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:native_geofence/native_geofence.dart';
+import 'package:permission_handler/permission_handler.dart' as permissions;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter/foundation.dart';
@@ -13,6 +16,42 @@ import '../models/attendance_record.dart';
 import 'attendance_dwell_session.dart';
 import 'supabase_resilience.dart';
 
+const String _attendanceSupabaseUrl =
+    'https://nimgsgnkcvddomrgkawb.supabase.co';
+const String _attendanceSupabaseAnonKey =
+    'sb_publishable_-lsEclVqaNPAlO4h7z3vtw_Q8xZY3cN';
+
+/// Entry point invoked by Android's native, battery-efficient Geofence API.
+///
+/// The plugin starts a short-lived background Flutter isolate for a transition,
+/// rather than keeping a location foreground service alive. Supabase restores
+/// and refreshes its persisted member session in that isolate before any
+/// attendance write is attempted.
+@pragma('vm:entry-point')
+Future<void> attendanceGeofenceTriggered(
+  GeofenceCallbackParams params,
+) async {
+  WidgetsFlutterBinding.ensureInitialized();
+  try {
+    try {
+      Supabase.instance.client;
+    } catch (_) {
+      await Supabase.initialize(
+        url: _attendanceSupabaseUrl,
+        anonKey: _attendanceSupabaseAnonKey,
+        authOptions: const FlutterAuthClientOptions(
+          authFlowType: AuthFlowType.pkce,
+          detectSessionInUri: false,
+        ),
+      );
+    }
+    await AttendanceService().handleNativeGeofenceEvent(params);
+  } catch (error, stackTrace) {
+    debugPrint('Native attendance geofence callback failed: $error');
+    debugPrintStack(stackTrace: stackTrace);
+  }
+}
+
 class AttendanceSetupStatus {
   final bool autoCheckInEnabled;
   final bool locationServicesEnabled;
@@ -20,6 +59,7 @@ class AttendanceSetupStatus {
   final bool hasChurchLocation;
   final bool hasServiceSchedule;
   final String? activeServiceName;
+  final bool requiresBackgroundLocation;
 
   const AttendanceSetupStatus({
     required this.autoCheckInEnabled,
@@ -27,6 +67,7 @@ class AttendanceSetupStatus {
     required this.permission,
     required this.hasChurchLocation,
     required this.hasServiceSchedule,
+    this.requiresBackgroundLocation = false,
     this.activeServiceName,
   });
 
@@ -34,10 +75,14 @@ class AttendanceSetupStatus {
       permission == LocationPermission.always ||
       permission == LocationPermission.whileInUse;
 
+  bool get hasAutoAttendanceLocationPermission =>
+      hasLocationPermission &&
+      (!requiresBackgroundLocation || permission == LocationPermission.always);
+
   bool get canMonitor =>
       autoCheckInEnabled &&
       locationServicesEnabled &&
-      hasLocationPermission &&
+      hasAutoAttendanceLocationPermission &&
       hasChurchLocation &&
       hasServiceSchedule;
 
@@ -49,6 +94,10 @@ class AttendanceSetupStatus {
     }
     if (!hasLocationPermission) {
       missing.add('Location permission is not granted.');
+    } else if (!hasAutoAttendanceLocationPermission) {
+      missing.add(
+        'Allow location all the time so Android can detect the church geofence when the app is closed.',
+      );
     }
     if (!hasChurchLocation) missing.add('Church geofence location is not set.');
     if (!hasServiceSchedule) missing.add('No service schedule is configured.');
@@ -110,6 +159,13 @@ class AttendanceService {
   String _lastDebugStatus = 'Auto-attendance has not started yet.';
   static const String _pendingAttendanceQueueKey =
       'pending_attendance_records_v1';
+  static const String _legacyRegisteredNativeGeofenceIdKey =
+      'attendance_native_geofence_id_v1';
+  static const String _registeredNativeGeofenceIdsKey =
+      'attendance_native_geofence_ids_v2';
+  static const String _registeredNativeGeofenceSignatureKey =
+      'attendance_native_geofence_signature_v2';
+  static const String _nativeGeofenceIdPrefix = 'grace_auto_attendance_';
   static const Duration _requiredClearOutsideDuration = Duration(minutes: 2);
   static const Duration _maximumClearOutsideEvidenceGap = Duration(seconds: 90);
 
@@ -149,8 +205,13 @@ class AttendanceService {
 
     // Several screens initialize this singleton. Keep the existing listener so
     // navigating or tapping Recheck cannot restart the dwell countdown.
-    if (_isMonitoring && _positionStreamSubscription != null) {
-      unawaited(_pollCurrentLocationForAttendance());
+    if (_isMonitoring &&
+        (_positionStreamSubscription != null || _usesNativeAndroidGeofence)) {
+      if (_usesNativeAndroidGeofence) {
+        await _registerAndroidNativeGeofence();
+      } else {
+        unawaited(_pollCurrentLocationForAttendance());
+      }
       return;
     }
 
@@ -163,10 +224,7 @@ class AttendanceService {
       return;
     }
 
-    LocationPermission permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-    }
+    final permission = await Geolocator.checkPermission();
 
     if (permission == LocationPermission.deniedForever) {
       _setMonitoring(false);
@@ -181,10 +239,46 @@ class AttendanceService {
       return;
     }
 
+    if (_usesNativeAndroidGeofence && permission != LocationPermission.always) {
+      _setMonitoring(false);
+      _updateDebugStatus(
+        'Auto-attendance needs “Allow all the time” location access so Android can monitor the church geofence when the app is closed.',
+      );
+      return;
+    }
+
     if (permission == LocationPermission.whileInUse ||
         permission == LocationPermission.always) {
-      _startMonitoring();
+      await _startMonitoring();
     }
+  }
+
+  bool get _usesNativeAndroidGeofence =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+
+  /// Requests only the permissions needed for user-enabled auto-attendance.
+  /// UI callers must show the prominent background-location disclosure first.
+  Future<bool> requestAutoAttendancePermissions() async {
+    if (kIsWeb) return false;
+
+    if (_usesNativeAndroidGeofence) {
+      final foreground =
+          await permissions.Permission.locationWhenInUse.request();
+      if (!foreground.isGranted) return false;
+
+      var background = await permissions.Permission.locationAlways.status;
+      if (!background.isGranted) {
+        background = await permissions.Permission.locationAlways.request();
+      }
+      return background.isGranted;
+    }
+
+    var permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+    return permission == LocationPermission.always ||
+        permission == LocationPermission.whileInUse;
   }
 
   // Debug / Status Streams
@@ -206,35 +300,28 @@ class AttendanceService {
     _isMonitoringController.add(value);
   }
 
-  void _startMonitoring() {
+  Future<void> _startMonitoring() async {
     _monitoringRestartTimer?.cancel();
     _monitoringRestartTimer = null;
     _monitoringRequested = true;
+
+    if (_usesNativeAndroidGeofence) {
+      final registered = await _registerAndroidNativeGeofence();
+      _setMonitoring(registered);
+      if (!registered) return;
+      _updateDebugStatus(
+        'Android geofence active. Auto-attendance will check the scheduled service after the required dwell.',
+      );
+      unawaited(_pollCurrentLocationForAttendance());
+      return;
+    }
+
     _setMonitoring(true);
     _updateDebugStatus('Starting monitoring...');
-    final LocationSettings locationSettings = defaultTargetPlatform ==
-            TargetPlatform.android
-        ? AndroidSettings(
-            accuracy: LocationAccuracy.high,
-            distanceFilter: 20,
-            intervalDuration: const Duration(seconds: 30),
-            foregroundNotificationConfig: const ForegroundNotificationConfig(
-              notificationTitle: 'Grace Connect auto-attendance',
-              notificationText:
-                  'Checking your church location while auto-attendance is enabled.',
-              notificationChannelName: 'Auto-attendance',
-              notificationIcon: AndroidResource(
-                name: 'ic_stat_grace_connect',
-                defType: 'drawable',
-              ),
-              enableWakeLock: true,
-              setOngoing: true,
-            ),
-          )
-        : const LocationSettings(
-            accuracy: LocationAccuracy.high,
-            distanceFilter: 20,
-          );
+    const LocationSettings locationSettings = LocationSettings(
+      accuracy: LocationAccuracy.high,
+      distanceFilter: 20,
+    );
 
     _positionStreamSubscription =
         Geolocator.getPositionStream(locationSettings: locationSettings).listen(
@@ -278,9 +365,8 @@ class AttendanceService {
       Duration(seconds: 30),
       Duration(minutes: 1),
     ];
-    final delay = delays[_monitoringRestartAttempts
-        .clamp(0, delays.length - 1)
-        .toInt()];
+    final delay =
+        delays[_monitoringRestartAttempts.clamp(0, delays.length - 1).toInt()];
     _monitoringRestartAttempts++;
     _updateDebugStatus(
       'Location monitoring was interrupted. Retrying automatically in ${delay.inSeconds} seconds.',
@@ -465,6 +551,275 @@ class AttendanceService {
     return membershipChurchId.isEmpty ? null : membershipChurchId;
   }
 
+  String _nativeGeofenceId(String churchId, int dwellMinutes) {
+    final safeChurchId = churchId.replaceAll(
+      RegExp(r'[^A-Za-z0-9_-]'),
+      '_',
+    );
+    return '$_nativeGeofenceIdPrefix${safeChurchId}_dwell_$dwellMinutes';
+  }
+
+  String _nativeGeofenceSignature(
+    String churchId,
+    ChurchLocation churchLocation,
+    List<int> dwellMinutes,
+  ) {
+    return <String>[
+      churchId,
+      churchLocation.latitude.toStringAsFixed(6),
+      churchLocation.longitude.toStringAsFixed(6),
+      churchLocation.radiusMeters.toStringAsFixed(1),
+      dwellMinutes.join(','),
+    ].join('|');
+  }
+
+  Future<List<int>> _configuredNativeDwellMinutes(String churchId) async {
+    final schedules = await _supabase
+        .from('service_schedules')
+        .select('minimumDwellMinutes')
+        .eq('churchId', churchId)
+        .eq('attendanceEnabled', true);
+    final values = schedules
+        .map(
+            (row) => int.tryParse(row['minimumDwellMinutes']?.toString() ?? ''))
+        .whereType<int>()
+        .where((minutes) => minutes > 0 && minutes <= 60)
+        .toSet()
+        .toList()
+      ..sort();
+    return values.isEmpty ? const [10] : values;
+  }
+
+  Set<String> _storedNativeGeofenceIds(SharedPreferences prefs) {
+    final ids = <String>{
+      ...?prefs.getStringList(_registeredNativeGeofenceIdsKey),
+    };
+    final legacyId = prefs.getString(_legacyRegisteredNativeGeofenceIdKey);
+    if (legacyId != null && legacyId.isNotEmpty) ids.add(legacyId);
+    return ids;
+  }
+
+  Future<bool> _registerAndroidNativeGeofence() async {
+    if (!_usesNativeAndroidGeofence) return false;
+
+    final user = _supabase.auth.currentUser;
+    if (user == null) {
+      _updateDebugStatus('Sign in again to register auto-attendance.');
+      return false;
+    }
+
+    final permission = await Geolocator.checkPermission();
+    if (permission != LocationPermission.always) {
+      _updateDebugStatus(
+        'Allow location all the time to register Android auto-attendance.',
+      );
+      return false;
+    }
+
+    final churchId = await _getCurrentUserChurchId(user.id);
+    if (churchId == null || churchId.isEmpty) {
+      _updateDebugStatus('No active church is configured for this member.');
+      return false;
+    }
+
+    final churchLocation = await _getChurchLocation(churchId);
+    if (churchLocation == null) {
+      _updateDebugStatus(
+        'The church geofence must be configured before auto-attendance can start.',
+      );
+      return false;
+    }
+
+    final dwellMinutes = await _configuredNativeDwellMinutes(churchId);
+    final geofenceIds = dwellMinutes
+        .map((minutes) => _nativeGeofenceId(churchId, minutes))
+        .toList(growable: false);
+    final geofenceSignature = _nativeGeofenceSignature(
+      churchId,
+      churchLocation,
+      dwellMinutes,
+    );
+    final prefs = await SharedPreferences.getInstance();
+    final previousIds = _storedNativeGeofenceIds(prefs);
+    final previousSignature =
+        prefs.getString(_registeredNativeGeofenceSignatureKey);
+
+    try {
+      await NativeGeofenceManager.instance.initialize();
+      if (previousSignature == geofenceSignature) {
+        final registeredIds =
+            await NativeGeofenceManager.instance.getRegisteredGeofenceIds();
+        if (geofenceIds.every(registeredIds.contains)) {
+          // Re-opening Attendance or tapping Recheck must not replace the
+          // native geofences: doing so restarts Android's dwell countdown.
+          return true;
+        }
+      }
+      for (final previousId in previousIds.difference(geofenceIds.toSet())) {
+        try {
+          await NativeGeofenceManager.instance.removeGeofenceById(previousId);
+        } catch (_) {
+          // A church transfer can leave a stale local ID after Android has
+          // already discarded the old geofence. Registration can continue.
+        }
+      }
+
+      for (final minutes in dwellMinutes) {
+        await NativeGeofenceManager.instance.createGeofence(
+          Geofence(
+            id: _nativeGeofenceId(churchId, minutes),
+            location: Location(
+              latitude: churchLocation.latitude,
+              longitude: churchLocation.longitude,
+            ),
+            radiusMeters: churchLocation.radiusMeters,
+            triggers: const {
+              GeofenceEvent.enter,
+              GeofenceEvent.exit,
+              GeofenceEvent.dwell,
+            },
+            iosSettings: const IosGeofenceSettings(initialTrigger: false),
+            androidSettings: AndroidGeofenceSettings(
+              initialTriggers: const {GeofenceEvent.enter},
+              loiteringDelay: Duration(minutes: minutes),
+              notificationResponsiveness: const Duration(minutes: 1),
+            ),
+          ),
+          attendanceGeofenceTriggered,
+        );
+      }
+      await prefs.setStringList(_registeredNativeGeofenceIdsKey, geofenceIds);
+      await prefs.remove(_legacyRegisteredNativeGeofenceIdKey);
+      await prefs.setString(
+        _registeredNativeGeofenceSignatureKey,
+        geofenceSignature,
+      );
+      return true;
+    } catch (error) {
+      debugPrint('Could not register Android attendance geofence: $error');
+      _updateDebugStatus(
+        'Android could not register the church geofence. Check “Allow all the time” location access and Google Play services.',
+      );
+      return false;
+    }
+  }
+
+  Future<void> _removeAndroidNativeGeofence() async {
+    if (!_usesNativeAndroidGeofence) return;
+    final prefs = await SharedPreferences.getInstance();
+    final geofenceIds = _storedNativeGeofenceIds(prefs);
+    if (geofenceIds.isEmpty) return;
+
+    try {
+      await NativeGeofenceManager.instance.initialize();
+      for (final geofenceId in geofenceIds) {
+        await NativeGeofenceManager.instance.removeGeofenceById(geofenceId);
+      }
+    } catch (error) {
+      debugPrint('Android attendance geofence removal skipped: $error');
+    } finally {
+      await prefs.remove(_registeredNativeGeofenceIdsKey);
+      await prefs.remove(_legacyRegisteredNativeGeofenceIdKey);
+      await prefs.remove(_registeredNativeGeofenceSignatureKey);
+    }
+  }
+
+  Future<void> handleNativeGeofenceEvent(
+    GeofenceCallbackParams params,
+  ) async {
+    if (!_usesNativeAndroidGeofence || params.geofences.isEmpty) return;
+
+    final user = _supabase.auth.currentUser;
+    if (user == null) {
+      debugPrint('Attendance geofence ignored because the session expired.');
+      return;
+    }
+
+    final churchId = await _getCurrentUserChurchId(user.id);
+    if (churchId == null || churchId.isEmpty) return;
+    final safeChurchId = churchId.replaceAll(
+      RegExp(r'[^A-Za-z0-9_-]'),
+      '_',
+    );
+    final expectedPrefix = '$_nativeGeofenceIdPrefix${safeChurchId}_dwell_';
+    if (!params.geofences
+        .any((geofence) => geofence.id.startsWith(expectedPrefix))) {
+      debugPrint(
+          'Attendance geofence ignored after church membership changed.');
+      return;
+    }
+
+    final observedAt = DateTime.now();
+    final activeService = await getActiveServiceAt(churchId, observedAt);
+    final serviceId = activeService?['id']?.toString();
+
+    if (params.event == GeofenceEvent.exit) {
+      if (serviceId != null && serviceId.isNotEmpty) {
+        await _clearDwellEntry(user.id, serviceId);
+      }
+      _updateDebugStatus('Android detected that the member left the geofence.');
+      return;
+    }
+
+    if (activeService == null || serviceId == null || serviceId.isEmpty) {
+      _updateDebugStatus(
+        'Church geofence detected, but no attendance-enabled service is open.',
+      );
+      return;
+    }
+
+    if (params.event == GeofenceEvent.enter) {
+      await _readOrStartDwellEntry(
+        user.id,
+        serviceId,
+        observedAt: observedAt,
+      );
+      _updateDebugStatus('Android detected arrival at church.');
+      return;
+    }
+
+    if (params.event != GeofenceEvent.dwell) return;
+
+    final requiredDwellMinutes =
+        activeService['minimumDwellMinutes'] as int? ?? 10;
+    final requiredGeofenceId =
+        _nativeGeofenceId(churchId, requiredDwellMinutes);
+    if (!params.geofences
+        .any((geofence) => geofence.id == requiredGeofenceId)) {
+      // Multiple service schedules can use different dwell requirements at
+      // the same church. Only the active service's exact timer may check in.
+      return;
+    }
+
+    final churchLocation = await _getChurchLocation(churchId);
+    final triggerLocation = params.location;
+    if (churchLocation == null) return;
+    if (triggerLocation != null) {
+      final distance = Geolocator.distanceBetween(
+        triggerLocation.latitude,
+        triggerLocation.longitude,
+        churchLocation.latitude,
+        churchLocation.longitude,
+      );
+      if (distance > churchLocation.radiusMeters + 50) {
+        debugPrint(
+          'Delayed attendance dwell ignored because the trigger location is no longer near church.',
+        );
+        return;
+      }
+    }
+
+    await _initializeNotifications();
+    await _markPresent(
+      user.id,
+      churchId,
+      serviceId,
+      activeService['startTime']?.toString(),
+      activeService['name']?.toString(),
+      checkedInAt: observedAt,
+    );
+  }
+
   Future<void> saveChurchLocation({
     required String churchId,
     required double latitude,
@@ -485,12 +840,21 @@ class AttendanceService {
     });
 
     _updateDebugStatus('Church geofence saved for auto-attendance.');
+    if (_usesNativeAndroidGeofence && _monitoringRequested) {
+      unawaited(_registerAndroidNativeGeofence());
+    }
   }
 
   /// Returns the currently active recurring service for the given church.
   Future<Map<String, dynamic>?> getActiveService(String churchId) async {
-    final now = DateTime.now();
-    final jamaicaNow = _jamaicaWallClock(now);
+    return getActiveServiceAt(churchId, DateTime.now());
+  }
+
+  Future<Map<String, dynamic>?> getActiveServiceAt(
+    String churchId,
+    DateTime observedAt,
+  ) async {
+    final jamaicaNow = _jamaicaWallClock(observedAt);
     final servicesSnapshot = await _supabase
         .from('service_schedules')
         .select()
@@ -500,7 +864,7 @@ class AttendanceService {
 
     for (var doc in servicesSnapshot) {
       final schedule = ServiceSchedule.fromMap(doc);
-      if (_isTimeWithinSchedule(now, schedule)) {
+      if (_isTimeWithinSchedule(observedAt, schedule)) {
         return {
           'id': schedule.serviceId,
           'startTime': schedule.startTime,
@@ -634,7 +998,9 @@ class AttendanceService {
     String? serviceStartTime,
     String? serviceName, {
     String method = 'auto_geofence',
+    DateTime? checkedInAt,
   }) async {
+    final effectiveCheckedInAt = checkedInAt ?? DateTime.now();
     // A failed duplicate-check must not prevent the offline queue from saving
     // attendance when the dwell countdown completes.
     if (await _hasAttendanceForToday(
@@ -642,6 +1008,7 @@ class AttendanceService {
       churchId,
       serviceId,
       continueWhenOffline: true,
+      forTimestamp: effectiveCheckedInAt,
     )) {
       _updateDebugStatus('Already marked present for today.');
       return;
@@ -651,10 +1018,8 @@ class AttendanceService {
     String status = 'on_time';
     int? minutesLate;
 
-    final checkedInAt = DateTime.now();
-
     if (serviceStartTime != null) {
-      final now = _jamaicaWallClock(checkedInAt);
+      final now = _jamaicaWallClock(effectiveCheckedInAt);
       final startParts = _parseTimeParts(serviceStartTime);
       if (startParts != null) {
         final scheduleTime = DateTime(
@@ -675,7 +1040,7 @@ class AttendanceService {
       userId: userId,
       churchId: churchId,
       serviceId: serviceId,
-      timestamp: checkedInAt,
+      timestamp: effectiveCheckedInAt,
       method: method,
       present: true,
       status: status,
@@ -1258,12 +1623,19 @@ class AttendanceService {
     String churchId,
     String serviceId, {
     bool continueWhenOffline = false,
+    DateTime? forTimestamp,
   }) async {
-    if (await _hasQueuedAttendanceForToday(userId, churchId, serviceId)) {
+    final attendanceAt = forTimestamp ?? DateTime.now();
+    if (await _hasQueuedAttendanceForToday(
+      userId,
+      churchId,
+      serviceId,
+      forTimestamp: attendanceAt,
+    )) {
       return true;
     }
 
-    final todayStart = _jamaicaDayStartUtc(DateTime.now());
+    final todayStart = _jamaicaDayStartUtc(attendanceAt);
     final tomorrowStart = todayStart.add(const Duration(days: 1));
 
     try {
@@ -1287,10 +1659,14 @@ class AttendanceService {
   }
 
   Future<bool> _hasQueuedAttendanceForToday(
-      String userId, String churchId, String serviceId) async {
+    String userId,
+    String churchId,
+    String serviceId, {
+    DateTime? forTimestamp,
+  }) async {
     final prefs = await SharedPreferences.getInstance();
     final queue = prefs.getStringList(_pendingAttendanceQueueKey) ?? const [];
-    final todayKey = _jamaicaDateKey(DateTime.now());
+    final todayKey = _jamaicaDateKey(forTimestamp ?? DateTime.now());
     for (final encoded in queue) {
       try {
         final decoded = jsonDecode(encoded);
@@ -1479,6 +1855,7 @@ class AttendanceService {
       permission: permission,
       hasChurchLocation: churchLocation != null,
       hasServiceSchedule: hasSchedule,
+      requiresBackgroundLocation: _usesNativeAndroidGeofence,
       activeServiceName: activeServiceName,
     );
   }
@@ -1579,6 +1956,9 @@ class AttendanceService {
   void stopMonitoring() {
     _monitoringRequested = false;
     _clearMonitoringState(resetRestartAttempts: true);
+    if (_usesNativeAndroidGeofence) {
+      unawaited(_removeAndroidNativeGeofence());
+    }
     _updateDebugStatus('Monitoring stopped');
   }
 

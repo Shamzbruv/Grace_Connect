@@ -1,6 +1,6 @@
 name: grace_connect
 description: "Grace Connect - Church Management System"
-version: "1.0.27-beta+29"
+version: "1.0.28-beta+30"
 publish_to: "none"
 
 environment:
@@ -29,6 +29,7 @@ dependencies:
   vibration: ^3.1.4
   fl_chart: ^0.66.0
   geolocator: ^14.0.2
+  native_geofence: 1.2.1
   permission_handler: ^12.0.1
   intl: ^0.20.2
   uuid: ^4.5.2
@@ -44,13 +45,17 @@ dependencies:
   flutter_typeahead: ^5.2.0
   cached_network_image: ^3.4.1
   url_launcher: ^6.3.0
+  device_calendar_plus: ^0.8.0
   youtube_player_flutter: ^9.0.1
   supabase_flutter: ^2.12.0
   google_maps_flutter: ^2.14.2
+  google_maps_flutter_android: ^2.18.3
+  google_maps_flutter_platform_interface: ^2.14.1
   record: ^6.2.1
   audioplayers: ^6.6.0
   path_provider: ^2.1.5
   video_player: ^2.10.1
+  video_thumbnail: ^0.5.6
   visibility_detector: ^0.4.0+2
 
 dev_dependencies:

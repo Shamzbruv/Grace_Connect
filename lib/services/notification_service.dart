@@ -124,6 +124,7 @@ class NotificationService {
     'social_follow_accepted': _defaultSound,
     'grace_room_invitation': _defaultSound,
     'event_invitation': _defaultSound,
+    'event_rsvp_reminder': _defaultSound,
     'message': _NotificationSoundProfile(
       channelId: 'grace_messages_channel_v1',
       channelName: 'Grace Connect Messages',

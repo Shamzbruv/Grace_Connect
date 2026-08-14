@@ -66,6 +66,28 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   }
 
   Future<void> _toggleAutoCheckIn(bool value) async {
+    if (value && !kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      final accepted = await _showBackgroundLocationDisclosure();
+      if (!accepted) return;
+      final granted =
+          await _attendanceService.requestAutoAttendancePermissions();
+      if (!granted) {
+        if (!mounted) return;
+        setState(() => _autoCheckIn = false);
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('auto_check_in', false);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Auto-attendance stays off until Location is set to “Allow all the time” in Android settings.',
+            ),
+          ),
+        );
+        return;
+      }
+    }
+
     setState(() => _autoCheckIn = value);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('auto_check_in', value);
@@ -80,6 +102,31 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     if (churchId != null) {
       await _refreshSetupStatus(churchId);
     }
+  }
+
+  Future<bool> _showBackgroundLocationDisclosure() async {
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Background location for auto-attendance'),
+        content: const Text(
+          'When you turn on Auto-Attendance, Grace Connect uses your precise location in the background—even when the app is closed—to detect when you enter and remain inside your church’s saved geofence during a scheduled service. '
+          'It does not store or share a trail of where you travel. Only the attendance check-in result is saved. Turning Auto-Attendance off removes the Android geofence.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Not now'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
+    return result ?? false;
   }
 
   void _queueSetupRefresh(String churchId) {

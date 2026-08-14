@@ -9,6 +9,8 @@ class CommunityStory {
     this.mediaUrl,
     this.mediaPath,
     this.mediaType,
+    this.mediaThumbnailUrl,
+    this.mediaThumbnailPath,
     this.mediaFit = 'cover',
     this.mediaAspectRatio,
     this.likes = const [],
@@ -26,6 +28,8 @@ class CommunityStory {
   final String? mediaUrl;
   final String? mediaPath;
   final String? mediaType;
+  final String? mediaThumbnailUrl;
+  final String? mediaThumbnailPath;
   final String mediaFit;
   final double? mediaAspectRatio;
   final List<String> likes;
@@ -46,6 +50,10 @@ class CommunityStory {
       mediaUrl: data['media_url'] ?? data['mediaUrl'],
       mediaPath: data['media_path'] ?? data['mediaPath'],
       mediaType: data['media_type'] ?? data['mediaType'],
+      mediaThumbnailUrl:
+          data['media_thumbnail_url'] ?? data['mediaThumbnailUrl'],
+      mediaThumbnailPath:
+          data['media_thumbnail_path'] ?? data['mediaThumbnailPath'],
       mediaFit: (data['media_fit'] ?? data['mediaFit'] ?? 'cover').toString(),
       mediaAspectRatio: _nullableDouble(
           data['media_aspect_ratio'] ?? data['mediaAspectRatio']),
@@ -67,6 +75,8 @@ class CommunityStory {
       'media_url': mediaUrl,
       'media_path': mediaPath,
       'media_type': mediaType,
+      'media_thumbnail_url': mediaThumbnailUrl,
+      'media_thumbnail_path': mediaThumbnailPath,
       'media_fit': mediaFit,
       'media_aspect_ratio': mediaAspectRatio,
       'likes': likes,
@@ -89,6 +99,8 @@ class CommunityStory {
       mediaUrl: mediaUrl,
       mediaPath: mediaPath,
       mediaType: mediaType,
+      mediaThumbnailUrl: mediaThumbnailUrl,
+      mediaThumbnailPath: mediaThumbnailPath,
       mediaFit: mediaFit,
       mediaAspectRatio: mediaAspectRatio,
       likes: likes ?? this.likes,

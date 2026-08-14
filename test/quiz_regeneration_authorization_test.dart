@@ -7,6 +7,9 @@ void main() {
     final source = File(
       'supabase/functions/generate-daily-bible-quiz/index.ts',
     ).readAsStringSync();
+    final developerPortalMigration = File(
+      'supabase/migrations/20260624153000_developer_portal.sql',
+    ).readAsStringSync();
 
     final roleSetStart = source.indexOf('const scheduledQuizMutationRoles');
     final authorizationStart = source.indexOf(
@@ -26,6 +29,15 @@ void main() {
       expect(source, contains('"$role"'));
     }
     expect(authorization, contains('scheduledQuizMutationRoles.has'));
+    expect(authorization, contains('"current_developer_role"'));
+    expect(authorization, contains('anonClient(accessToken).rpc'));
+    expect(authorization, isNot(contains('.from("developer_accounts")')));
+    expect(developerPortalMigration, contains('lower(email) = jwt_email'));
+    expect(developerPortalMigration, contains('user_id is null'));
+    expect(
+      authorization,
+      isNot(contains('.ilike("email"')),
+    );
     expect(
       source,
       contains('if (!(await canRegenerateScheduledQuiz(client, request)))'),
@@ -44,10 +56,12 @@ void main() {
 
     final roleSetStart = source.indexOf('const _scheduledQuizMutationRoles');
     final gateStart = source.indexOf('bool _canReplaceScheduledQuiz');
-    final updateSubscriptionStart = source.indexOf(
-      'Future<void> _updateSubscription',
+    final gateEnd = source.indexOf(
+      'bool _isUpcomingScheduledContent',
+      gateStart,
     );
-    final gate = source.substring(gateStart, updateSubscriptionStart);
+    expect(gateEnd, greaterThan(gateStart));
+    final gate = source.substring(gateStart, gateEnd);
 
     expect(roleSetStart, greaterThanOrEqualTo(0));
     expect(gateStart, greaterThan(roleSetStart));

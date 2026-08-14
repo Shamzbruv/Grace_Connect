@@ -67,6 +67,12 @@
     <string>Grace Connect needs access to your photo library to allow you to upload photos for your profile and the community feed.</string>
     <key>NSPhotoLibraryAddUsageDescription</key>
     <string>Grace Connect may save media you create or receive when you choose to keep it.</string>
+    <key>NSCalendarsUsageDescription</key>
+    <string>Grace Connect accesses your calendar only when you choose to add or update an event reminder.</string>
+    <key>NSCalendarsFullAccessUsageDescription</key>
+    <string>Grace Connect needs calendar access to add the events you choose, keep those entries updated, and set your selected reminders.</string>
+    <key>NSCalendarsWriteOnlyAccessUsageDescription</key>
+    <string>Grace Connect can add an event reminder when you explicitly choose calendar sync.</string>
     <key>NSUserNotificationsUsageDescription</key>
     <string>Grace Connect sends church updates, messages, Bible Nudges, and attendance reminders.</string>
     <key>LSApplicationQueriesSchemes</key>

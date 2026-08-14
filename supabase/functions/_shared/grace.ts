@@ -326,6 +326,7 @@ export function notificationSoundProfile(type: string): { channelId: string; sou
     live_stream: { channelId: "grace_live_channel_v1", sound: "grace_live.wav" },
     bible_streak_reminder: { channelId: "grace_daily_word_channel_v1", sound: "grace_daily.wav" },
     grace_room_invitation: { channelId: "grace_default_channel_v1", sound: "grace_default.wav" },
+    event_rsvp_reminder: { channelId: "grace_default_channel_v1", sound: "grace_default.wav" },
   };
   return profiles[normalized] ?? profiles.general;
 }
@@ -472,18 +473,20 @@ export async function sendTopicPush(
     type: string;
     entityTable?: string;
     entityId?: string;
+    idempotencyKey?: string;
   },
 ): Promise<{ sent: boolean; reason?: string }> {
   // A reclaimed delivery lease must not send a topic again after the provider
   // already accepted it. Failed/skipped rows remain retryable.
-  if (params.entityTable && params.entityId) {
+  const outboxEntityId = params.idempotencyKey ?? params.entityId;
+  if (params.entityTable && outboxEntityId) {
     const { data: priorSent } = await client
       .from("system_notification_outbox")
       .select("id")
       .eq("topic", params.topic)
       .eq("type", params.type)
       .eq("entity_table", params.entityTable)
-      .eq("entity_id", params.entityId)
+      .eq("entity_id", outboxEntityId)
       .eq("status", "sent")
       .limit(1);
     if ((priorSent ?? []).length > 0) {
@@ -491,7 +494,7 @@ export async function sendTopicPush(
     }
   }
 
-  const { data: outbox } = await client
+  const { data: outbox, error: outboxError } = await client
     .from("system_notification_outbox")
     .insert({
       topic: params.topic,
@@ -500,10 +503,16 @@ export async function sendTopicPush(
       route: params.route,
       type: params.type,
       entity_table: params.entityTable,
-      entity_id: params.entityId,
+      entity_id: outboxEntityId,
     })
     .select("id")
     .single();
+  if (outboxError || !outbox?.id) {
+    return {
+      sent: false,
+      reason: `Unable to reserve push delivery: ${outboxError?.message ?? "outbox unavailable"}`,
+    };
+  }
 
   const serviceAccountJson = Deno.env.get("FIREBASE_SERVICE_ACCOUNT_JSON");
   if (!serviceAccountJson) {

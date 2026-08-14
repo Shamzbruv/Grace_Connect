@@ -57,6 +57,7 @@ class AppAccessContext {
 
       case AppFeature.churchHome:
       case AppFeature.churchTestimonies:
+      case AppFeature.subscriptionManagement:
         return hasActiveChurchMembership;
 
       case AppFeature.memberDirectory:

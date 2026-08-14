@@ -9,11 +9,13 @@ import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../models/daily_motivation.dart';
+import '../../models/bible_passage_reference.dart';
 import '../../services/daily_motivation_service.dart';
 import '../../services/notification_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/ui/app_feedback.dart';
 import '../../widgets/ui/app_loader.dart';
+import '../bible/bible_reader_screen.dart';
 
 class DailyWordScreen extends StatefulWidget {
   const DailyWordScreen({super.key, this.motivationId});
@@ -121,6 +123,28 @@ class _DailyWordScreenState extends State<DailyWordScreen> {
     }
   }
 
+  void _openStudyChapter(DailyMotivation motivation) {
+    final passage = BiblePassageReference.tryParse(
+      motivation.scriptureReference,
+    );
+    if (passage == null) {
+      AppFeedback.show(
+        context,
+        'This Bible chapter could not be opened.',
+        type: AppFeedbackType.error,
+      );
+      return;
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => BibleReaderScreen(
+          book: passage.book,
+          chapter: passage.chapter,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -171,6 +195,13 @@ class _DailyWordScreenState extends State<DailyWordScreen> {
                   child: _DailyWordHero(motivation: data!.selected!),
                 ),
                 const SizedBox(height: 12),
+                if (data.selected!.hasStudyQuiz) ...[
+                  _QuizStudyNotice(
+                    motivation: data.selected!,
+                    onTap: () => _openStudyChapter(data.selected!),
+                  ),
+                  const SizedBox(height: 12),
+                ],
                 FilledButton.icon(
                   onPressed: () => _shareDailyWordImage(data.selected!),
                   icon: const Icon(Icons.ios_share_outlined),
@@ -211,10 +242,68 @@ class _DailyWordScreenState extends State<DailyWordScreen> {
   }
 }
 
+class _QuizStudyNotice extends StatelessWidget {
+  const _QuizStudyNotice({
+    required this.motivation,
+    required this.onTap,
+  });
+
+  final DailyMotivation motivation;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final passage = BiblePassageReference.tryParse(
+      motivation.scriptureReference,
+    );
+    final chapter = passage == null
+        ? motivation.scriptureChapterKey ?? 'this chapter'
+        : '${passage.book.name} ${passage.chapter}';
+    return Card(
+      color: Theme.of(context).colorScheme.primaryContainer,
+      child: ListTile(
+        onTap: onTap,
+        leading: const Icon(Icons.school_outlined),
+        title: const Text(
+          'Study for today’s quiz',
+          style: TextStyle(fontWeight: FontWeight.w900),
+        ),
+        subtitle: Text(
+          'All five questions are based on $chapter. Tap to read the whole chapter in context before the 7:00 AM quiz.',
+        ),
+        trailing: const Icon(Icons.arrow_forward),
+      ),
+    );
+  }
+}
+
 class _DailyWordHero extends StatelessWidget {
   const _DailyWordHero({required this.motivation});
 
   final DailyMotivation motivation;
+
+  void _openScripture(BuildContext context) {
+    final passage =
+        BiblePassageReference.tryParse(motivation.scriptureReference);
+    if (passage == null) {
+      AppFeedback.show(
+        context,
+        'This Bible reference could not be opened.',
+        type: AppFeedbackType.error,
+      );
+      return;
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => BibleReaderScreen(
+          book: passage.book,
+          chapter: passage.chapter,
+          initialVerse: passage.startVerse,
+          initialVerseEnd: passage.endVerse,
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -283,27 +372,51 @@ class _DailyWordHero extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 22),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: AppColors.gold.withValues(alpha: 0.35)),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.menu_book_outlined,
-                    color: AppColors.gold, size: 18),
-                const SizedBox(width: 8),
-                Text(
-                  motivation.scriptureReference,
-                  style: GoogleFonts.outfit(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w800,
+          Tooltip(
+            message: 'Read ${motivation.scriptureReference} in context',
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: () => _openScripture(context),
+                borderRadius: BorderRadius.circular(16),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: AppColors.gold.withValues(alpha: 0.5),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.menu_book_outlined,
+                        color: AppColors.gold,
+                        size: 18,
+                      ),
+                      const SizedBox(width: 8),
+                      Flexible(
+                        child: Text(
+                          motivation.scriptureReference,
+                          style: GoogleFonts.outfit(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      const Icon(
+                        Icons.arrow_forward_rounded,
+                        color: Colors.white,
+                        size: 17,
+                      ),
+                    ],
                   ),
                 ),
-              ],
+              ),
             ),
           ),
         ],

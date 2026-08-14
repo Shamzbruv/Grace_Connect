@@ -25,6 +25,7 @@ import '../../models/community_story.dart';
 import '../../models/post.dart';
 import '../../models/user_profile.dart';
 import '../../utils/community_media_upload.dart';
+import '../../utils/community_video_inspection.dart';
 import '../../utils/media_display_format.dart';
 import '../../widgets/profile_photo_viewer.dart';
 import 'post_detail_screen.dart';
@@ -58,7 +59,9 @@ class CommunityFeedScreen extends StatefulWidget {
 
 class _CommunityFeedScreenState extends State<CommunityFeedScreen>
     with WidgetsBindingObserver {
-  static const int _maxCommunityVideoBytes = 200 * 1024 * 1024;
+  // Keep this aligned with community_media.file_size_limit. Raw videos larger
+  // than this need a real server-side transcoding pipeline before upload.
+  static const int _maxCommunityVideoBytes = 50 * 1024 * 1024;
   final TextEditingController _postController = TextEditingController();
   final CommunityService _communityService = CommunityService();
   final DirectMessageService _messageService = DirectMessageService();
@@ -72,6 +75,8 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
   StreamSubscription<void>? _scrollToTopSubscription;
   Timer? _scrollIdleTimer;
   bool _isPosting = false;
+  String? _postingStatus;
+  bool _isInspectingMedia = false;
   bool _isPostingStory = false;
   bool _showMediaPreviews = true;
   bool _confirmBeforePosting = false;
@@ -84,6 +89,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
   final Map<String, String> _churchNamesById = {};
   final Set<String> _loadingChurchNameIds = {};
   final Map<String, List<String>> _postLikeOverrides = {};
+  final Set<String> _prefetchedVideoPosterUrls = {};
   String _feedScope = 'church';
   List<String>? _selectedFeedChurchIds;
   String? _selectedFeedLabel;
@@ -91,9 +97,11 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
 
   XFile? _selectedMedia;
   Uint8List? _selectedImagePreviewBytes;
+  Uint8List? _selectedVideoThumbnailBytes;
   String? _mediaType; // 'image' or 'video'
-  MediaDisplayFormat _postMediaFormat = MediaDisplayFormat.fill;
+  MediaDisplayFormat _postMediaFormat = MediaDisplayFormat.full;
   double? _postMediaAspectRatio;
+  MediaFormatRecommendation? _postMediaRecommendation;
 
   bool get _hasLimitedAccess =>
       widget.limitedAccessMessage?.trim().isNotEmpty == true;
@@ -248,47 +256,80 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
 
   Future<void> _pickImage() async {
     final ImagePicker picker = ImagePicker();
-    final XFile? image = await picker.pickImage(source: ImageSource.gallery);
+    final XFile? image = await picker.pickImage(
+      source: ImageSource.gallery,
+      // Large camera originals make a status appear to hang while uploading.
+      // 2160px keeps flyers sharp on modern phones while dramatically cutting
+      // transfer time and memory pressure.
+      maxWidth: 2160,
+      maxHeight: 2160,
+      imageQuality: 88,
+    );
 
     if (image != null) {
       final previewBytes = await image.readAsBytes();
       final aspectRatio = await imageAspectRatioFromBytes(previewBytes);
+      final recommendation = recommendMediaDisplayFormat(aspectRatio);
       if (!mounted) return;
       setState(() {
         _selectedMedia = image;
         _selectedImagePreviewBytes = previewBytes;
+        _selectedVideoThumbnailBytes = null;
         _mediaType = 'image';
-        _postMediaFormat = MediaDisplayFormat.full;
+        _postMediaFormat = recommendation.format;
         _postMediaAspectRatio = aspectRatio;
+        _postMediaRecommendation = recommendation;
       });
     }
   }
 
-  Future<void> _pickVideo() async {
+  Future<void> _pickVideo({VoidCallback? onStateChanged}) async {
     final ImagePicker picker = ImagePicker();
     final XFile? video = await picker.pickVideo(source: ImageSource.gallery);
 
-    // Check file size limit (50 MB) before accepting
     if (video != null) {
-      final size = await video.length();
-      if (size > _maxCommunityVideoBytes) {
+      if (mounted) {
+        setState(() => _isInspectingMedia = true);
+        onStateChanged?.call();
+      }
+      try {
+        final inspection = await inspectCommunityVideo(
+          video,
+          maxByteLength: _maxCommunityVideoBytes,
+        );
+        if (inspection.byteLength > _maxCommunityVideoBytes) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Choose a video that is 50MB or smaller.'),
+              ),
+            );
+          }
+          return;
+        }
+
+        if (!mounted) return;
+        setState(() {
+          _selectedMedia = video;
+          _selectedImagePreviewBytes = null;
+          _selectedVideoThumbnailBytes = inspection.thumbnailBytes;
+          _mediaType = 'video';
+          _postMediaFormat = inspection.recommendation.format;
+          _postMediaAspectRatio = inspection.aspectRatio;
+          _postMediaRecommendation = inspection.recommendation;
+        });
+      } catch (error) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Video file size must be less than 200MB'),
-            ),
+            SnackBar(content: Text('Could not inspect this video: $error')),
           );
         }
-        return;
+      } finally {
+        if (mounted) {
+          setState(() => _isInspectingMedia = false);
+          onStateChanged?.call();
+        }
       }
-
-      setState(() {
-        _selectedMedia = video;
-        _selectedImagePreviewBytes = null;
-        _mediaType = 'video';
-        _postMediaFormat = MediaDisplayFormat.fill;
-        _postMediaAspectRatio = null;
-      });
     }
   }
 
@@ -296,9 +337,13 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
     final captionController = TextEditingController();
     XFile? selectedStoryMedia;
     Uint8List? selectedStoryPreviewBytes;
+    Uint8List? selectedStoryVideoThumbnailBytes;
     String? selectedStoryType;
     var selectedStoryFormat = MediaDisplayFormat.full;
     double? selectedStoryAspectRatio;
+    MediaFormatRecommendation? selectedStoryRecommendation;
+    var isInspectingStoryMedia = false;
+    var isSharingStory = false;
     var shareWithAllChurches = false;
 
     await showModalBottomSheet<void>(
@@ -309,17 +354,25 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
         builder: (context, setSheetState) {
           Future<void> pickStoryImage(ImageSource source) async {
             final picker = ImagePicker();
-            final image = await picker.pickImage(source: source);
+            final image = await picker.pickImage(
+              source: source,
+              maxWidth: 2160,
+              maxHeight: 2160,
+              imageQuality: 88,
+            );
             if (image == null) return;
             final bytes = await image.readAsBytes();
             final aspectRatio = await imageAspectRatioFromBytes(bytes);
+            final recommendation = recommendMediaDisplayFormat(aspectRatio);
             if (!sheetContext.mounted) return;
             setSheetState(() {
               selectedStoryMedia = image;
               selectedStoryPreviewBytes = bytes;
+              selectedStoryVideoThumbnailBytes = null;
               selectedStoryType = 'image';
-              selectedStoryFormat = MediaDisplayFormat.full;
+              selectedStoryFormat = recommendation.format;
               selectedStoryAspectRatio = aspectRatio;
+              selectedStoryRecommendation = recommendation;
             });
           }
 
@@ -328,26 +381,48 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
             final video = await picker.pickVideo(source: ImageSource.gallery);
             if (video == null) return;
 
-            final size = await video.length();
-            if (size > _maxCommunityVideoBytes) {
+            if (sheetContext.mounted) {
+              setSheetState(() => isInspectingStoryMedia = true);
+            }
+            try {
+              final inspection = await inspectCommunityVideo(
+                video,
+                maxByteLength: _maxCommunityVideoBytes,
+              );
+              if (inspection.byteLength > _maxCommunityVideoBytes) {
+                if (sheetContext.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Choose a video that is 50MB or smaller.'),
+                    ),
+                  );
+                }
+                return;
+              }
+
+              if (!sheetContext.mounted) return;
+              setSheetState(() {
+                selectedStoryMedia = video;
+                selectedStoryPreviewBytes = null;
+                selectedStoryVideoThumbnailBytes = inspection.thumbnailBytes;
+                selectedStoryType = 'video';
+                selectedStoryFormat = inspection.recommendation.format;
+                selectedStoryAspectRatio = inspection.aspectRatio;
+                selectedStoryRecommendation = inspection.recommendation;
+              });
+            } catch (error) {
               if (sheetContext.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Video file size must be less than 200MB'),
+                  SnackBar(
+                    content: Text('Could not inspect this video: $error'),
                   ),
                 );
               }
-              return;
+            } finally {
+              if (sheetContext.mounted) {
+                setSheetState(() => isInspectingStoryMedia = false);
+              }
             }
-
-            if (!sheetContext.mounted) return;
-            setSheetState(() {
-              selectedStoryMedia = video;
-              selectedStoryPreviewBytes = null;
-              selectedStoryType = 'video';
-              selectedStoryFormat = MediaDisplayFormat.fill;
-              selectedStoryAspectRatio = null;
-            });
           }
 
           return Padding(
@@ -392,24 +467,32 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                               .colorScheme
                               .surfaceContainerHighest,
                           borderRadius: BorderRadius.circular(18),
-                          image: selectedStoryPreviewBytes == null
+                          image: (selectedStoryPreviewBytes ??
+                                      selectedStoryVideoThumbnailBytes) ==
+                                  null
                               ? null
                               : DecorationImage(
-                                  image:
-                                      MemoryImage(selectedStoryPreviewBytes!),
+                                  image: MemoryImage(
+                                    selectedStoryPreviewBytes ??
+                                        selectedStoryVideoThumbnailBytes!,
+                                  ),
                                   fit: boxFitForMedia(
                                     selectedStoryFormat.mediaFit,
                                   ),
                                 ),
                         ),
                         child: selectedStoryType == 'video'
-                            ? const Center(
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(Icons.play_circle_fill, size: 54),
-                                    SizedBox(height: 10),
-                                    Text('Video attached'),
+                            ? Center(
+                                child: Icon(
+                                  Icons.play_circle_fill,
+                                  size: 54,
+                                  color:
+                                      selectedStoryVideoThumbnailBytes == null
+                                          ? null
+                                          : Colors.white,
+                                  shadows: const [
+                                    Shadow(
+                                        color: Colors.black54, blurRadius: 8),
                                   ],
                                 ),
                               )
@@ -447,18 +530,28 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                       const SizedBox(width: 10),
                       Expanded(
                         child: OutlinedButton.icon(
-                          onPressed: pickStoryVideo,
-                          icon: const Icon(Icons.videocam_outlined),
-                          label: const Text('Video'),
+                          onPressed:
+                              isInspectingStoryMedia ? null : pickStoryVideo,
+                          icon: isInspectingStoryMedia
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child:
+                                      CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : const Icon(Icons.videocam_outlined),
+                          label: Text(
+                              isInspectingStoryMedia ? 'Inspecting…' : 'Video'),
                         ),
                       ),
                     ],
                   ),
                   const SizedBox(height: 12),
-                  if (selectedStoryPreviewBytes != null &&
-                      selectedStoryType == 'image') ...[
+                  if (selectedStoryMedia != null) ...[
                     _MediaFormatSelector(
                       selectedFormat: selectedStoryFormat,
+                      recommendation: selectedStoryRecommendation,
+                      mediaType: selectedStoryType ?? 'media',
                       onSelected: (format) => setSheetState(
                         () => selectedStoryFormat = format,
                       ),
@@ -481,29 +574,36 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                   SizedBox(
                     width: double.infinity,
                     child: FilledButton.icon(
-                      onPressed: _isPostingStory
+                      onPressed: isSharingStory || isInspectingStoryMedia
                           ? null
                           : () async {
-                              await _handleStoryPost(
+                              setSheetState(() => isSharingStory = true);
+                              final posted = await _handleStoryPost(
                                 caption: captionController.text,
                                 media: selectedStoryMedia,
                                 mediaType: selectedStoryType,
                                 mediaFormat: selectedStoryFormat,
                                 imageAspectRatio: selectedStoryAspectRatio,
+                                videoThumbnailBytes:
+                                    selectedStoryVideoThumbnailBytes,
                                 visibleToAllChurches: shareWithAllChurches,
                               );
-                              if (sheetContext.mounted) {
+                              if (posted && sheetContext.mounted) {
                                 Navigator.pop(sheetContext);
+                              } else if (sheetContext.mounted) {
+                                setSheetState(() => isSharingStory = false);
                               }
                             },
-                      icon: _isPostingStory
+                      icon: isSharingStory
                           ? const SizedBox(
                               width: 16,
                               height: 16,
                               child: CircularProgressIndicator(strokeWidth: 2),
                             )
                           : const Icon(Icons.auto_awesome_outlined),
-                      label: const Text('Share Status'),
+                      label: Text(
+                        isSharingStory ? 'Sharing Status…' : 'Share Status',
+                      ),
                     ),
                   ),
                 ],
@@ -515,33 +615,40 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
     );
   }
 
-  Future<void> _handleStoryPost({
+  Future<bool> _handleStoryPost({
     required String caption,
     required XFile? media,
     required String? mediaType,
     required MediaDisplayFormat mediaFormat,
     required double? imageAspectRatio,
+    required Uint8List? videoThumbnailBytes,
     required bool visibleToAllChurches,
   }) async {
-    if (_isPostingStory) return;
+    if (_isPostingStory) return false;
     final cleanCaption = caption.trim();
-    if (cleanCaption.isEmpty && media == null) return;
+    if (cleanCaption.isEmpty && media == null) return false;
 
     setState(() => _isPostingStory = true);
+    String? pendingMediaPath;
+    String? pendingThumbnailPath;
+    var committed = false;
     try {
       final authUser = _auth.currentUser;
       final profile = context.read<UserRoleProvider>().userProfile;
       final churchId = profile?.placeId ?? '';
-      if (authUser == null || churchId.isEmpty) return;
+      if (authUser == null || churchId.isEmpty) return false;
 
       String? mediaUrl;
       String? mediaPath;
+      String? mediaThumbnailUrl;
+      String? mediaThumbnailPath;
       if (media != null) {
         final mimeType = _contentTypeFor(media, mediaType);
         final extension =
             _extensionFor(media, mimeType, fallbackMediaType: mediaType);
-        final fileName =
-            '$churchId/stories/${DateTime.now().millisecondsSinceEpoch}_${authUser.id}.$extension';
+        final objectStem =
+            '$churchId/stories/${DateTime.now().millisecondsSinceEpoch}_${authUser.id}';
+        final fileName = '$objectStem.$extension';
         mediaPath = fileName;
         mediaUrl = await uploadCommunityMediaXFile(
           service: _communityService,
@@ -549,6 +656,16 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
           path: fileName,
           contentType: mimeType,
         );
+        pendingMediaPath = fileName;
+        if (mediaType == 'video' && videoThumbnailBytes?.isNotEmpty == true) {
+          final poster = await _uploadVideoPoster(
+            bytes: videoThumbnailBytes!,
+            path: '$objectStem-poster.jpg',
+          );
+          mediaThumbnailUrl = poster.$1;
+          mediaThumbnailPath = poster.$2;
+          pendingThumbnailPath = poster.$2;
+        }
       }
 
       final story = CommunityStory(
@@ -565,6 +682,8 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
         mediaUrl: mediaUrl,
         mediaPath: mediaPath,
         mediaType: mediaType,
+        mediaThumbnailUrl: mediaThumbnailUrl,
+        mediaThumbnailPath: mediaThumbnailPath,
         mediaFit: mediaFormat.mediaFit,
         mediaAspectRatio: mediaFormat.aspectRatio ?? imageAspectRatio,
         visibleToAllChurches: visibleToAllChurches,
@@ -573,20 +692,30 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
       );
 
       await _communityService.addStory(story);
+      committed = true;
       if (mounted) {
         setState(() => _storiesRefreshToken++);
       }
+      return true;
     } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not share status: $error')),
-      );
+      if (!committed) {
+        await _communityService.removeUploadedMediaObjects([
+          pendingMediaPath,
+          pendingThumbnailPath,
+        ]);
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not share status: $error')),
+        );
+      }
+      return false;
     } finally {
       if (mounted) setState(() => _isPostingStory = false);
     }
   }
 
-  Future<bool> _handlePost() async {
+  Future<bool> _handlePost({VoidCallback? onProgressChanged}) async {
     if (_isPosting) return false;
     if (_postController.text.trim().isEmpty && _selectedMedia == null) {
       return false;
@@ -619,8 +748,17 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
       if (!mounted) return false;
     }
 
-    setState(() => _isPosting = true);
+    setState(() {
+      _isPosting = true;
+      _postingStatus = _selectedMedia == null
+          ? 'Publishing post…'
+          : 'Uploading optimized media…';
+    });
+    onProgressChanged?.call();
 
+    String? pendingMediaPath;
+    String? pendingThumbnailPath;
+    var committed = false;
     try {
       final user = _auth.currentUser;
       if (user == null) return false;
@@ -633,6 +771,8 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
 
       String? mediaUrl;
       String? mediaPath;
+      String? mediaThumbnailUrl;
+      String? mediaThumbnailPath;
       if (_selectedMedia != null) {
         final mimeType = _contentTypeFor(_selectedMedia!, _mediaType);
         final extension = _extensionFor(
@@ -641,8 +781,9 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
           fallbackMediaType: _mediaType,
         );
         final mediaScope = churchId.isEmpty ? 'global' : churchId;
-        final fileName =
-            '$mediaScope/${DateTime.now().millisecondsSinceEpoch}_${user.id}.$extension';
+        final objectStem =
+            '$mediaScope/${DateTime.now().millisecondsSinceEpoch}_${user.id}';
+        final fileName = '$objectStem.$extension';
         mediaPath = fileName;
         mediaUrl = await uploadCommunityMediaXFile(
           service: _communityService,
@@ -650,6 +791,17 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
           path: fileName,
           contentType: mimeType,
         );
+        pendingMediaPath = fileName;
+        if (_mediaType == 'video' &&
+            _selectedVideoThumbnailBytes?.isNotEmpty == true) {
+          final poster = await _uploadVideoPoster(
+            bytes: _selectedVideoThumbnailBytes!,
+            path: '$objectStem-poster.jpg',
+          );
+          mediaThumbnailUrl = poster.$1;
+          mediaThumbnailPath = poster.$2;
+          pendingThumbnailPath = poster.$2;
+        }
       }
 
       final authorName = profile?.fullName.isNotEmpty == true
@@ -673,6 +825,8 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
         mediaUrl: mediaUrl,
         mediaPath: mediaPath,
         mediaType: _mediaType,
+        mediaThumbnailUrl: mediaThumbnailUrl,
+        mediaThumbnailPath: mediaThumbnailPath,
         mediaFit: _postMediaFormat.mediaFit,
         mediaAspectRatio: _postMediaFormat.aspectRatio ?? _postMediaAspectRatio,
         expiresAt: postsToDiscover
@@ -683,27 +837,40 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
         postType: postsToDiscover ? 'social_post' : 'post',
       );
 
+      if (mounted) {
+        setState(() => _postingStatus = 'Publishing post…');
+        onProgressChanged?.call();
+      }
       await _communityService.addPost(newPost);
-
-      _postController.clear();
-      setState(() {
-        _selectedMedia = null;
-        _selectedImagePreviewBytes = null;
-        _mediaType = null;
-        _postMediaFormat = MediaDisplayFormat.fill;
-        _postMediaAspectRatio = null;
-        _postVisibleToAllChurches = false;
-        _feedRefreshToken++;
-      });
-      if (mounted) FocusScope.of(context).unfocus();
+      committed = true;
 
       if (mounted) {
+        _postController.clear();
+        setState(() {
+          _selectedMedia = null;
+          _selectedImagePreviewBytes = null;
+          _selectedVideoThumbnailBytes = null;
+          _mediaType = null;
+          _postMediaFormat = MediaDisplayFormat.full;
+          _postMediaAspectRatio = null;
+          _postMediaRecommendation = null;
+          _postVisibleToAllChurches = false;
+          _feedRefreshToken++;
+        });
+        onProgressChanged?.call();
+        FocusScope.of(context).unfocus();
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Posted successfully!')),
         );
       }
       return true;
     } catch (e) {
+      if (!committed) {
+        await _communityService.removeUploadedMediaObjects([
+          pendingMediaPath,
+          pendingThumbnailPath,
+        ]);
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error posting: $e')),
@@ -711,7 +878,32 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
       }
       return false;
     } finally {
-      if (mounted) setState(() => _isPosting = false);
+      if (mounted) {
+        setState(() {
+          _isPosting = false;
+          _postingStatus = null;
+        });
+        onProgressChanged?.call();
+      }
+    }
+  }
+
+  Future<(String?, String?)> _uploadVideoPoster({
+    required Uint8List bytes,
+    required String path,
+  }) async {
+    try {
+      final url = await _communityService.uploadMediaBytes(
+        bytes,
+        path,
+        contentType: 'image/jpeg',
+      );
+      return (url, path);
+    } catch (error) {
+      // A poster improves perceived speed but must never prevent the actual
+      // video from being shared.
+      debugPrint('Video poster upload skipped: $error');
+      return (null, null);
     }
   }
 
@@ -1416,6 +1608,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                     (post) => !_blockedUserIds.contains(post.authorId),
                   )
                   .toList();
+              _queueVideoPosterPrefetch(posts);
               _queueChurchNameLoads(posts, churchId);
               final isWaiting =
                   snapshot.connectionState == ConnectionState.waiting;
@@ -1440,7 +1633,10 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                     ),
                     padding: EdgeInsets.zero,
                     // ignore: deprecated_member_use
-                    cacheExtent: 1200,
+                    // Build roughly one screen ahead. Video posters can warm
+                    // from cache without eagerly allocating decoders for many
+                    // off-screen posts.
+                    cacheExtent: 480,
                     clipBehavior: Clip.hardEdge,
                     keyboardDismissBehavior:
                         ScrollViewKeyboardDismissBehavior.onDrag,
@@ -1471,6 +1667,30 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
         ],
       ),
     );
+  }
+
+  void _queueVideoPosterPrefetch(List<Post> posts) {
+    final urls = posts
+        .where((post) => post.mediaType == 'video')
+        .map((post) => post.mediaThumbnailUrl?.trim() ?? '')
+        .where((url) => url.isNotEmpty)
+        .take(4)
+        .where(_prefetchedVideoPosterUrls.add)
+        .toList(growable: false);
+    if (urls.isEmpty) return;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      for (final url in urls) {
+        unawaited(
+          precacheImage(CachedNetworkImageProvider(url), context).catchError(
+            (_) {
+              // The inline widget retains its normal retry/error behavior.
+            },
+          ),
+        );
+      }
+    });
   }
 
   int _feedListItemCount({
@@ -2560,7 +2780,9 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                     const SizedBox(height: 10),
                     _buildComposer(
                       context,
-                      onMediaChanged: () => setSheetState(() {}),
+                      onMediaChanged: () {
+                        if (sheetContext.mounted) setSheetState(() {});
+                      },
                       onPosted: () {
                         if (sheetContext.mounted) {
                           Navigator.pop(sheetContext);
@@ -3022,6 +3244,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                   borderRadius: BorderRadius.circular(8),
                   child: CommunityVideoPlayer(
                     mediaUrl: post.mediaUrl!,
+                    thumbnailUrl: post.mediaThumbnailUrl,
                     fit: boxFitForMedia(post.mediaFit),
                     autoPlay: false,
                   ),
@@ -3241,7 +3464,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                             thumbnail?.authorPhoto ?? currentUser?.photoUrl,
                         thumbnailUrl: thumbnail?.mediaType == 'image'
                             ? thumbnail?.mediaUrl
-                            : null,
+                            : thumbnail?.mediaThumbnailUrl,
                         hasUnwatched: ownGroup?.hasUnwatched(
                               _watchedStoryIds,
                             ) ??
@@ -3262,7 +3485,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                       label: _shortStoryName(group.authorName),
                       thumbnailUrl: thumbnail.mediaType == 'image'
                           ? thumbnail.mediaUrl
-                          : group.authorPhoto,
+                          : thumbnail.mediaThumbnailUrl ?? group.authorPhoto,
                       photoUrl: group.authorPhoto,
                       hasUnwatched: group.hasUnwatched(_watchedStoryIds),
                       statusCount: group.stories.length,
@@ -3345,69 +3568,128 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
             const SizedBox(height: 2),
             Align(
               alignment: Alignment.centerLeft,
-              child: SizedBox(
-                height: 112,
-                width: 132,
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: theme.colorScheme.surfaceContainerHighest,
-                          image: _mediaType == 'image' &&
-                                  _selectedImagePreviewBytes != null
-                              ? DecorationImage(
-                                  image:
-                                      MemoryImage(_selectedImagePreviewBytes!),
-                                  fit:
-                                      boxFitForMedia(_postMediaFormat.mediaFit),
+              child: Semantics(
+                label:
+                    _mediaType == 'video' ? 'Video attached' : 'Photo attached',
+                child: SizedBox(
+                  height: 112,
+                  width: 132,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: theme.colorScheme.surfaceContainerHighest,
+                            image: _mediaType == 'image' &&
+                                    _selectedImagePreviewBytes != null
+                                ? DecorationImage(
+                                    image: MemoryImage(
+                                      _selectedImagePreviewBytes!,
+                                    ),
+                                    fit: boxFitForMedia(
+                                      _postMediaFormat.mediaFit,
+                                    ),
+                                  )
+                                : _mediaType == 'video' &&
+                                        _selectedVideoThumbnailBytes != null
+                                    ? DecorationImage(
+                                        image: MemoryImage(
+                                          _selectedVideoThumbnailBytes!,
+                                        ),
+                                        fit: boxFitForMedia(
+                                          _postMediaFormat.mediaFit,
+                                        ),
+                                      )
+                                    : null,
+                          ),
+                          child: _mediaType == 'video'
+                              ? const Center(
+                                  child: Icon(
+                                    Icons.play_circle_fill,
+                                    size: 38,
+                                    color: Colors.white,
+                                    shadows: [
+                                      Shadow(
+                                        color: Colors.black54,
+                                        blurRadius: 8,
+                                      ),
+                                    ],
+                                  ),
                                 )
                               : null,
                         ),
-                        child: _mediaType == 'video'
-                            ? const Center(
-                                child: Icon(Icons.play_circle_fill, size: 34),
-                              )
-                            : null,
-                      ),
-                      Positioned(
-                        top: 4,
-                        right: 4,
-                        child: IconButton.filled(
-                          style: IconButton.styleFrom(
-                            backgroundColor: Colors.black54,
-                            foregroundColor: Colors.white,
+                        Positioned(
+                          top: 4,
+                          right: 4,
+                          child: IconButton.filled(
+                            style: IconButton.styleFrom(
+                              backgroundColor: Colors.black54,
+                              foregroundColor: Colors.white,
+                            ),
+                            icon: const Icon(Icons.close, size: 18),
+                            onPressed: () {
+                              setState(() {
+                                _selectedMedia = null;
+                                _selectedImagePreviewBytes = null;
+                                _selectedVideoThumbnailBytes = null;
+                                _mediaType = null;
+                                _postMediaFormat = MediaDisplayFormat.full;
+                                _postMediaAspectRatio = null;
+                                _postMediaRecommendation = null;
+                              });
+                              onMediaChanged?.call();
+                            },
                           ),
-                          icon: const Icon(Icons.close, size: 18),
-                          onPressed: () {
-                            setState(() {
-                              _selectedMedia = null;
-                              _selectedImagePreviewBytes = null;
-                              _mediaType = null;
-                              _postMediaFormat = MediaDisplayFormat.fill;
-                              _postMediaAspectRatio = null;
-                            });
-                            onMediaChanged?.call();
-                          },
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),
             ),
             const SizedBox(height: 8),
-            if (_mediaType == 'image')
-              _MediaFormatSelector(
-                selectedFormat: _postMediaFormat,
-                onSelected: (format) {
-                  setState(() => _postMediaFormat = format);
-                  onMediaChanged?.call();
-                },
+            _MediaFormatSelector(
+              selectedFormat: _postMediaFormat,
+              recommendation: _postMediaRecommendation,
+              mediaType: _mediaType ?? 'media',
+              onSelected: (format) {
+                setState(() => _postMediaFormat = format);
+                onMediaChanged?.call();
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+          if (_isPosting) ...[
+            const LinearProgressIndicator(minHeight: 2),
+            const SizedBox(height: 6),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                _postingStatus ?? 'Publishing post…',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
-            if (_mediaType == 'image') const SizedBox(height: 8),
+            ),
+            const SizedBox(height: 6),
+          ],
+          if (_isInspectingMedia) ...[
+            const LinearProgressIndicator(minHeight: 2),
+            const SizedBox(height: 6),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Checking video orientation and preparing its preview…',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            const SizedBox(height: 6),
           ],
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
@@ -3447,19 +3729,28 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
               const SizedBox(width: 4),
               IconButton(
                 icon: const Icon(Icons.image_outlined),
-                onPressed: () async {
-                  await _pickImage();
-                  onMediaChanged?.call();
-                },
+                onPressed: _isInspectingMedia || _isPosting
+                    ? null
+                    : () async {
+                        await _pickImage();
+                        onMediaChanged?.call();
+                      },
                 tooltip: 'Attach image',
                 visualDensity: VisualDensity.compact,
               ),
               IconButton(
-                icon: const Icon(Icons.videocam_outlined),
-                onPressed: () async {
-                  await _pickVideo();
-                  onMediaChanged?.call();
-                },
+                icon: _isInspectingMedia
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.videocam_outlined),
+                onPressed: _isInspectingMedia || _isPosting
+                    ? null
+                    : () async {
+                        await _pickVideo(onStateChanged: onMediaChanged);
+                      },
                 tooltip: 'Attach video',
                 visualDensity: VisualDensity.compact,
               ),
@@ -3476,10 +3767,12 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                         theme.colorScheme.onSurface.withValues(alpha: 0.38),
                   ),
                   tooltip: 'Post',
-                  onPressed: _isPosting
+                  onPressed: _isPosting || _isInspectingMedia
                       ? null
                       : () async {
-                          final posted = await _handlePost();
+                          final posted = await _handlePost(
+                            onProgressChanged: onMediaChanged,
+                          );
                           if (posted) onPosted?.call();
                         },
                   icon: _isPosting
@@ -3574,6 +3867,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
           'caption': story.caption,
           'media_url': story.mediaUrl,
           'media_type': story.mediaType,
+          'media_thumbnail_url': story.mediaThumbnailUrl,
           'media_fit': story.mediaFit,
           'created_at': story.createdAt.toUtc().toIso8601String(),
         },
@@ -3928,6 +4222,7 @@ class _StatusViewerDialogState extends State<_StatusViewerDialog> {
         children: [
           CommunityVideoPlayer(
             mediaUrl: story.mediaUrl!,
+            thumbnailUrl: story.mediaThumbnailUrl,
             fit: boxFitForMedia(story.mediaFit),
             autoPlay: true,
           ),
@@ -4174,10 +4469,14 @@ class _MediaFormatSelector extends StatelessWidget {
   const _MediaFormatSelector({
     required this.selectedFormat,
     required this.onSelected,
+    required this.mediaType,
+    this.recommendation,
   });
 
   final MediaDisplayFormat selectedFormat;
   final ValueChanged<MediaDisplayFormat> onSelected;
+  final String mediaType;
+  final MediaFormatRecommendation? recommendation;
 
   @override
   Widget build(BuildContext context) {
@@ -4186,8 +4485,42 @@ class _MediaFormatSelector extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        if (recommendation != null) ...[
+          DecoratedBox(
+            decoration: BoxDecoration(
+              color: theme.colorScheme.primaryContainer.withValues(alpha: 0.55),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: theme.colorScheme.primary.withValues(alpha: 0.24),
+              ),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(10),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.auto_awesome_outlined,
+                    size: 18,
+                    color: theme.colorScheme.primary,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      recommendation!.summary,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+        ],
         Text(
-          'Photo format',
+          '${mediaType == 'video' ? 'Video' : 'Photo'} format • change if you prefer',
           style: theme.textTheme.labelLarge?.copyWith(
             fontWeight: FontWeight.w800,
           ),
@@ -4199,7 +4532,14 @@ class _MediaFormatSelector extends StatelessWidget {
             children: [
               for (final format in MediaDisplayFormat.values) ...[
                 ChoiceChip(
-                  label: Text(format.label),
+                  avatar: recommendation?.format == format
+                      ? const Icon(Icons.auto_awesome, size: 15)
+                      : null,
+                  label: Text(
+                    recommendation?.format == format
+                        ? '${format.label} (Recommended)'
+                        : format.label,
+                  ),
                   selected: selectedFormat == format,
                   tooltip: format.description,
                   onSelected: (_) => onSelected(format),

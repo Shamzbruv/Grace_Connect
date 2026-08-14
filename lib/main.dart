@@ -3,6 +3,8 @@ import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:google_maps_flutter_android/google_maps_flutter_android.dart';
+import 'package:google_maps_flutter_platform_interface/google_maps_flutter_platform_interface.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'access/app_feature.dart';
 import 'providers/user_role_provider.dart';
@@ -64,6 +66,7 @@ import 'screens/settings/finance_settings_screen.dart';
 import 'screens/settings/app_settings_screen.dart';
 import 'screens/settings/feedback_screen.dart';
 import 'screens/settings/legal_document_screen.dart';
+import 'screens/subscription/subscription_screen.dart';
 import 'screens/developer/developer_console_screen.dart';
 import 'screens/splash_screen.dart';
 import 'screens/profile/profile_screen.dart';
@@ -99,6 +102,8 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  await _initializeAndroidMaps();
+
   // Start Firebase initialization (for Analytics/Crashlytics/Distribution)
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
@@ -132,6 +137,23 @@ Future<void> main() async {
       child: const MyApp(),
     ),
   );
+}
+
+Future<void> _initializeAndroidMaps() async {
+  if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+  try {
+    final mapsImplementation = GoogleMapsFlutterPlatform.instance;
+    if (mapsImplementation is GoogleMapsFlutterAndroid) {
+      await mapsImplementation.initializeWithRenderer(
+        AndroidMapRenderer.latest,
+      );
+      await mapsImplementation.warmup();
+    }
+  } catch (error) {
+    // The picker still provides retry and manual coordinates if a device's
+    // Google Play services cannot initialize the preferred renderer.
+    debugPrint('Android Maps renderer warmup skipped: $error');
+  }
 }
 
 Future<void> _configureCrashReporting() async {
@@ -385,6 +407,10 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
               '/settings/finance': (context) => _protected(
                   const FinanceSettingsScreen(),
                   feature: AppFeature.churchFinance),
+              '/subscription': (context) => _protected(
+                    const SubscriptionScreen(),
+                    feature: AppFeature.subscriptionManagement,
+                  ),
               '/settings/app_config': (context) =>
                   _protected(const AppSettingsScreen()),
               '/settings/feedback': (context) =>
