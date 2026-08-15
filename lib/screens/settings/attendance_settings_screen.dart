@@ -6,6 +6,7 @@ import '../../widgets/ui/app_scaffold.dart';
 import '../../widgets/ui/app_feedback.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../services/attendance_service.dart';
+import '../../services/notification_service.dart';
 
 class AttendanceSettingsScreen extends StatefulWidget {
   const AttendanceSettingsScreen({super.key});
@@ -18,11 +19,16 @@ class AttendanceSettingsScreen extends StatefulWidget {
 class _AttendanceSettingsScreenState extends State<AttendanceSettingsScreen> {
   bool _autoCheckIn = false;
   bool _isLoading = true;
+  bool? _batteryOptimizationIgnored;
+
+  bool get _isAndroid =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
   @override
   void initState() {
     super.initState();
     _loadSettings();
+    if (_isAndroid) _loadBatteryOptimizationStatus();
   }
 
   Future<void> _loadSettings() async {
@@ -31,6 +37,19 @@ class _AttendanceSettingsScreenState extends State<AttendanceSettingsScreen> {
       _autoCheckIn = prefs.getBool('auto_check_in') ?? false;
       _isLoading = false;
     });
+  }
+
+  Future<void> _loadBatteryOptimizationStatus() async {
+    final ignored =
+        await NotificationService().isIgnoringBatteryOptimizations();
+    if (!mounted) return;
+    setState(() => _batteryOptimizationIgnored = ignored);
+  }
+
+  Future<void> _openBatterySettings() async {
+    await NotificationService().openBatteryOptimizationSettings();
+    await Future<void>.delayed(const Duration(milliseconds: 600));
+    if (mounted) await _loadBatteryOptimizationStatus();
   }
 
   Future<void> _toggleAutoCheckIn(bool value) async {
@@ -59,6 +78,7 @@ class _AttendanceSettingsScreenState extends State<AttendanceSettingsScreen> {
     await prefs.setBool('auto_check_in', value);
     if (value) {
       await AttendanceService().initialize();
+      if (_isAndroid) await _loadBatteryOptimizationStatus();
     } else {
       AttendanceService().stopMonitoring();
     }
@@ -249,6 +269,54 @@ class _AttendanceSettingsScreenState extends State<AttendanceSettingsScreen> {
                         ],
                       ),
                     ),
+                    if (_isAndroid && _batteryOptimizationIgnored == false) ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                            color: Colors.orange.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                                color: Colors.orange.withValues(alpha: 0.3))),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Row(
+                              children: [
+                                Icon(Icons.battery_alert, color: Colors.orange),
+                                SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    'Battery optimization is still restricting this app',
+                                    style: TextStyle(
+                                      color: Colors.orange,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            const Text(
+                              'Some phones stop background location checks to '
+                              'save battery, which can keep auto-attendance '
+                              'from marking you present without opening the '
+                              'app. Allow Grace Connect to run in the '
+                              'background to make this reliable.',
+                              style: TextStyle(fontSize: 13),
+                            ),
+                            const SizedBox(height: 10),
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: OutlinedButton(
+                                onPressed: _openBatterySettings,
+                                child: const Text('Allow background activity'),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ],
                   const Divider(height: 48),
                   Text(
