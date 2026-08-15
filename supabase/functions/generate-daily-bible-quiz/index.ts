@@ -671,7 +671,7 @@ Return valid JSON only in this shape:
       // church that needs more candidates gets its own rotating targeted calls.
       sharedAiResponse = await callHuggingFaceJson(
         quizPrompt(blockedFactKeys, 0),
-        1800,
+        3600,
       );
       aiStatus =
         Array.isArray((sharedAiResponse as AiQuizResponse | null)?.questions)
@@ -688,7 +688,7 @@ Return valid JSON only in this shape:
     try {
       const response = await callHuggingFaceJson(
         quizPrompt(blockedFactKeys, variationBatch),
-        1800,
+        3600,
       );
       if (Array.isArray((response as AiQuizResponse | null)?.questions)) {
         aiStatus = "received";

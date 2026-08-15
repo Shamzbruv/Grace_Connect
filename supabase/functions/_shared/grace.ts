@@ -219,6 +219,7 @@ export function safeJsonParse<T>(value: string): T | null {
 export async function callHuggingFaceJson(
   prompt: string,
   maxNewTokens = 900,
+  timeoutMs = 45_000,
 ): Promise<unknown | null> {
   const hfToken = Deno.env.get("HF_TOKEN");
   if (!hfToken) throw new Error("AI configuration is incomplete.");
@@ -227,37 +228,77 @@ export async function callHuggingFaceJson(
   // api-inference.huggingface.co serverless endpoint (it no longer even
   // resolves) in favor of this OpenAI-compatible router, which auto-selects
   // an available provider for the requested model.
-  const response = await fetch(
-    "https://router.huggingface.co/v1/chat/completions",
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${hfToken}`,
-        "Content-Type": "application/json",
+  //
+  // This call is bounded by an explicit timeout. Quiz generation can invoke
+  // this multiple times in one run (a shared attempt plus targeted retries
+  // per church); a single provider hang with no abort here previously
+  // stalled the entire request indefinitely instead of failing a single
+  // attempt and letting the existing retry logic move on.
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(
+      "https://router.huggingface.co/v1/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${hfToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "openai/gpt-oss-120b",
+          messages: [{ role: "user", content: prompt }],
+          max_tokens: Math.max(256, Math.min(maxNewTokens, 4000)),
+          temperature: 0.7,
+          // gpt-oss is a reasoning model: without forcing strict JSON output
+          // it can wrap the answer in chain-of-thought prose, or spend part
+          // of the token budget reasoning before writing the actual JSON,
+          // which truncates long structured responses (like a 12-question
+          // quiz) before they close their braces. This is the standard
+          // OpenAI-compatible switch to stop that.
+          response_format: { type: "json_object" },
+        }),
+        signal: controller.signal,
       },
-      body: JSON.stringify({
-        model: "openai/gpt-oss-120b",
-        messages: [{ role: "user", content: prompt }],
-        max_tokens: Math.max(256, Math.min(maxNewTokens, 2400)),
-        temperature: 0.7,
-      }),
-    },
-  );
+    );
 
-  if (!response.ok) {
-    // A bare null return here previously made every AI failure
-    // indistinguishable from a validation rejection. Logging the status and
-    // body is the only way to tell a dead token/model apart from a
-    // transient provider error in the Edge Function logs.
-    const body = await response.text().catch(() => "");
+    if (!response.ok) {
+      // A bare null return here previously made every AI failure
+      // indistinguishable from a validation rejection. Logging the status
+      // and body is the only way to tell a dead token/model apart from a
+      // transient provider error in the Edge Function logs.
+      const body = await response.text().catch(() => "");
+      console.error(
+        `Hugging Face router request failed: HTTP ${response.status} ${body}`,
+      );
+      return null;
+    }
+    const payload = await response.json();
+    const text = String(payload?.choices?.[0]?.message?.content ?? "");
+    const parsed = safeJsonParse(text);
+    if (parsed === null) {
+      // Same reasoning as above: silently returning null here made a
+      // truncated/malformed response indistinguishable from every other
+      // failure mode. Logging a snippet of what actually came back is what
+      // would have shown this was a formatting problem, not a dead
+      // integration, without needing to guess from production data.
+      console.error(
+        `Hugging Face router response was not parseable JSON (finish_reason=${
+          String(payload?.choices?.[0]?.finish_reason ?? "?")
+        }): ${text.slice(0, 500)}`,
+      );
+    }
+    return parsed;
+  } catch (error) {
     console.error(
-      `Hugging Face router request failed: HTTP ${response.status} ${body}`,
+      `Hugging Face router request threw: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
     );
     return null;
+  } finally {
+    clearTimeout(timeout);
   }
-  const payload = await response.json();
-  const text = String(payload?.choices?.[0]?.message?.content ?? "");
-  return safeJsonParse(text);
 }
 
 function base64Url(input: ArrayBuffer | Uint8Array | string): string {
