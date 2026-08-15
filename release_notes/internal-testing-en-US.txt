@@ -1,8 +1,6 @@
 <en-US>
-Grace Connect 1.0.28-beta:
-- Fixes attendance alerts and moves Android auto-attendance to native geofencing.
-- Prevents duplicate events; adds RSVP reminders, calendar sync, and safe links.
-- Adds uncropped media suggestions, video posters, and faster feed playback.
-- Makes Daily Word chapters unique and links Mon/Wed/Sat quizzes to them; other days are pop quizzes.
-- Adds transparent subscription status/support and developer finance reporting.
+Grace Connect 1.0.29-beta:
+- Fixes Daily Word and Bible Quiz generation, which had silently stopped producing new content.
+- Confirms Android now targets the API level Google Play currently requires.
+- Adds a map-loading diagnostic and a battery-optimization warning for auto-attendance.
 </en-US>

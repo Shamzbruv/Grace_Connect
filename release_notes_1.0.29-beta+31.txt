@@ -1,0 +1,7 @@
+Grace Connect 1.0.29-beta+31
+
+- Fixed a Hugging Face API endpoint that Hugging Face had fully decommissioned, which was silently breaking all Daily Word and Bible Quiz generation. Verified against production: the previous several published Daily Words had all silently fallen back to non-AI content, including two consecutive days that repeated the same Bible chapter -- the exact repetition this release's chapter-uniqueness work was meant to end.
+- Confirmed Android now compiles/targets API 36, resolving Google Play's target-API policy warning once this build is live.
+- Added an always-visible signing-certificate diagnostic to the Church Geofence map screen, so a "map frame renders but no tiles load" failure can be diagnosed from the certificate shown on screen instead of guessing.
+- Added a battery-optimization warning with a one-tap fix to Attendance Settings, since some phones silently stop background auto-attendance to save power without ever telling the member why.
+- Verified live in production after deploying: manually triggering the same nightly prepare flow the nightly cron job uses now returns real AI-generated content (source: "ai", not a fallback), with tomorrow's chapter-linked Daily Word and Bible Quiz both scheduled correctly.
