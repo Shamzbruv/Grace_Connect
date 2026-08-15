@@ -611,6 +611,24 @@ class _ChurchLocationPickerScreenState
                       unsupportedPlatform: !_supportsInteractiveMap,
                       detail: _mapFailureDetail,
                     ),
+          if (_isAndroidMapBuild && _androidMapBuildIdentity != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              'Build signature: $_androidMapBuildIdentity',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            Text(
+              'If the map frame appears but no imagery loads, this signing '
+              'certificate is most likely missing from the Maps API key\'s '
+              'allowed list in Google Cloud Console — that is fixed there, '
+              'not by installing a new app build.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
           if (_supportsInteractiveMap) ...[
             const SizedBox(height: 12),
             _ManualGeofenceFields(
