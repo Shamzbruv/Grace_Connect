@@ -96,11 +96,28 @@ function validateQuestion(
       bibleChapterFromReference(String(ref))?.key === requiredChapterKey
     )
   ) return null;
+
+  // AI-generated multiple choice reliably puts the correct answer first.
+  // Shuffle each question's options into a random order so the correct
+  // answer's on-screen letter is unpredictable, and recompute
+  // correct_option_index/correct_answer to match the new order.
+  const shuffledOrder = [0, 1, 2, 3];
+  for (let i = shuffledOrder.length - 1; i > 0; i--) {
+    const random = new Uint32Array(1);
+    crypto.getRandomValues(random);
+    const j = random[0] % (i + 1);
+    [shuffledOrder[i], shuffledOrder[j]] = [shuffledOrder[j], shuffledOrder[i]];
+  }
+  const shuffledOptions = shuffledOrder.map((originalIndex) =>
+    options[originalIndex]
+  ) as [string, string, string, string];
+  const shuffledIndex = shuffledOrder.indexOf(index);
+
   return {
     question: q.question.trim(),
-    options: options as [string, string, string, string],
-    correct_option_index: index,
-    correct_answer: options[index],
+    options: shuffledOptions,
+    correct_option_index: shuffledIndex,
+    correct_answer: shuffledOptions[shuffledIndex],
     explanation: String(q.explanation).trim(),
     scripture_references: q.scripture_references.map((ref) =>
       String(ref).trim()
