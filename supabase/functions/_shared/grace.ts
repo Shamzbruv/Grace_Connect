@@ -223,8 +223,12 @@ export async function callHuggingFaceJson(
   const hfToken = Deno.env.get("HF_TOKEN");
   if (!hfToken) throw new Error("AI configuration is incomplete.");
 
+  // Hugging Face fully decommissioned the legacy
+  // api-inference.huggingface.co serverless endpoint (it no longer even
+  // resolves) in favor of this OpenAI-compatible router, which auto-selects
+  // an available provider for the requested model.
   const response = await fetch(
-    "https://api-inference.huggingface.co/models/microsoft/Phi-3-mini-4k-instruct",
+    "https://router.huggingface.co/v1/chat/completions",
     {
       method: "POST",
       headers: {
@@ -232,21 +236,27 @@ export async function callHuggingFaceJson(
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        inputs: prompt,
-        parameters: {
-          max_new_tokens: Math.max(256, Math.min(maxNewTokens, 2400)),
-          return_full_text: false,
-          temperature: 0.7,
-        },
+        model: "openai/gpt-oss-120b",
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: Math.max(256, Math.min(maxNewTokens, 2400)),
+        temperature: 0.7,
       }),
     },
   );
 
-  if (!response.ok) return null;
+  if (!response.ok) {
+    // A bare null return here previously made every AI failure
+    // indistinguishable from a validation rejection. Logging the status and
+    // body is the only way to tell a dead token/model apart from a
+    // transient provider error in the Edge Function logs.
+    const body = await response.text().catch(() => "");
+    console.error(
+      `Hugging Face router request failed: HTTP ${response.status} ${body}`,
+    );
+    return null;
+  }
   const payload = await response.json();
-  const text = Array.isArray(payload)
-    ? String(payload[0]?.generated_text ?? "")
-    : String(payload.generated_text ?? payload[0]?.generated_text ?? "");
+  const text = String(payload?.choices?.[0]?.message?.content ?? "");
   return safeJsonParse(text);
 }
 
