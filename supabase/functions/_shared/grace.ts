@@ -216,11 +216,20 @@ export function safeJsonParse<T>(value: string): T | null {
   }
 }
 
+export type HuggingFaceJsonResult = {
+  data: unknown | null;
+  // Populated whenever data is null, so a caller can surface *why* -- an
+  // HTTP failure, a malformed/truncated response, or a thrown network
+  // error -- into its own error reporting instead of a bare null being
+  // indistinguishable from every other failure mode downstream.
+  diagnostic: string | null;
+};
+
 export async function callHuggingFaceJson(
   prompt: string,
   maxNewTokens = 900,
   timeoutMs = 45_000,
-): Promise<unknown | null> {
+): Promise<HuggingFaceJsonResult> {
   const hfToken = Deno.env.get("HF_TOKEN");
   if (!hfToken) throw new Error("AI configuration is incomplete.");
 
@@ -264,14 +273,17 @@ export async function callHuggingFaceJson(
 
     if (!response.ok) {
       // A bare null return here previously made every AI failure
-      // indistinguishable from a validation rejection. Logging the status
-      // and body is the only way to tell a dead token/model apart from a
-      // transient provider error in the Edge Function logs.
+      // indistinguishable from a validation rejection. Returning the status
+      // and body as a diagnostic (not just logging it) is the only way for
+      // a caller to tell a dead token/model apart from a transient provider
+      // error without needing separate access to the Edge Function logs.
       const body = await response.text().catch(() => "");
-      console.error(
-        `Hugging Face router request failed: HTTP ${response.status} ${body}`,
-      );
-      return null;
+      const diagnostic =
+        `Hugging Face router request failed: HTTP ${response.status} ${
+          body.slice(0, 500)
+        }`;
+      console.error(diagnostic);
+      return { data: null, diagnostic };
     }
     const payload = await response.json();
     const text = String(payload?.choices?.[0]?.message?.content ?? "");
@@ -279,23 +291,23 @@ export async function callHuggingFaceJson(
     if (parsed === null) {
       // Same reasoning as above: silently returning null here made a
       // truncated/malformed response indistinguishable from every other
-      // failure mode. Logging a snippet of what actually came back is what
-      // would have shown this was a formatting problem, not a dead
-      // integration, without needing to guess from production data.
-      console.error(
+      // failure mode. Returning a snippet of what actually came back is
+      // what shows this was a formatting/quota/safety-filter problem, not
+      // a dead integration, without needing to guess from production data.
+      const diagnostic =
         `Hugging Face router response was not parseable JSON (finish_reason=${
           String(payload?.choices?.[0]?.finish_reason ?? "?")
-        }): ${text.slice(0, 500)}`,
-      );
+        }): ${text.slice(0, 500)}`;
+      console.error(diagnostic);
+      return { data: null, diagnostic };
     }
-    return parsed;
+    return { data: parsed, diagnostic: null };
   } catch (error) {
-    console.error(
-      `Hugging Face router request threw: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-    return null;
+    const diagnostic = `Hugging Face router request threw: ${
+      error instanceof Error ? error.message : String(error)
+    }`;
+    console.error(diagnostic);
+    return { data: null, diagnostic };
   } finally {
     clearTimeout(timeout);
   }

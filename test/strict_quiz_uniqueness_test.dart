@@ -154,4 +154,43 @@ void main() {
     expect(reader, contains('Scrollable.ensureVisible'));
     expect(reader, contains('isLinkedVerse'));
   });
+
+  test(
+      'chapter-study quiz uniqueness no longer competes with Global for the '
+      'same chapter', () {
+    final migration = File(
+      'supabase/migrations/20260819235000_chapter_study_fact_isolation.sql',
+    ).readAsStringSync();
+
+    // On a chapter-study day every audience is deliberately assigned the
+    // same linked chapter, so blocking a church's generation on facts
+    // Global already picked from that identical chapter forces N audiences
+    // to find 5*N mutually-exclusive facts out of one chapter -- this is
+    // what was failing in production. Only an audience's own history should
+    // block it on those days; pop-quiz days keep the original sharing.
+    expect(
+      migration,
+      contains(
+          'select coalesce(has_study_quiz, false) into v_chapter_study'),
+    );
+    expect(
+      migration,
+      contains(
+          "q.church_id = p_church_id\n        or (not v_chapter_study and q.church_id = 'grace_connect_global')"),
+    );
+    expect(
+      migration,
+      contains("v_chapter_study := v_quiz.quiz_mode = 'chapter_study';"),
+    );
+    expect(
+      migration,
+      contains(
+          "q.church_id = v_quiz.church_id\n        or (not v_chapter_study and q.church_id = 'grace_connect_global')"),
+    );
+    expect(migration, isNot(contains("in (p_church_id, 'grace_connect_global')")));
+    expect(
+      migration,
+      isNot(contains("in (v_quiz.church_id, 'grace_connect_global')")),
+    );
+  });
 }

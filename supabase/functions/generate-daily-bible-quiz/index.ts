@@ -238,10 +238,17 @@ async function selectFiveQuestions(
     };
   }
 
+  // A bare "fewer than five facts available" message was indistinguishable
+  // between "the AI returned nothing usable" and "it returned plenty, but
+  // none passed validation" -- these have completely different fixes, and
+  // guessing between them from production data alone is what cost the most
+  // time diagnosing this. The counts below make that visible directly in
+  // quiz_generation_runs.error_message without needing Edge Function logs.
   throw new Error(
-    guaranteeUnique
+    (guaranteeUnique
       ? "Strict quiz uniqueness is enabled, but fewer than five unseen Scripture facts are available. No questions were replaced."
-      : "Fewer than five facts outside the configured recent-history window are available. No questions were replaced.",
+      : "Fewer than five facts outside the configured recent-history window are available. No questions were replaced.") +
+      ` [diagnostic: ${candidates.length} raw candidate(s) received, ${valid.length} passed validation, ${blockedFactKeys.size} fact(s) already blocked]`,
   );
 }
 
@@ -679,6 +686,12 @@ Return valid JSON only in this shape:
   let sharedAiResponse: unknown = null;
   let aiStatus = "not_called";
   let sharedAiAttempted = false;
+  // Populated whenever callHuggingFaceJson comes back empty, so the eventual
+  // "fewer than five facts available" error can say *why* -- an HTTP
+  // failure, a truncated/malformed response, quota, etc. -- instead of
+  // leaving every AI failure mode indistinguishable from genuine fact
+  // exhaustion, which is what made this expensive to diagnose in production.
+  let lastAiDiagnostic: string | null = null;
   const ensureSharedAiResponse = async (blockedFactKeys: Set<string>) => {
     if (sharedAiAttempted) return;
     sharedAiAttempted = true;
@@ -686,16 +699,21 @@ Return valid JSON only in this shape:
       // The baseline is shared for cron scalability, but is seeded with a real
       // audience history (global is processed first for cron runs). Any later
       // church that needs more candidates gets its own rotating targeted calls.
-      sharedAiResponse = await callHuggingFaceJson(
+      const { data, diagnostic } = await callHuggingFaceJson(
         quizPrompt(blockedFactKeys, 0),
         3600,
       );
+      sharedAiResponse = data;
+      if (diagnostic) lastAiDiagnostic = diagnostic;
       aiStatus =
         Array.isArray((sharedAiResponse as AiQuizResponse | null)?.questions)
           ? "received"
           : "invalid";
-    } catch (_) {
+    } catch (error) {
       aiStatus = "failed";
+      lastAiDiagnostic = `callHuggingFaceJson threw: ${
+        error instanceof Error ? error.message : String(error)
+      }`;
     }
   };
   const targetedAiResponse = async (
@@ -703,17 +721,21 @@ Return valid JSON only in this shape:
     variationBatch: number,
   ) => {
     try {
-      const response = await callHuggingFaceJson(
+      const { data, diagnostic } = await callHuggingFaceJson(
         quizPrompt(blockedFactKeys, variationBatch),
         3600,
       );
-      if (Array.isArray((response as AiQuizResponse | null)?.questions)) {
+      if (diagnostic) lastAiDiagnostic = diagnostic;
+      if (Array.isArray((data as AiQuizResponse | null)?.questions)) {
         aiStatus = "received";
-        return response;
+        return data;
       }
       aiStatus = "invalid";
-    } catch (_) {
+    } catch (error) {
       aiStatus = "failed";
+      lastAiDiagnostic = `callHuggingFaceJson threw: ${
+        error instanceof Error ? error.message : String(error)
+      }`;
     }
     return null;
   };
@@ -892,14 +914,17 @@ Return valid JSON only in this shape:
       }
       if (targetedError != null) {
         failedChurches++;
+        const baseMessage = targetedError instanceof Error
+          ? targetedError.message
+          : initialError instanceof Error
+          ? initialError.message
+          : "Five unseen Scripture facts were not available.";
         issues.push({
           church_id: churchId,
           stage: "strict_uniqueness_exhausted",
-          message: targetedError instanceof Error
-            ? targetedError.message
-            : initialError instanceof Error
-            ? initialError.message
-            : "Five unseen Scripture facts were not available.",
+          message: lastAiDiagnostic
+            ? `${baseMessage} [last AI call: ${lastAiDiagnostic}]`
+            : baseMessage,
         });
         continue;
       }
@@ -909,7 +934,9 @@ Return valid JSON only in this shape:
       issues.push({
         church_id: churchId,
         stage: "strict_uniqueness_exhausted",
-        message: "Five unseen Scripture facts were not available.",
+        message: lastAiDiagnostic
+          ? `Five unseen Scripture facts were not available. [last AI call: ${lastAiDiagnostic}]`
+          : "Five unseen Scripture facts were not available.",
       });
       continue;
     }

@@ -208,12 +208,14 @@ async function generateFreshDailyWord(
   chapter: BibleChapterText,
   history: DailyWordHistoryItem[],
 ): Promise<DailyMotivationAiResponse> {
+  let lastDiagnostic: string | null = null;
   for (let attempt = 1; attempt <= 4; attempt++) {
     try {
-      const value = await callHuggingFaceJson(
+      const { data: value, diagnostic } = await callHuggingFaceJson(
         dailyWordPrompt(chapter, history, attempt),
         1000,
       );
+      if (diagnostic) lastDiagnostic = diagnostic;
       const validated = validateMotivation(value, chapter, history);
       if (validated) return validated;
     } catch (_) {
@@ -221,7 +223,8 @@ async function generateFreshDailyWord(
     }
   }
   throw new Error(
-    "AI could not create a distinct, chapter-grounded Daily Word. The scheduled slot was left unchanged and will retry.",
+    "AI could not create a distinct, chapter-grounded Daily Word. The scheduled slot was left unchanged and will retry." +
+      (lastDiagnostic ? ` [diagnostic: ${lastDiagnostic}]` : ""),
   );
 }
 
