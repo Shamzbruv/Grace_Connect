@@ -193,4 +193,45 @@ void main() {
       isNot(contains("in (v_quiz.church_id, 'grace_connect_global')")),
     );
   });
+
+  test(
+      'quiz fact blocking never treats Global mirroring the same content to a '
+      'church as a conflict', () {
+    final migration = File(
+      'supabase/migrations/20260820013000_retire_cross_audience_global_fact_blocking.sql',
+    ).readAsStringSync();
+    final generator = File(
+      'supabase/functions/generate-daily-bible-quiz/index.ts',
+    ).readAsStringSync();
+
+    // Grace Connect Global and every church now always show the identical
+    // quiz (one canonical generation, mirrored everywhere). The pop-quiz-day
+    // rule that counted Global's own picked facts as blocking every church's
+    // generation was written for the old per-audience-independent
+    // architecture -- under mirroring it rejects every legitimate copy of
+    // Global's quiz, because Global's facts always show up as "already
+    // claimed by another audience". Confirmed in production for the
+    // 2026-08-20 prepare cycle: every fact in Global's scheduled quiz
+    // blocked the mirrored insert for a church that had never seen those
+    // facts before. Blocking must be scoped to an audience's own retained
+    // history only, with no cross-audience comparison against Global at all,
+    // on every day type.
+    expect(
+      migration,
+      contains('and q.church_id = p_church_id\n      and ('),
+    );
+    expect(
+      migration,
+      contains('and q.church_id = v_quiz.church_id\n      and ('),
+    );
+    expect(migration, isNot(contains('grace_connect_global')));
+    expect(migration, isNot(contains('v_chapter_study')));
+
+    expect(generator, contains('loadPublishedGlobalSelection'));
+    expect(
+      generator,
+      contains('canonicalSelection = await loadPublishedGlobalSelection('),
+    );
+    expect(generator, contains('hasConflict = canonicalFactKeys.some('));
+  });
 }
