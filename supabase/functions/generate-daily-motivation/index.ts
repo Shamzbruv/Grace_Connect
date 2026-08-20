@@ -2,7 +2,7 @@ import {
   accessTokenFromRequest,
   anonClient,
   authenticatedUser,
-  callHuggingFaceJson,
+  callAiJson,
   createInAppNotifications,
   handleOptions,
   hasCronSecret,
@@ -211,7 +211,11 @@ async function generateFreshDailyWord(
   let lastDiagnostic: string | null = null;
   for (let attempt = 1; attempt <= 4; attempt++) {
     try {
-      const { data: value, diagnostic } = await callHuggingFaceJson(
+      // callAiJson tries Hugging Face first and only calls Gemini as a
+      // backup if Hugging Face fails -- this is what keeps the Daily Word
+      // (always scripture-grounded) generating through a single provider's
+      // outage instead of leaving that day's slot unchanged.
+      const { data: value, diagnostic } = await callAiJson(
         dailyWordPrompt(chapter, history, attempt),
         1000,
       );

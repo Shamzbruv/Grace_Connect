@@ -2,7 +2,7 @@ import {
   accessTokenFromRequest,
   anonClient,
   authenticatedUser,
-  callHuggingFaceJson,
+  callAiJson,
   createInAppNotifications,
   GLOBAL_VISITOR_CHURCH_ID,
   handleOptions,
@@ -770,12 +770,17 @@ Return valid JSON only in this shape:
   let sharedAiResponse: unknown = null;
   let aiStatus = "not_called";
   let sharedAiAttempted = false;
-  // Populated whenever callHuggingFaceJson comes back empty, so the eventual
+  // Populated whenever both AI providers come back empty, so the eventual
   // "fewer than five facts available" error can say *why* -- an HTTP
   // failure, a truncated/malformed response, quota, etc. -- instead of
   // leaving every AI failure mode indistinguishable from genuine fact
   // exhaustion, which is what made this expensive to diagnose in production.
   let lastAiDiagnostic: string | null = null;
+  // Which provider actually produced the current sharedAiResponse -- surfaced
+  // in the run metadata so a Hugging Face outage being silently covered by
+  // Gemini (or vice versa) is visible, not just inferred from the absence of
+  // an error.
+  let lastAiProvider: "huggingface" | "gemini" | null = null;
   const ensureSharedAiResponse = async (blockedFactKeys: Set<string>) => {
     if (sharedAiAttempted) return;
     sharedAiAttempted = true;
@@ -783,19 +788,23 @@ Return valid JSON only in this shape:
       // The baseline is shared for cron scalability, but is seeded with a real
       // audience history (global is processed first for cron runs). Any later
       // church that needs more candidates gets its own rotating targeted calls.
-      const { data, diagnostic } = await callHuggingFaceJson(
+      // callAiJson tries Hugging Face first and only calls Gemini if Hugging
+      // Face fails -- Gemini is a backup provider, not a second independent
+      // source, so the two must never be blended into one prompt response.
+      const { data, diagnostic, provider } = await callAiJson(
         quizPrompt(blockedFactKeys, 0),
         3600,
       );
       sharedAiResponse = data;
       if (diagnostic) lastAiDiagnostic = diagnostic;
+      if (provider) lastAiProvider = provider;
       aiStatus =
         Array.isArray((sharedAiResponse as AiQuizResponse | null)?.questions)
           ? "received"
           : "invalid";
     } catch (error) {
       aiStatus = "failed";
-      lastAiDiagnostic = `callHuggingFaceJson threw: ${
+      lastAiDiagnostic = `callAiJson threw: ${
         error instanceof Error ? error.message : String(error)
       }`;
     }
@@ -805,11 +814,12 @@ Return valid JSON only in this shape:
     variationBatch: number,
   ) => {
     try {
-      const { data, diagnostic } = await callHuggingFaceJson(
+      const { data, diagnostic, provider } = await callAiJson(
         quizPrompt(blockedFactKeys, variationBatch),
         3600,
       );
       if (diagnostic) lastAiDiagnostic = diagnostic;
+      if (provider) lastAiProvider = provider;
       if (Array.isArray((data as AiQuizResponse | null)?.questions)) {
         aiStatus = "received";
         return data;
@@ -817,7 +827,7 @@ Return valid JSON only in this shape:
       aiStatus = "invalid";
     } catch (error) {
       aiStatus = "failed";
-      lastAiDiagnostic = `callHuggingFaceJson threw: ${
+      lastAiDiagnostic = `callAiJson threw: ${
         error instanceof Error ? error.message : String(error)
       }`;
     }
@@ -1220,6 +1230,7 @@ Return valid JSON only in this shape:
       scheduled,
       skipped_existing: skippedExisting,
       failed_churches: failedChurches,
+      ai_provider: lastAiProvider,
       issues,
     },
   });

@@ -313,6 +313,139 @@ export async function callHuggingFaceJson(
   }
 }
 
+// Kept as a single constant so a future model retirement is a one-line fix
+// instead of a hunt through every caller.
+const GEMINI_MODEL = "gemini-3.6-flash";
+
+export async function callGeminiJson(
+  prompt: string,
+  maxNewTokens = 900,
+  timeoutMs = 45_000,
+): Promise<HuggingFaceJsonResult> {
+  const apiKey = Deno.env.get("GEMINI_API_KEY");
+  if (!apiKey) throw new Error("Gemini AI configuration is incomplete.");
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
+      {
+        method: "POST",
+        headers: {
+          "x-goog-api-key": apiKey,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0.7,
+            // This model thinks by default, spending part of the output
+            // token budget on invisible reasoning before it ever writes the
+            // requested JSON -- confirmed live: a small budget was consumed
+            // entirely by reasoning and the response got cut off mid-answer
+            // with finishReason MAX_TOKENS. thinkingBudget: 0 to disable it
+            // outright was tried and rejected as an invalid argument for
+            // this model, so the budget is padded generously instead to
+            // leave room for both the reasoning and the actual JSON.
+            maxOutputTokens: Math.max(1024, Math.min(maxNewTokens * 4, 32768)),
+            responseMimeType: "application/json",
+          },
+        }),
+        signal: controller.signal,
+      },
+    );
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      const diagnostic =
+        `Gemini request failed: HTTP ${response.status} ${body.slice(0, 500)}`;
+      console.error(diagnostic);
+      return { data: null, diagnostic };
+    }
+    const payload = await response.json();
+    const blockReason = payload?.promptFeedback?.blockReason;
+    if (blockReason) {
+      const diagnostic = `Gemini blocked the prompt (${blockReason}).`;
+      console.error(diagnostic);
+      return { data: null, diagnostic };
+    }
+    const candidate = payload?.candidates?.[0];
+    const text = String(
+      (candidate?.content?.parts ?? [])
+        .map((part: { text?: string }) => part?.text ?? "")
+        .join(""),
+    );
+    const parsed = safeJsonParse(text);
+    if (parsed === null) {
+      const diagnostic =
+        `Gemini response was not parseable JSON (finishReason=${
+          String(candidate?.finishReason ?? "?")
+        }): ${text.slice(0, 500)}`;
+      console.error(diagnostic);
+      return { data: null, diagnostic };
+    }
+    return { data: parsed, diagnostic: null };
+  } catch (error) {
+    const diagnostic = `Gemini request threw: ${
+      error instanceof Error ? error.message : String(error)
+    }`;
+    console.error(diagnostic);
+    return { data: null, diagnostic };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export type AiJsonResult = HuggingFaceJsonResult & {
+  // Which provider actually produced `data`, or null when both failed. Lets
+  // a caller record which one is currently doing the real work without
+  // parsing the diagnostic string.
+  provider: "huggingface" | "gemini" | null;
+};
+
+// Hugging Face stays primary (already tuned/prompted against in production).
+// Gemini is the secondary AI provider -- tried automatically whenever Hugging
+// Face fails for any reason (quota, outage, malformed output), before ever
+// falling back to a static/curated bank. This is what makes AI-backed,
+// scripture-grounded generation (the chapter-study Bible Quiz, the Daily
+// Word) resilient to a single provider's outage: the two providers would
+// both have to fail in the same window for generation to actually stop.
+export async function callAiJson(
+  prompt: string,
+  maxNewTokens = 900,
+  timeoutMs = 45_000,
+): Promise<AiJsonResult> {
+  const primary = await callHuggingFaceJson(prompt, maxNewTokens, timeoutMs);
+  if (primary.data !== null) {
+    return { ...primary, provider: "huggingface" };
+  }
+  let secondary: HuggingFaceJsonResult;
+  try {
+    secondary = await callGeminiJson(prompt, maxNewTokens, timeoutMs);
+  } catch (error) {
+    secondary = {
+      data: null,
+      diagnostic: `Gemini call threw: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    };
+  }
+  if (secondary.data !== null) {
+    return { ...secondary, provider: "gemini" };
+  }
+  // Both providers failed. Keep both diagnostics, not just the last one --
+  // "HF is out of credits" and "Gemini is rate-limited" are two different
+  // facts a caller needs to see together, not the second one masking the
+  // first the way a single overwritten variable would.
+  const diagnostic = [
+    primary.diagnostic ? `Hugging Face: ${primary.diagnostic}` : null,
+    secondary.diagnostic ? `Gemini: ${secondary.diagnostic}` : null,
+  ].filter(Boolean).join(" | ") ||
+    "Both AI providers returned no usable response.";
+  return { data: null, diagnostic, provider: null };
+}
+
 function base64Url(input: ArrayBuffer | Uint8Array | string): string {
   const bytes = typeof input === "string"
     ? new TextEncoder().encode(input)
