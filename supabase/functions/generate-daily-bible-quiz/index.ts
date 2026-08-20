@@ -539,6 +539,8 @@ async function publishQuiz(
 async function loadPublishedGlobalSelection(
   client: ReturnType<typeof serviceClient>,
   quizDate: string,
+  expectedChapterKey: string | null,
+  expectedDailyWordId: string | null,
 ): Promise<
   {
     questions: QuizQuestion[];
@@ -546,14 +548,32 @@ async function loadPublishedGlobalSelection(
     reusedRecent: boolean;
   } | null
 > {
+  // "scheduled" counts, not just "published": Global is routinely prepared
+  // well ahead of release, so by the time a still-missing church is retried,
+  // Global's real question set usually already exists but hasn't been
+  // released to members yet. Both states have already passed
+  // replace_daily_bible_quiz_questions (the DB-level fact-conflict guard),
+  // so both are equally safe to mirror.
   const { data: quiz } = await client
     .from("daily_bible_quizzes")
-    .select("id, generation_source")
+    .select(
+      "id, generation_source, quiz_mode, study_chapter_key, source_daily_motivation_id",
+    )
     .eq("church_id", GLOBAL_VISITOR_CHURCH_ID)
     .eq("quiz_date", quizDate)
-    .eq("status", "published")
+    .in("status", ["scheduled", "published"])
     .maybeSingle();
   if (!quiz?.id) return null;
+  // Only mirror Global if it was built for today's exact contract. A stale
+  // or mismatched row (wrong chapter link, wrong quiz_mode) must never be
+  // copied onto another church just because it happens to exist.
+  const contractMatches = expectedChapterKey
+    ? quiz.quiz_mode === "chapter_study" &&
+      quiz.study_chapter_key === expectedChapterKey &&
+      quiz.source_daily_motivation_id === expectedDailyWordId
+    : quiz.quiz_mode === "pop_quiz" && quiz.study_chapter_key == null &&
+      quiz.source_daily_motivation_id == null;
+  if (!contractMatches) return null;
 
   const { data: rows, error } = await client
     .from("daily_bible_quiz_questions")
@@ -830,7 +850,12 @@ Return valid JSON only in this shape:
   // AI call and could produce different content than what Global already
   // has, defeating "always identical" the moment the two runs don't overlap.
   if (!regenerating) {
-    canonicalSelection = await loadPublishedGlobalSelection(client, quizDate);
+    canonicalSelection = await loadPublishedGlobalSelection(
+      client,
+      quizDate,
+      expectedChapterKey,
+      expectedDailyWordId,
+    );
   }
 
   for (const churchId of churchIds) {
