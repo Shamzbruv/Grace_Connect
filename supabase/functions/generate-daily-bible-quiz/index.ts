@@ -529,6 +529,70 @@ async function publishQuiz(
   }
 }
 
+// Every audience is meant to see identical content. If Grace Connect
+// Global's quiz for the day already published in an earlier run (the
+// common case -- Global is processed first and usually succeeds well
+// before a later run tries a church that doesn't have one yet), reuse its
+// exact stored questions instead of making a fresh AI call. This is what
+// makes "always the same as Global" hold across separate invocations, not
+// just within a single run.
+async function loadPublishedGlobalSelection(
+  client: ReturnType<typeof serviceClient>,
+  quizDate: string,
+): Promise<
+  {
+    questions: QuizQuestion[];
+    source: "ai" | "fallback" | "mixed";
+    reusedRecent: boolean;
+  } | null
+> {
+  const { data: quiz } = await client
+    .from("daily_bible_quizzes")
+    .select("id, generation_source")
+    .eq("church_id", GLOBAL_VISITOR_CHURCH_ID)
+    .eq("quiz_date", quizDate)
+    .eq("status", "published")
+    .maybeSingle();
+  if (!quiz?.id) return null;
+
+  const { data: rows, error } = await client
+    .from("daily_bible_quiz_questions")
+    .select(
+      "question_order, question_text, option_a, option_b, option_c, option_d, correct_option_index, correct_answer, explanation, scripture_references, category, difficulty",
+    )
+    .eq("quiz_id", quiz.id)
+    .order("question_order");
+  if (error || !rows || rows.length !== 5) return null;
+
+  const questions: QuizQuestion[] = rows.map((row) => ({
+    question: String(row.question_text ?? ""),
+    options: [
+      String(row.option_a ?? ""),
+      String(row.option_b ?? ""),
+      String(row.option_c ?? ""),
+      String(row.option_d ?? ""),
+    ],
+    correct_option_index: Number(row.correct_option_index),
+    correct_answer: String(row.correct_answer ?? ""),
+    explanation: String(row.explanation ?? ""),
+    scripture_references: Array.isArray(row.scripture_references)
+      ? row.scripture_references.map(String)
+      : [],
+    category: String(row.category ?? "Bible"),
+    difficulty: (["easy", "medium", "hard"].includes(
+        String(row.difficulty),
+      )
+      ? row.difficulty
+      : "easy") as "easy" | "medium" | "hard",
+  }));
+  const source = (["ai", "fallback", "mixed"].includes(
+      String(quiz.generation_source),
+    )
+    ? quiz.generation_source
+    : "ai") as "ai" | "fallback" | "mixed";
+  return { questions, source, reusedRecent: false };
+}
+
 Deno.serve(async (request) => {
   const options = handleOptions(request);
   if (options) return options;
@@ -752,6 +816,22 @@ Return valid JSON only in this shape:
   const issues: GenerationIssue[] = [];
   const expectedChapterKey = studyContext?.chapter.key ?? null;
   const expectedDailyWordId = studyContext?.motivationId ?? null;
+  // Grace Connect Global and every church are meant to see the identical
+  // Daily Bible Quiz every day, not an independently generated variant per
+  // audience. Whichever audience is processed first in this run selects the
+  // real question set; everyone after it reuses that exact selection
+  // instead of making its own AI call -- one generation per day total,
+  // regardless of how many churches exist, not one per church.
+  let canonicalSelection: Awaited<ReturnType<typeof selectFiveQuestions>> | null =
+    null;
+  // Global is very often already published by the time a later run (a cron
+  // retry, or a member opening the app) processes a church that still needs
+  // one -- without this, that later run would go straight to its own fresh
+  // AI call and could produce different content than what Global already
+  // has, defeating "always identical" the moment the two runs don't overlap.
+  if (!regenerating) {
+    canonicalSelection = await loadPublishedGlobalSelection(client, quizDate);
+  }
 
   for (const churchId of churchIds) {
     const existingResult = requestedQuiz
@@ -868,11 +948,32 @@ Return valid JSON only in this shape:
 
     // Scheduled quizzes publish exactly as reviewed. AI is only called when a
     // quiz really needs to be generated or deliberately refreshed.
+    let selected: Awaited<ReturnType<typeof selectFiveQuestions>> | null =
+      null;
+    if (!regenerating && canonicalSelection != null) {
+      // Mirroring is only safe if none of the canonical facts were already
+      // used in *this* church's own retained history -- e.g. Global picked a
+      // fact fresh for itself, but this specific church already asked it in
+      // an earlier quiz. Falling through to this church's own generation
+      // below is what keeps that case from turning into "no quiz today",
+      // the exact failure this whole change exists to prevent.
+      const canonicalFactKeys = canonicalSelection.questions.flatMap((q) =>
+        canonicalQuizFactKeys(q)
+      );
+      const hasConflict = canonicalFactKeys.some((key) =>
+        blockedFactKeys.has(key)
+      );
+      if (!hasConflict) selected = canonicalSelection;
+    }
+    if (selected != null) {
+      // Another audience earlier in this same run already produced the
+      // day's real question set; every later audience gets the identical
+      // five questions instead of triggering its own AI call.
+    } else {
     await ensureSharedAiResponse(blockedFactKeys);
     const seed = `${quizDate}:${churchId}:${
       regenerating ? crypto.randomUUID() : "scheduled"
     }`;
-    let selected: Awaited<ReturnType<typeof selectFiveQuestions>> | null = null;
     try {
       selected = await selectFiveQuestions(
         sharedAiResponse,
@@ -929,6 +1030,8 @@ Return valid JSON only in this shape:
         continue;
       }
     }
+    }
+    if (!regenerating && selected != null) canonicalSelection = selected;
     if (selected == null) {
       failedChurches++;
       issues.push({
