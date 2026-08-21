@@ -70,6 +70,10 @@ class _ShareCardCustomizerSheetState
   @override
   void initState() {
     super.initState();
+    _loadBackgrounds();
+  }
+
+  void _loadBackgrounds() {
     _backgroundsFuture = QuoteBackgroundCatalogue.load();
   }
 
@@ -127,13 +131,45 @@ class _ShareCardCustomizerSheetState
     return FutureBuilder<List<QuoteBackground>>(
       future: _backgroundsFuture,
       builder: (context, snapshot) {
-        final backgrounds = snapshot.data;
-        if (backgrounds == null) {
+        // A FutureBuilder that only checks snapshot.data never notices a
+        // future that completed with an error -- data just stays null
+        // forever, which looks identical to "still loading" from the
+        // user's side. This is exactly what happened when the backgrounds
+        // asset wasn't registered in pubspec.yaml: the load failed
+        // instantly, but the sheet spun indefinitely instead of saying so.
+        if (snapshot.connectionState != ConnectionState.done) {
           return const SizedBox(
             height: 240,
             child: Center(child: CircularProgressIndicator()),
           );
         }
+        if (snapshot.hasError) {
+          return SizedBox(
+            height: 200,
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Could not load share backgrounds.\n${snapshot.error}',
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.bodyMedium,
+                    ),
+                    const SizedBox(height: 12),
+                    TextButton(
+                      onPressed: () =>
+                          setState(_loadBackgrounds),
+                      child: const Text('Retry'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }
+        final backgrounds = snapshot.data ?? const [];
         if (backgrounds.isEmpty) {
           return const SizedBox(
             height: 160,

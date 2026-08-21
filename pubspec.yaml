@@ -69,6 +69,12 @@ flutter:
   uses-material-design: true
   assets:
     - assets/
+    # pubspec asset directory entries are not recursive -- "assets/" only
+    # bundles files directly inside it, not a nested folder's contents.
+    # Without this line the 12 backgrounds and their manifest silently never
+    # shipped, and the customizer's FutureBuilder had no error branch, so it
+    # spun forever instead of showing why.
+    - assets/quote_backgrounds/
 
 flutter_launcher_icons:
   android: true
