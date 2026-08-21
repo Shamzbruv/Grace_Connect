@@ -1,21 +1,29 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
 
-/// One curated background from assets/quote_backgrounds/, loaded from
+// Public Supabase Storage bucket -- adding, replacing, or fixing a
+// background is now an upload, not an app release. The bucket is public
+// (no user data in these images, same trust level as the app icon already
+// served from the bundle) and its catalogue_manifest.json is the same
+// shape the app used to read out of assets/, just fetched over HTTP now.
+const String _quoteBackgroundsBaseUrl =
+    'https://nimgsgnkcvddomrgkawb.supabase.co/storage/v1/object/public/quote-backgrounds/quote_backgrounds';
+
+/// One curated background served from Supabase Storage, described by
 /// catalogue_manifest.json rather than hardcoded -- new backgrounds can be
-/// added by dropping a PNG and a manifest entry, no Dart changes needed.
+/// added by uploading a PNG and a manifest entry, no app release needed.
 class QuoteBackground {
   const QuoteBackground({
-    required this.assetPath,
+    required this.imageUrl,
     required this.title,
     required this.category,
     required this.recommendedTextColor,
     required this.safeTextArea,
   });
 
-  final String assetPath;
+  final String imageUrl;
   final String title;
   final String category;
   final Color recommendedTextColor;
@@ -23,7 +31,7 @@ class QuoteBackground {
 
   factory QuoteBackground.fromManifestEntry(Map<String, dynamic> entry) {
     return QuoteBackground(
-      assetPath: 'assets/quote_backgrounds/${entry['file']}',
+      imageUrl: '$_quoteBackgroundsBaseUrl/${entry['file']}',
       title: entry['title']?.toString() ?? 'Background',
       category: entry['category']?.toString() ?? '',
       recommendedTextColor:
@@ -50,9 +58,16 @@ class QuoteBackgroundCatalogue {
   static Future<List<QuoteBackground>> load() async {
     final cached = _cache;
     if (cached != null) return cached;
-    final raw = await rootBundle
-        .loadString('assets/quote_backgrounds/catalogue_manifest.json');
-    final decoded = jsonDecode(raw) as Map<String, dynamic>;
+    final response = await http
+        .get(Uri.parse('$_quoteBackgroundsBaseUrl/catalogue_manifest.json'))
+        .timeout(const Duration(seconds: 15));
+    if (response.statusCode != 200) {
+      throw Exception(
+        'Could not reach the share backgrounds (HTTP ${response.statusCode}). '
+        'Check your connection and try again.',
+      );
+    }
+    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
     final entries = (decoded['backgrounds'] as List<dynamic>? ?? [])
         .cast<Map<String, dynamic>>()
         .map(QuoteBackground.fromManifestEntry)

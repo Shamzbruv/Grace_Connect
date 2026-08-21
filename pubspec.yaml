@@ -69,12 +69,12 @@ flutter:
   uses-material-design: true
   assets:
     - assets/
-    # pubspec asset directory entries are not recursive -- "assets/" only
-    # bundles files directly inside it, not a nested folder's contents.
-    # Without this line the 12 backgrounds and their manifest silently never
-    # shipped, and the customizer's FutureBuilder had no error branch, so it
-    # spun forever instead of showing why.
-    - assets/quote_backgrounds/
+    # Quote/scripture share backgrounds moved to a public Supabase Storage
+    # bucket (see lib/models/quote_background.dart) so a new background is
+    # an upload, not an app release -- they are intentionally not bundled
+    # here. The source PNGs + manifest live in
+    # supabase/storage_seed/quote_backgrounds/ as the upload record, not as
+    # app assets.
 
 flutter_launcher_icons:
   android: true

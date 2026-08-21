@@ -1,5 +1,6 @@
 import 'dart:ui';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -59,15 +60,21 @@ class ShareableQuoteCard extends StatelessWidget {
                   sigmaY: style.blurSigma,
                   tileMode: TileMode.decal,
                 ),
-                child: Image.asset(
-                  background.assetPath,
+                child: CachedNetworkImage(
+                  imageUrl: background.imageUrl,
                   fit: BoxFit.cover,
-                  // A missing/corrupt background must never crash the whole
-                  // card -- the quote and watermark are the part that
-                  // actually has to reach the person it's shared with.
-                  errorBuilder: (context, error, stackTrace) => Container(
-                    color: AppColors.primary,
-                  ),
+                  fadeInDuration: Duration.zero,
+                  // A background that's still downloading, or failed to
+                  // (offline, storage outage), must never crash the whole
+                  // card or show a blank hole -- the quote and watermark are
+                  // the part that actually has to reach whoever it's shared
+                  // with. _share() precaches this same URL before capture,
+                  // so in the normal path this placeholder never actually
+                  // paints -- it's the fallback for whatever precache missed.
+                  placeholder: (context, url) =>
+                      Container(color: AppColors.primary),
+                  errorWidget: (context, url, error) =>
+                      Container(color: AppColors.primary),
                 ),
               ),
             ),

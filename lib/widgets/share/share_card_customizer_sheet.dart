@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:ui' as ui;
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -87,6 +88,17 @@ class _ShareCardCustomizerSheetState
   Future<void> _share(QuoteBackground background) async {
     setState(() => _isSharing = true);
     try {
+      // The card background now streams from Supabase Storage instead of
+      // the app bundle -- unlike a bundled asset, it is not guaranteed to
+      // have finished decoding by the time the user taps Share. Precaching
+      // it here forces that wait explicitly, so the capture below never
+      // bakes in a half-loaded placeholder instead of the real image.
+      if (mounted) {
+        await precacheImage(
+          CachedNetworkImageProvider(background.imageUrl),
+          context,
+        );
+      }
       await WidgetsBinding.instance.endOfFrame;
       final boundary = _previewKey.currentContext?.findRenderObject()
           as RenderRepaintBoundary?;
@@ -249,9 +261,17 @@ class _ShareCardCustomizerSheetState
                           ),
                           child: ClipRRect(
                             borderRadius: BorderRadius.circular(9),
-                            child: Image.asset(
-                              option.assetPath,
+                            child: CachedNetworkImage(
+                              imageUrl: option.imageUrl,
                               fit: BoxFit.cover,
+                              placeholder: (context, url) => Container(
+                                color: theme.colorScheme.surfaceContainerHighest,
+                              ),
+                              errorWidget: (context, url, error) => Container(
+                                color: theme.colorScheme.surfaceContainerHighest,
+                                child: const Icon(Icons.broken_image_outlined,
+                                    size: 18),
+                              ),
                             ),
                           ),
                         ),

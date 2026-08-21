@@ -9,7 +9,11 @@ import 'package:grace_connect/widgets/share/shareable_quote_card.dart';
 
 QuoteBackground _sampleBackground({String safeTextArea = 'center'}) {
   return QuoteBackground(
-    assetPath: 'assets/quote_backgrounds/01_midnight_grace.png',
+    // A placeholder domain, not the real Storage bucket: this exercises
+    // the network-image code path (CachedNetworkImage's placeholder/error
+    // handling) without making these widget tests depend on a live
+    // network call, which would be slow and flaky in CI either way.
+    imageUrl: 'https://example.invalid/01_midnight_grace.png',
     title: 'Midnight Grace',
     category: 'Dark / Prayer',
     recommendedTextColor: Colors.white,
@@ -27,8 +31,11 @@ void main() {
         'recommended_text_color': 'white',
         'safe_text_area': 'center',
       });
-      expect(background.assetPath,
-          'assets/quote_backgrounds/01_midnight_grace.png');
+      expect(
+        background.imageUrl,
+        'https://nimgsgnkcvddomrgkawb.supabase.co/storage/v1/object/public/'
+        'quote-backgrounds/quote_backgrounds/01_midnight_grace.png',
+      );
       expect(background.recommendedTextColor, Colors.white);
     });
 
@@ -49,16 +56,19 @@ void main() {
     });
   });
 
-  // Reads the manifest straight off disk (not through Flutter's rootBundle,
-  // which some environments fail to populate under `flutter test` even
-  // though it works in a real build) -- this still catches a manifest that
-  // doesn't parse, references a missing file, or has drifted from what's
-  // actually on disk, which is the real risk here.
-  test('the on-disk manifest parses and matches the bundled images', () {
-    final manifestFile =
-        File('assets/quote_backgrounds/catalogue_manifest.json');
+  // The images live in Supabase Storage now, not the app bundle -- there is
+  // no local copy to fetch over the network in a unit test. What's checked
+  // here instead: supabase/storage_seed/quote_backgrounds/ (the record of
+  // what was actually uploaded, and the source for any future re-upload)
+  // still has a matching PNG for every manifest entry, and
+  // QuoteBackground.fromManifestEntry builds a URL actually pointing at
+  // the real bucket -- so a typo in the base URL or a manifest/seed-folder
+  // drift fails this test instead of surfacing as a blank card in prod.
+  test('the seed manifest parses and matches the uploaded images', () {
+    final manifestFile = File(
+        'supabase/storage_seed/quote_backgrounds/catalogue_manifest.json');
     expect(manifestFile.existsSync(), isTrue,
-        reason: 'catalogue_manifest.json must ship next to the images');
+        reason: 'catalogue_manifest.json must ship next to the seed images');
 
     final decoded =
         jsonDecode(manifestFile.readAsStringSync()) as Map<String, dynamic>;
@@ -71,10 +81,18 @@ void main() {
     for (final entry in entries) {
       final background = QuoteBackground.fromManifestEntry(entry);
       expect(background.title, isNotEmpty);
-      final imageFile = File(background.assetPath);
-      expect(imageFile.existsSync(), isTrue,
-          reason: '${background.assetPath} is listed in the manifest but '
-              'missing from disk');
+      expect(
+        background.imageUrl,
+        startsWith('https://nimgsgnkcvddomrgkawb.supabase.co/storage/v1/'
+            'object/public/quote-backgrounds/quote_backgrounds/'),
+      );
+      expect(background.imageUrl, endsWith('${entry['file']}'));
+      final seedFile =
+          File('supabase/storage_seed/quote_backgrounds/${entry['file']}');
+      expect(seedFile.existsSync(), isTrue,
+          reason: '${entry['file']} is listed in the manifest but missing '
+              'from supabase/storage_seed/quote_backgrounds/ -- nothing '
+              'would exist to re-upload if the bucket needed restoring');
     }
   });
 
