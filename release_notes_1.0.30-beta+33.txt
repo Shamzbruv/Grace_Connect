@@ -1,0 +1,10 @@
+Grace Connect 1.0.30-beta+33
+
+- Fixed the new "customize and share" feature (introduced in this same beta) opening to an endless loading spinner. The 12 background images never actually shipped in the app due to a packaging bug, and the loading screen had no way to say so -- it just spun forever. Backgrounds now load from Supabase Storage instead of the app itself, so adding, fixing, or replacing one going forward is an upload, not another app release.
+- Fixed auto-attendance marking members "late" when they were genuinely on time. Automatic geofence check-in, manual sign-in, and a third internal check-in path all now grade lateness against the moment the member actually arrived, not the moment the record was written.
+- Fixed a misleading "check your connection" error shown during manual check-in. The real cause was GPS struggling to get a fix indoors (common inside a church building), not a network issue. Location lookup now falls back through medium and reduced accuracy instead of giving up after one high-accuracy attempt, and shows an honest, accurate message when it still can't get a fix -- and only that specific message, never a raw technical error.
+- Fixed iOS auto-attendance silently requiring less than it actually needs: the app only ever enforced "Always" location access on Android, even though iOS's monitoring mechanism also needs it to survive the app backgrounding.
+- Battery optimization silently blocking background auto-attendance is now shown directly on the Attendance screen with a one-tap fix.
+- The first-time auto-attendance prompt now explains why the permission is needed, gives real step-by-step instructions for both Android and iOS, and clearly states the consequence of declining.
+- Added real charted attendance analytics for pastors/admins: a stacked present/late/remote/absent breakdown, an attendance-rate trend line, and an accessible data table.
+- Added customizable, branded sharing for the Daily Word and Bible verses: choose from 12 curated backgrounds, adjust blur and darkness, pick a font and text color, and share -- every card carries the Grace Connect watermark.
