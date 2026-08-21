@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
-import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../models/bible_data.dart';
 import '../../models/user_profile.dart';
@@ -14,6 +13,7 @@ import '../../services/bible_service.dart';
 import '../../services/direct_message_service.dart';
 import '../../services/user_service.dart';
 import '../../theme/app_colors.dart';
+import '../../widgets/share/share_card_customizer_sheet.dart';
 import '../messages/message_thread_screen.dart';
 
 class BibleReaderScreen extends StatefulWidget {
@@ -542,7 +542,37 @@ class _BibleReaderScreenState extends State<BibleReaderScreen>
   ) async {
     final text = _selectedPassageText(verses, reference, translationName);
     if (text.isEmpty) return;
-    await SharePlus.instance.share(ShareParams(text: text));
+
+    final selected = _selectedVerses.toList()..sort();
+    final quoteLines = <String>[];
+    for (final verseNumber in selected) {
+      final verse = verses.firstWhere(
+        (item) {
+          if (item is! Map) return false;
+          return (int.tryParse((item['verse'] ?? '').toString()) ?? -1) ==
+              verseNumber;
+        },
+        orElse: () => null,
+      );
+      if (verse is! Map) continue;
+      final verseText = (verse['text'] ?? '').toString().trim();
+      if (verseText.isNotEmpty) quoteLines.add(verseText);
+    }
+    if (quoteLines.isEmpty) return;
+
+    final versesLabel = selected.length > 1
+        ? '$reference:${selected.first}-${selected.last}'
+        : '$reference:${selected.first}';
+
+    await showShareCardCustomizer(
+      context,
+      quoteText: quoteLines.join(' '),
+      attribution: '$versesLabel ($translationName)',
+      shareFileName:
+          'grace_scripture_${reference.replaceAll(' ', '_').replaceAll(':', '_')}',
+      shareText: text,
+      shareSubject: versesLabel,
+    );
   }
 
   Future<void> _toggleHighlightsForSelection() async {

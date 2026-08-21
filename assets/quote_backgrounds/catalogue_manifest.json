@@ -1,0 +1,111 @@
+{
+  "project": "Grace Connect",
+  "purpose": "Scripture and daily quote customizable backgrounds",
+  "format": "PNG",
+  "dimensions": "1080x1080",
+  "brand_palette": {
+    "primary": "#10141C",
+    "primary_variant": "#1E2430",
+    "secondary": "#D2982C",
+    "gold_highlight": "#FFBF00",
+    "background": "#F8F9FA"
+  },
+  "backgrounds": [
+    {
+      "file": "01_midnight_grace.png",
+      "title": "Midnight Grace",
+      "category": "Dark / Prayer",
+      "recommended_text_color": "white",
+      "safe_text_area": "center",
+      "size": "1080x1080"
+    },
+    {
+      "file": "02_morning_mercy.png",
+      "title": "Morning Mercy",
+      "category": "Light / Hope",
+      "recommended_text_color": "#10141C",
+      "safe_text_area": "upper-center",
+      "size": "1080x1080"
+    },
+    {
+      "file": "03_living_water.png",
+      "title": "Living Water",
+      "category": "Nature / Peace",
+      "recommended_text_color": "white",
+      "safe_text_area": "upper-center",
+      "size": "1080x1080"
+    },
+    {
+      "file": "04_quiet_prayer.png",
+      "title": "Quiet Prayer",
+      "category": "Dark / Reflection",
+      "recommended_text_color": "white",
+      "safe_text_area": "center-right",
+      "size": "1080x1080"
+    },
+    {
+      "file": "05_faith_lines.png",
+      "title": "Faith Lines",
+      "category": "Minimal / Modern",
+      "recommended_text_color": "#10141C",
+      "safe_text_area": "center",
+      "size": "1080x1080"
+    },
+    {
+      "file": "06_open_heavens.png",
+      "title": "Open Heavens",
+      "category": "Sky / Worship",
+      "recommended_text_color": "#10141C",
+      "safe_text_area": "center",
+      "size": "1080x1080"
+    },
+    {
+      "file": "07_cross_glow.png",
+      "title": "Cross Glow",
+      "category": "Faith / Worship",
+      "recommended_text_color": "white",
+      "safe_text_area": "left-center",
+      "size": "1080x1080"
+    },
+    {
+      "file": "08_cathedral_glass.png",
+      "title": "Cathedral Glass",
+      "category": "Art / Celebration",
+      "recommended_text_color": "white",
+      "safe_text_area": "center",
+      "size": "1080x1080"
+    },
+    {
+      "file": "09_grace_garden.png",
+      "title": "Grace Garden",
+      "category": "Nature / Gratitude",
+      "recommended_text_color": "#10141C",
+      "safe_text_area": "center",
+      "size": "1080x1080"
+    },
+    {
+      "file": "10_connected_in_grace.png",
+      "title": "Connected in Grace",
+      "category": "Community / Fellowship",
+      "recommended_text_color": "white",
+      "safe_text_area": "center",
+      "size": "1080x1080"
+    },
+    {
+      "file": "11_scripture_parchment.png",
+      "title": "Scripture Parchment",
+      "category": "Classic / Bible",
+      "recommended_text_color": "#1A1A1A",
+      "safe_text_area": "center",
+      "size": "1080x1080"
+    },
+    {
+      "file": "12_golden_horizon.png",
+      "title": "Golden Horizon",
+      "category": "Hope / Encouragement",
+      "recommended_text_color": "#10141C",
+      "safe_text_area": "upper-center",
+      "size": "1080x1080"
+    }
+  ]
+}

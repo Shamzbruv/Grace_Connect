@@ -1,11 +1,8 @@
 import 'dart:async';
-import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
-import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../models/daily_motivation.dart';
@@ -13,6 +10,7 @@ import '../../models/bible_passage_reference.dart';
 import '../../services/daily_motivation_service.dart';
 import '../../services/notification_service.dart';
 import '../../theme/app_colors.dart';
+import '../../widgets/share/share_card_customizer_sheet.dart';
 import '../../widgets/ui/app_feedback.dart';
 import '../../widgets/ui/app_loader.dart';
 import '../bible/bible_reader_screen.dart';
@@ -28,7 +26,6 @@ class DailyWordScreen extends StatefulWidget {
 
 class _DailyWordScreenState extends State<DailyWordScreen> {
   final _service = DailyMotivationService();
-  final _dailyWordShareKey = GlobalKey();
   late Future<_DailyWordData> _future;
 
   @override
@@ -83,44 +80,16 @@ class _DailyWordScreenState extends State<DailyWordScreen> {
     );
   }
 
-  Future<void> _shareDailyWordImage(DailyMotivation motivation) async {
-    try {
-      await WidgetsBinding.instance.endOfFrame;
-      final boundary = _dailyWordShareKey.currentContext?.findRenderObject()
-          as RenderRepaintBoundary?;
-      if (boundary == null) {
-        throw Exception('Daily Word card is not ready yet.');
-      }
-
-      final image = await boundary.toImage(pixelRatio: 3);
-      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-      final pngBytes = byteData?.buffer.asUint8List();
-      if (pngBytes == null || pngBytes.isEmpty) {
-        throw Exception('Could not prepare Daily Word image.');
-      }
-
-      await SharePlus.instance.share(
-        ShareParams(
-          files: [
-            XFile.fromData(
-              pngBytes,
-              mimeType: 'image/png',
-              name:
-                  'grace_daily_word_${DateFormat('yyyyMMdd').format(motivation.publishDate.toLocal())}.png',
-            ),
-          ],
-          text: 'Grace Connect Daily Word • ${motivation.scriptureReference}',
-          subject: motivation.title,
-        ),
-      );
-    } catch (error) {
-      if (!mounted) return;
-      AppFeedback.show(
-        context,
-        'Could not share Daily Word image: $error',
-        type: AppFeedbackType.error,
-      );
-    }
+  Future<void> _shareDailyWordImage(DailyMotivation motivation) {
+    return showShareCardCustomizer(
+      context,
+      quoteText: motivation.message,
+      attribution: motivation.scriptureReference,
+      shareFileName:
+          'grace_daily_word_${DateFormat('yyyyMMdd').format(motivation.publishDate.toLocal())}',
+      shareText: 'Grace Connect Daily Word • ${motivation.scriptureReference}',
+      shareSubject: motivation.title,
+    );
   }
 
   void _openStudyChapter(DailyMotivation motivation) {
@@ -190,10 +159,7 @@ class _DailyWordScreenState extends State<DailyWordScreen> {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(18, 12, 18, 28),
               children: [
-                RepaintBoundary(
-                  key: _dailyWordShareKey,
-                  child: _DailyWordHero(motivation: data!.selected!),
-                ),
+                _DailyWordHero(motivation: data!.selected!),
                 const SizedBox(height: 12),
                 if (data.selected!.hasStudyQuiz) ...[
                   _QuizStudyNotice(
