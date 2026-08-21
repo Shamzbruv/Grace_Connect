@@ -254,10 +254,12 @@ class AttendanceService {
       return;
     }
 
-    if (_usesNativeAndroidGeofence && permission != LocationPermission.always) {
+    if (_needsAlwaysLocationPermission &&
+        permission != LocationPermission.always) {
       _setMonitoring(false);
       _updateDebugStatus(
-        'Auto-attendance needs “Allow all the time” location access so Android can monitor the church geofence when the app is closed.',
+        'Auto-attendance needs “Always” location access so it can detect '
+        'your arrival even when the app is closed.',
       );
       return;
     }
@@ -271,29 +273,32 @@ class AttendanceService {
   bool get _usesNativeAndroidGeofence =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
+  // iOS auto-attendance runs on a continuous Geolocator position stream
+  // (see _startMonitoring), not the native geofence API Android uses -- but
+  // that stream is paused by iOS the moment the app truly backgrounds
+  // unless the app holds "Always" location access, same as Android's
+  // background geofence. Without this, iOS silently "starts" monitoring on
+  // While-Using-App access and then goes quiet the instant the phone locks,
+  // which looks identical to auto-attendance being broken.
+  bool get _needsAlwaysLocationPermission => !kIsWeb;
+
   /// Requests only the permissions needed for user-enabled auto-attendance.
   /// UI callers must show the prominent background-location disclosure first.
+  /// Both Android and iOS request "Always" here -- permission_handler
+  /// drives each platform's real native flow for that upgrade (Android's
+  /// second system dialog; iOS's Settings hand-off after the first grant).
   Future<bool> requestAutoAttendancePermissions() async {
     if (kIsWeb) return false;
 
-    if (_usesNativeAndroidGeofence) {
-      final foreground =
-          await permissions.Permission.locationWhenInUse.request();
-      if (!foreground.isGranted) return false;
+    final foreground =
+        await permissions.Permission.locationWhenInUse.request();
+    if (!foreground.isGranted) return false;
 
-      var background = await permissions.Permission.locationAlways.status;
-      if (!background.isGranted) {
-        background = await permissions.Permission.locationAlways.request();
-      }
-      return background.isGranted;
+    var background = await permissions.Permission.locationAlways.status;
+    if (!background.isGranted) {
+      background = await permissions.Permission.locationAlways.request();
     }
-
-    var permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-    }
-    return permission == LocationPermission.always ||
-        permission == LocationPermission.whileInUse;
+    return background.isGranted;
   }
 
   // Debug / Status Streams
@@ -1925,7 +1930,7 @@ class AttendanceService {
       permission: permission,
       hasChurchLocation: churchLocation != null,
       hasServiceSchedule: hasSchedule,
-      requiresBackgroundLocation: _usesNativeAndroidGeofence,
+      requiresBackgroundLocation: _needsAlwaysLocationPermission,
       activeServiceName: activeServiceName,
       batteryOptimizationIgnored: batteryOptimizationIgnored,
     );

@@ -67,9 +67,23 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   }
 
   Future<void> _toggleAutoCheckIn(bool value) async {
-    if (value && !kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+    if (value && !kIsWeb) {
       final accepted = await _showBackgroundLocationDisclosure();
-      if (!accepted) return;
+      if (!accepted) {
+        // Declining used to fail completely silently -- the toggle just
+        // never turned on and nothing explained why, or what it meant for
+        // every future service.
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Auto-Attendance stays off. You\'ll need to open the app and tap Manual Sign-In yourself at every service.',
+            ),
+            duration: Duration(seconds: 5),
+          ),
+        );
+        return;
+      }
       final granted =
           await _attendanceService.requestAutoAttendancePermissions();
       if (!granted) {
@@ -78,11 +92,15 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('auto_check_in', false);
         if (!mounted) return;
+        final settingsPath = defaultTargetPlatform == TargetPlatform.iOS
+            ? 'Settings → Grace Connect → Location → Always'
+            : 'Location settings → Grace Connect → Allow all the time';
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
+          SnackBar(
             content: Text(
-              'Auto-attendance stays off until Location is set to “Allow all the time” in Android settings.',
+              'Auto-attendance stays off until location access is set to "Always" ($settingsPath). Until then, you\'ll need to tap Manual Sign-In at every service.',
             ),
+            duration: const Duration(seconds: 6),
           ),
         );
         return;
@@ -106,14 +124,90 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   }
 
   Future<bool> _showBackgroundLocationDisclosure() async {
+    final isIOS = defaultTargetPlatform == TargetPlatform.iOS;
     final result = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Background location for auto-attendance'),
-        content: const Text(
-          'When you turn on Auto-Attendance, Grace Connect uses your precise location in the background—even when the app is closed—to detect when you enter and remain inside your church’s saved geofence during a scheduled service. '
-          'It does not store or share a trail of where you travel. Only the attendance check-in result is saved. Turning Auto-Attendance off removes the Android geofence.',
+        title: const Text('Let Grace Connect check you in automatically'),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'So you can enjoy service without pulling out your phone: '
+                'Grace Connect checks your location in the background — even '
+                'while the app is closed — to detect when you\'re at church '
+                'during a scheduled service, and marks you present '
+                'automatically. It does not track or store where else you '
+                'go; only the check-in result is saved. Turning this off '
+                'removes the background location access immediately.',
+              ),
+              const SizedBox(height: 16),
+              Text(
+                isIOS ? 'On iPhone:' : 'On Android:',
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 6),
+              if (isIOS) ...[
+                _DisclosureStep(1, 'Tap Continue below.'),
+                _DisclosureStep(
+                  2,
+                  'When iOS asks for your location, choose '
+                  '"Allow While Using App".',
+                ),
+                _DisclosureStep(
+                  3,
+                  'Open Settings → Grace Connect → Location, and change it '
+                  'to "Always". iOS sometimes offers this automatically '
+                  'after a few days of use instead — either way works.',
+                ),
+                _DisclosureStep(
+                  4,
+                  'On that same screen, make sure "Precise Location" is '
+                  'turned on.',
+                ),
+              ] else ...[
+                _DisclosureStep(1, 'Tap Continue below.'),
+                _DisclosureStep(
+                  2,
+                  'Android will ask twice. First choose '
+                  '"While using the app".',
+                ),
+                _DisclosureStep(
+                  3,
+                  'Android will then ask again — this time choose '
+                  '"Allow all the time". This second step is required; '
+                  'without it, Android won\'t detect you once the app is '
+                  'closed.',
+                ),
+              ],
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.info_outline, size: 18, color: Colors.orange),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'If you skip this, that\'s completely fine — you\'ll '
+                        'just need to open the app and tap Manual Sign-In '
+                        'yourself at every single service.',
+                        style: TextStyle(fontSize: 13),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
         actions: [
           TextButton(
@@ -1251,6 +1345,46 @@ class _WeekdayLabel extends StatelessWidget {
               color: Theme.of(context).colorScheme.onSurfaceVariant,
               fontWeight: FontWeight.w800,
             ),
+      ),
+    );
+  }
+}
+
+class _DisclosureStep extends StatelessWidget {
+  const _DisclosureStep(this.number, this.text);
+
+  final int number;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 20,
+            height: 20,
+            margin: const EdgeInsets.only(top: 1),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.primaryContainer,
+              shape: BoxShape.circle,
+            ),
+            child: Center(
+              child: Text(
+                '$number',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  color: Theme.of(context).colorScheme.onPrimaryContainer,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(child: Text(text, style: const TextStyle(fontSize: 13.5))),
+        ],
       ),
     );
   }

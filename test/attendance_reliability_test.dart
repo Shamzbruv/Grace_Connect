@@ -347,4 +347,70 @@ void main() {
     );
     expect(mapPicker, contains('await _moveCameraToSelectedPosition();'));
   });
+
+  test(
+      'iOS auto-attendance requires "Always" location the same as Android, '
+      'and the disclosure dialog explains why, how, and the cost of '
+      'declining on both platforms', () {
+    final service =
+        File('lib/services/attendance_service.dart').readAsStringSync();
+    final screen = File('lib/screens/attendance/attendance_screen.dart')
+        .readAsStringSync();
+
+    // iOS runs auto-attendance on a continuous Geolocator position stream,
+    // not Android's native geofence -- but that stream is paused by iOS the
+    // instant the app backgrounds unless location access is "Always". The
+    // old code only enforced/required this on Android, so iOS could
+    // "start monitoring" on While-Using-App access and then silently stop
+    // the moment the phone locked -- indistinguishable from being broken.
+    expect(service, contains('bool get _needsAlwaysLocationPermission => !kIsWeb;'));
+    expect(
+      service,
+      isNot(contains(
+          'if (_usesNativeAndroidGeofence && permission != LocationPermission.always)')),
+      reason: 'the Always-permission gate must cover iOS too, not only Android',
+    );
+    expect(
+      service,
+      contains(
+          'if (_needsAlwaysLocationPermission &&\n        permission != LocationPermission.always)'),
+    );
+    expect(
+      service,
+      isNot(contains('if (_usesNativeAndroidGeofence) {\n      final foreground =')),
+      reason: 'requestAutoAttendancePermissions must request Always on both '
+          'platforms, not branch away from it on iOS',
+    );
+    expect(
+      service,
+      contains('requiresBackgroundLocation: _needsAlwaysLocationPermission,'),
+    );
+
+    // The disclosure dialog must cover both platforms (it used to be shown
+    // on Android only), explain why the permission is needed, give real
+    // step-by-step instructions for each OS, and be explicit that skipping
+    // it just means manual sign-in every service -- not a silent failure.
+    expect(
+      screen,
+      isNot(contains(
+          'if (value && !kIsWeb && defaultTargetPlatform == TargetPlatform.android)')),
+      reason: 'the disclosure dialog must show on iOS too, not Android only',
+    );
+    expect(screen, contains('final isIOS = defaultTargetPlatform == TargetPlatform.iOS;'));
+    expect(screen, contains('"Allow While Using App"'));
+    expect(screen, contains('"Always"'));
+    expect(screen, contains('"While using the app"'));
+    expect(screen, contains('"Allow all the time"'));
+    expect(screen, contains('Precise Location'));
+    expect(
+      screen,
+      contains('you\'ll just need to open the app and tap Manual Sign-In'),
+    );
+    // Declining used to do nothing visible at all.
+    expect(
+      screen,
+      contains(
+          'You\'ll need to open the app and tap Manual Sign-In yourself at every service.'),
+    );
+  });
 }
