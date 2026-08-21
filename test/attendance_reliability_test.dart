@@ -402,15 +402,23 @@ void main() {
     expect(screen, contains('"While using the app"'));
     expect(screen, contains('"Allow all the time"'));
     expect(screen, contains('Precise Location'));
+    // `screen` is the file's raw, unparsed source bytes (read via
+    // File.readAsStringSync), not the compiled runtime string -- an
+    // apostrophe in the source is literally written as \' (backslash then
+    // quote) inside a single-quoted Dart string literal. Checking for it
+    // with a normal 'you\'ll' literal here compiles down to a plain quote
+    // with no backslash, which can never match the raw source's escaped
+    // form. \\\' produces the literal two-character backslash+quote this
+    // comparison actually needs.
     expect(
       screen,
-      contains('you\'ll just need to open the app and tap Manual Sign-In'),
+      contains('you\\\'ll just need to open the app and tap Manual Sign-In'),
     );
     // Declining used to do nothing visible at all.
     expect(
       screen,
       contains(
-          'You\'ll need to open the app and tap Manual Sign-In yourself at every service.'),
+          'You\\\'ll need to open the app and tap Manual Sign-In yourself at every service.'),
     );
   });
 }

@@ -545,6 +545,11 @@ class _BibleReaderScreenState extends State<BibleReaderScreen>
 
     final selected = _selectedVerses.toList()..sort();
     final quoteLines = <String>[];
+    // Track only the verse numbers that actually made it into the quote --
+    // a verse with missing/empty text (a real gap in some translation
+    // payloads) is skipped from quoteLines, and the label must skip it too
+    // so a card never cites a verse number its own text doesn't cover.
+    final includedVerseNumbers = <int>[];
     for (final verseNumber in selected) {
       final verse = verses.firstWhere(
         (item) {
@@ -556,13 +561,16 @@ class _BibleReaderScreenState extends State<BibleReaderScreen>
       );
       if (verse is! Map) continue;
       final verseText = (verse['text'] ?? '').toString().trim();
-      if (verseText.isNotEmpty) quoteLines.add(verseText);
+      if (verseText.isNotEmpty) {
+        quoteLines.add(verseText);
+        includedVerseNumbers.add(verseNumber);
+      }
     }
     if (quoteLines.isEmpty) return;
 
-    final versesLabel = selected.length > 1
-        ? '$reference:${selected.first}-${selected.last}'
-        : '$reference:${selected.first}';
+    final versesLabel = includedVerseNumbers.length > 1
+        ? '$reference:${includedVerseNumbers.first}-${includedVerseNumbers.last}'
+        : '$reference:${includedVerseNumbers.first}';
 
     await showShareCardCustomizer(
       context,

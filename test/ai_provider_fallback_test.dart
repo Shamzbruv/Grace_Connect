@@ -28,8 +28,13 @@ void main() {
     expect(grace, contains('export async function callAiJson('));
     expect(
       grace,
-      contains('const primary = await callHuggingFaceJson('),
+      contains('primary = await callHuggingFaceJson('),
     );
+    // The primary call must be wrapped the same way the Gemini fallback
+    // call is (try/catch, not a bare unwrapped await) -- otherwise a
+    // synchronous throw from a missing HF_TOKEN escapes callAiJson entirely
+    // and skips the Gemini fallback below it.
+    expect(grace, contains('try {\n    primary = await callHuggingFaceJson('));
     expect(
       grace,
       contains('secondary = await callGeminiJson('),

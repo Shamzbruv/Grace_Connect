@@ -17,6 +17,19 @@ import 'attendance_dwell_session.dart';
 import 'notification_service.dart';
 import 'supabase_resilience.dart';
 
+/// Thrown only for the specific, already-diagnosed "no GPS fix" case, so the
+/// UI can safely show its message directly to the user. Every other failure
+/// in the attendance check path (a database error, an auth hiccup, a
+/// platform-channel error) is technical and must never reach the screen
+/// verbatim -- callers should catch this type separately and fall back to a
+/// generic friendly message for anything else.
+class LocationUnavailableException implements Exception {
+  LocationUnavailableException(this.message);
+  final String message;
+  @override
+  String toString() => message;
+}
+
 const String _attendanceSupabaseUrl =
     'https://nimgsgnkcvddomrgkawb.supabase.co';
 const String _attendanceSupabaseAnonKey =
@@ -106,7 +119,7 @@ class AttendanceSetupStatus {
       missing.add('Location permission is not granted.');
     } else if (!hasAutoAttendanceLocationPermission) {
       missing.add(
-        'Allow location all the time so Android can detect the church geofence when the app is closed.',
+        'Allow location all the time so the app can detect the church geofence when it is closed.',
       );
     }
     if (!hasChurchLocation) missing.add('Church geofence location is not set.');
@@ -133,6 +146,7 @@ class AttendanceCheckInPrompt {
     this.radiusMeters,
     this.requiredDwellMinutes = 10,
     this.currentDwellSeconds = 0,
+    this.arrivalTime,
   });
 
   final bool hasActiveService;
@@ -146,6 +160,11 @@ class AttendanceCheckInPrompt {
   final double? radiusMeters;
   final int requiredDwellMinutes;
   final int currentDwellSeconds;
+  // The moment the member was first verified on church property -- the true
+  // arrival time, not the moment this prompt (or a later mark-present call)
+  // happened to run. Lateness must always be graded against this, never
+  // against DateTime.now().
+  final DateTime? arrivalTime;
 
   int get currentDwellMinutes => currentDwellSeconds ~/ 60;
 
@@ -530,7 +549,7 @@ class AttendanceService {
             const Duration(minutes: 15);
     if (lastKnown != null && isRecent) return lastKnown;
 
-    throw Exception(
+    throw LocationUnavailableException(
       'Your device could not get a location fix. GPS can be unreliable indoors -- try moving near a window or door, or wait a moment and tap Recheck.',
     );
   }
@@ -1236,6 +1255,7 @@ class AttendanceService {
       radiusMeters: churchLocation.radiusMeters,
       requiredDwellMinutes: requiredDwellMinutes,
       currentDwellSeconds: currentDwellSeconds,
+      arrivalTime: entryTime,
     );
   }
 
@@ -1257,6 +1277,9 @@ class AttendanceService {
     }
 
     final activeService = await getActiveService(churchId);
+    // Grade lateness against arrivalTime (when they were first verified
+    // on-site), not against DateTime.now() -- the same fix already applied
+    // to the auto-dwell and manual on-site paths.
     await _markPresent(
       user.id,
       churchId,
@@ -1264,6 +1287,7 @@ class AttendanceService {
       activeService?['startTime'] as String?,
       prompt.serviceName,
       method: 'manual_geofence',
+      checkedInAt: prompt.arrivalTime,
     );
   }
 

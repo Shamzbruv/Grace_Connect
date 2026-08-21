@@ -241,6 +241,7 @@ class _AttendanceTrendChartState extends State<AttendanceTrendChart> {
                         entry.value,
                         brightness,
                         highlighted: _touchedIndex == entry.key,
+                        gapColor: theme.scaffoldBackgroundColor,
                       ),
                   ],
                 ),
@@ -257,6 +258,7 @@ class _AttendanceTrendChartState extends State<AttendanceTrendChart> {
     ServiceAttendanceSummary summary,
     Brightness brightness, {
     required bool highlighted,
+    required Color gapColor,
   }) {
     final segments = <(int, Color)>[
       (summary.presentCount, ChartPalette.present(brightness)),
@@ -270,12 +272,17 @@ class _AttendanceTrendChartState extends State<AttendanceTrendChart> {
       if (count <= 0) continue;
       final from = runningTotal;
       runningTotal += count;
-      // A 1-unit surface gap between stacked segments (dataviz mark spec)
-      // so adjacent same-height segments don't visually fuse into one.
+      // A surface-colored stroke around each segment stands in for the
+      // dataviz mark spec's gap between stacked fills. Insetting fromY
+      // instead (as this used to) shrinks that segment's rendered height
+      // below its true value -- a count of 1 drew as if it were 0.6,
+      // understating small segments by up to 40%. A border draws on top of
+      // the true from/to edges, so every segment keeps its exact height.
       stackItems.add(BarChartRodStackItem(
-        from + (stackItems.isEmpty ? 0 : 0.4),
+        from,
         runningTotal,
         color,
+        BorderSide(color: gapColor, width: 1.5),
       ));
     }
 

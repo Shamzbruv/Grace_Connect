@@ -56,12 +56,15 @@ void main() {
     final screen = File(
       'lib/screens/daily_word/daily_word_screen.dart',
     ).readAsStringSync();
-    final repaint = screen.indexOf('RepaintBoundary(');
-    final notice = screen.indexOf('_QuizStudyNotice(', repaint);
-    final shareButton = screen.indexOf('Share Daily Word', repaint);
+    // Sharing used to capture this screen's own RepaintBoundary directly;
+    // it now opens the branded share-card customizer instead (which builds
+    // and captures its own preview in share_card_customizer_sheet.dart), so
+    // this screen no longer has a RepaintBoundary of its own to check --
+    // the notice must still render before the share button, though.
+    final notice = screen.indexOf('_QuizStudyNotice(');
+    final shareButton = screen.indexOf('Share Daily Word', notice);
 
-    expect(repaint, greaterThanOrEqualTo(0));
-    expect(notice, greaterThan(repaint));
+    expect(notice, greaterThanOrEqualTo(0));
     expect(shareButton, greaterThan(notice));
     expect(screen, contains('All five questions are based on'));
     expect(screen, contains('book: passage.book'));

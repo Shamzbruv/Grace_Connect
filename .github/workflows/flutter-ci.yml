@@ -36,5 +36,5 @@ jobs:
       - name: Analyze
         run: flutter analyze
 
-      - name: Run hardening tests
-        run: flutter test test/beta_hardening_static_test.dart test/membership_service_test.dart test/notification_route_test.dart
+      - name: Run tests
+        run: flutter test

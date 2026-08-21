@@ -197,8 +197,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                     SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'If you skip this, that\'s completely fine — you\'ll '
-                        'just need to open the app and tap Manual Sign-In '
+                        'If you skip this, that\'s completely fine — '
+                        'you\'ll just need to open the app and tap Manual Sign-In '
                         'yourself at every single service.',
                         style: TextStyle(fontSize: 13),
                       ),
@@ -260,17 +260,21 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       // A GPS timeout indoors and a genuine network outage need different
       // messages and different fixes -- showing the same "check your
       // connection" text for both sent someone with a perfectly good
-      // connection off looking for a problem that did not exist.
-      final detail = e.toString().replaceFirst('Exception: ', '').trim();
+      // connection off looking for a problem that did not exist. But only
+      // LocationUnavailableException's message is written for a user to
+      // read -- anything else (a database error, an auth hiccup) is
+      // technical and falls back to the generic message instead of leaking
+      // raw exception text onto the screen.
+      final message = e is LocationUnavailableException
+          ? e.message
+          : 'Could not reach attendance right now. Tap Recheck and make sure your connection is active.';
       setState(() {
         _checkInPrompt = AttendanceCheckInPrompt(
           hasActiveService: false,
           canMarkPresent: false,
           isInsideGeofence: false,
           alreadyMarked: false,
-          message: detail.isNotEmpty
-              ? detail
-              : 'Could not reach attendance right now. Tap Recheck and make sure your connection is active.',
+          message: message,
         );
       });
     } finally {

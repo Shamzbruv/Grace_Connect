@@ -416,7 +416,24 @@ export async function callAiJson(
   maxNewTokens = 900,
   timeoutMs = 45_000,
 ): Promise<AiJsonResult> {
-  const primary = await callHuggingFaceJson(prompt, maxNewTokens, timeoutMs);
+  // Both calls are wrapped identically: callHuggingFaceJson/callGeminiJson
+  // each throw synchronously (before their own try block) when their secret
+  // is missing, e.g. HF_TOKEN unset. Leaving the primary call unwrapped
+  // let that one specific misconfiguration escape callAiJson entirely,
+  // skipping the Gemini fallback below even though it might be healthy --
+  // defeating the "both providers must fail" resilience goal for exactly
+  // the case (a missing/rotated secret) most likely to actually happen.
+  let primary: HuggingFaceJsonResult;
+  try {
+    primary = await callHuggingFaceJson(prompt, maxNewTokens, timeoutMs);
+  } catch (error) {
+    primary = {
+      data: null,
+      diagnostic: `Hugging Face call threw: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    };
+  }
   if (primary.data !== null) {
     return { ...primary, provider: "huggingface" };
   }

@@ -61,7 +61,15 @@ void main() {
         findsOneWidget,
       );
       // The empty state must not attempt to render a chart against no data.
-      expect(find.byType(SegmentedButton<Object>), findsNothing);
+      // SegmentedButton<_AttendanceView> can't be named from this library
+      // (_AttendanceView is private to attendance_trend_chart.dart), and
+      // find.byType matches on exact runtimeType -- SegmentedButton<Object>
+      // would never match SegmentedButton<_AttendanceView> and would pass
+      // trivially either way. A raw-type predicate actually exercises this.
+      expect(
+        find.byWidgetPredicate((widget) => widget is SegmentedButton),
+        findsNothing,
+      );
     });
 
     testWidgets('renders the breakdown chart by default and switches views',
