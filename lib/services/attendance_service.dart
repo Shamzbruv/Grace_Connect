@@ -14,6 +14,7 @@ import '../models/church_location.dart';
 import '../models/service_schedule.dart';
 import '../models/attendance_record.dart';
 import 'attendance_dwell_session.dart';
+import 'notification_service.dart';
 import 'supabase_resilience.dart';
 
 const String _attendanceSupabaseUrl =
@@ -60,6 +61,14 @@ class AttendanceSetupStatus {
   final bool hasServiceSchedule;
   final String? activeServiceName;
   final bool requiresBackgroundLocation;
+  // null on platforms where this doesn't apply (iOS, web). false means
+  // Android is still allowed to restrict this app in the background, which
+  // silently blocks the geofence's background delivery even though
+  // everything else here can show green -- the geofence stays registered,
+  // Android just may not wake the app to act on it. This is the state that
+  // makes auto-attendance look like it "stopped working" until the member
+  // reopens the app.
+  final bool? batteryOptimizationIgnored;
 
   const AttendanceSetupStatus({
     required this.autoCheckInEnabled,
@@ -69,6 +78,7 @@ class AttendanceSetupStatus {
     required this.hasServiceSchedule,
     this.requiresBackgroundLocation = false,
     this.activeServiceName,
+    this.batteryOptimizationIgnored,
   });
 
   bool get hasLocationPermission =>
@@ -101,6 +111,11 @@ class AttendanceSetupStatus {
     }
     if (!hasChurchLocation) missing.add('Church geofence location is not set.');
     if (!hasServiceSchedule) missing.add('No service schedule is configured.');
+    if (requiresBackgroundLocation && batteryOptimizationIgnored == false) {
+      missing.add(
+        'Battery optimization is still restricting this app, which can silently block auto-attendance while the app is closed.',
+      );
+    }
     return missing;
   }
 }
@@ -473,22 +488,46 @@ class AttendanceService {
   }
 
   Future<Position> _getReliablePosition() async {
-    try {
-      return await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-          timeLimit: Duration(seconds: 20),
-        ),
-      );
-    } catch (error) {
-      final lastKnown = await Geolocator.getLastKnownPosition();
-      final timestamp = lastKnown?.timestamp;
-      final isRecent = timestamp != null &&
-          DateTime.now().difference(timestamp).abs() <=
-              const Duration(minutes: 5);
-      if (lastKnown != null && isRecent) return lastKnown;
-      rethrow;
+    // A single high-accuracy (GPS-only) request with a 20s window regularly
+    // fails to get any fix at all inside a church building -- concrete and
+    // metal roofing block the GPS signal, which is exactly when a member is
+    // trying to check in. Reported in production as a scary "check your
+    // connection" error while sitting inside the sanctuary with a normal
+    // network connection; the real problem was GPS, not connectivity.
+    // Falling back to reduced accuracy (network/cell-assisted, works
+    // indoors) is far more likely to actually succeed, and is still easily
+    // precise enough for a geofence radius measured in tens of meters.
+    for (final accuracy in const [
+      LocationAccuracy.high,
+      LocationAccuracy.medium,
+      LocationAccuracy.reduced,
+    ]) {
+      try {
+        return await Geolocator.getCurrentPosition(
+          locationSettings: LocationSettings(
+            accuracy: accuracy,
+            timeLimit: const Duration(seconds: 15),
+          ),
+        );
+      } catch (_) {
+        continue;
+      }
     }
+
+    // Every live attempt failed. A last-known fix is better than nothing,
+    // and is widened from 5 to 15 minutes -- someone who has been sitting
+    // still inside the same building for a while is not meaningfully more
+    // likely to have moved than someone whose last fix is 6 minutes old.
+    final lastKnown = await Geolocator.getLastKnownPosition();
+    final timestamp = lastKnown?.timestamp;
+    final isRecent = timestamp != null &&
+        DateTime.now().difference(timestamp).abs() <=
+            const Duration(minutes: 15);
+    if (lastKnown != null && isRecent) return lastKnown;
+
+    throw Exception(
+      'Your device could not get a location fix. GPS can be unreliable indoors -- try moving near a window or door, or wait a moment and tap Recheck.',
+    );
   }
 
   Future<ChurchLocation?> _getChurchLocation(String churchId) async {
@@ -908,12 +947,20 @@ class AttendanceService {
 
     if (dwellDuration.inSeconds >= requiredDwellSeconds) {
       _updateDebugStatus('Marking present...');
+      // entryTime is when this person was first verified on church
+      // property, not "now" (which is always requiredDwellMinutes later by
+      // design, and can be pushed even further out by background delivery
+      // delays). Grading lateness against the write time instead of the
+      // true arrival time was inflating minutesLate by roughly the dwell
+      // window for everyone, and could flip an on-time arrival into "late"
+      // outright once background delays stacked on top of it.
       await _markPresent(
         userId,
         churchId,
         activeServiceId,
         activeServiceStartTime,
         activeServiceName,
+        checkedInAt: entryTime,
       );
     }
   }
@@ -1337,6 +1384,18 @@ class AttendanceService {
     }
 
     final activeService = await getActiveService(churchId);
+    // getManualOnSiteCheckInPrompt just called _readOrStartDwellEntry, which
+    // returns the *first* time this person was ever verified on property for
+    // this service (it never overwrites an existing session) -- not the
+    // moment they happened to notice auto-detection hadn't fired and tapped
+    // this button. A member who arrived on time and only manually signed in
+    // because the automatic path silently failed must be graded on when they
+    // actually arrived, not on when they gave up waiting and intervened.
+    final arrivalTime = await _readOrStartDwellEntry(
+      user.id,
+      prompt.serviceId!,
+      observedAt: DateTime.now(),
+    );
     await _markPresent(
       user.id,
       churchId,
@@ -1344,6 +1403,7 @@ class AttendanceService {
       activeService?['startTime'] as String?,
       prompt.serviceName,
       method: 'manual_geofence',
+      checkedInAt: arrivalTime,
     );
   }
 
@@ -1849,6 +1909,16 @@ class AttendanceService {
       debugPrint('Failed to inspect attendance schedule: $e');
     }
 
+    bool? batteryOptimizationIgnored;
+    if (_usesNativeAndroidGeofence) {
+      try {
+        batteryOptimizationIgnored =
+            await NotificationService().isIgnoringBatteryOptimizations();
+      } catch (e) {
+        debugPrint('Could not read battery optimization status: $e');
+      }
+    }
+
     return AttendanceSetupStatus(
       autoCheckInEnabled: autoCheckInEnabled,
       locationServicesEnabled: locationServicesEnabled,
@@ -1857,6 +1927,7 @@ class AttendanceService {
       hasServiceSchedule: hasSchedule,
       requiresBackgroundLocation: _usesNativeAndroidGeofence,
       activeServiceName: activeServiceName,
+      batteryOptimizationIgnored: batteryOptimizationIgnored,
     );
   }
 

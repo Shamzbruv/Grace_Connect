@@ -22,6 +22,55 @@ void main() {
     expect(status.blockers.single, contains('Allow location all the time'));
   });
 
+  test(
+      'battery optimization restricting the app surfaces as a blocker even '
+      'when every other check is green', () {
+    // Every other signal can be green -- permission granted, geofence set,
+    // schedule configured -- while Android still silently restricts this
+    // app's background execution, which is what makes the geofence's
+    // background delivery unreliable without ever showing up anywhere else
+    // in this status. This must not be folded into canMonitor (the geofence
+    // really is still registered and can still fire), only surfaced as an
+    // actionable warning.
+    const restricted = AttendanceSetupStatus(
+      autoCheckInEnabled: true,
+      locationServicesEnabled: true,
+      permission: LocationPermission.always,
+      hasChurchLocation: true,
+      hasServiceSchedule: true,
+      requiresBackgroundLocation: true,
+      batteryOptimizationIgnored: false,
+    );
+    expect(restricted.canMonitor, isTrue);
+    expect(
+      restricted.blockers.single,
+      contains('Battery optimization is still restricting this app'),
+    );
+
+    const unrestricted = AttendanceSetupStatus(
+      autoCheckInEnabled: true,
+      locationServicesEnabled: true,
+      permission: LocationPermission.always,
+      hasChurchLocation: true,
+      hasServiceSchedule: true,
+      requiresBackgroundLocation: true,
+      batteryOptimizationIgnored: true,
+    );
+    expect(unrestricted.blockers, isEmpty);
+
+    // Not applicable on iOS/web (requiresBackgroundLocation false) or before
+    // the check has run (null) -- neither should ever be reported as a
+    // blocker the member has to act on.
+    const notApplicable = AttendanceSetupStatus(
+      autoCheckInEnabled: true,
+      locationServicesEnabled: true,
+      permission: LocationPermission.whileInUse,
+      hasChurchLocation: true,
+      hasServiceSchedule: true,
+    );
+    expect(notApplicable.blockers, isEmpty);
+  });
+
   group('durable attendance dwell', () {
     const maximumEvidenceGap = Duration(seconds: 90);
     const requiredOutsideDuration = Duration(minutes: 2);
@@ -247,6 +296,39 @@ void main() {
     expect(migration, contains('send_attendance_finalized_report'));
     expect(migration, contains('finalize_attendance_service'));
     expect(migration, contains('refresh_attendance_priority_list'));
+
+    // A member who was genuinely on time but whose auto-detection silently
+    // failed (background delivery delay, or they had to fall back to manual
+    // sign-in) must be graded on when they actually arrived, not on when the
+    // dwell countdown finished or when they happened to notice and tap the
+    // button. Both the automatic and manual paths must pass the true
+    // first-observed-on-site timestamp through to _markPresent instead of
+    // leaving it to default to DateTime.now().
+    expect(
+      service,
+      contains('checkedInAt: entryTime,'),
+      reason: 'the automatic geofence path must grade lateness against the '
+          'true dwell-entry time, not against when the dwell requirement '
+          'happened to finish',
+    );
+    expect(
+      service,
+      contains('checkedInAt: arrivalTime,'),
+      reason: 'manual sign-in must grade lateness against the already-'
+          'tracked first-observed-on-site time, not against "now"',
+    );
+
+    // A single high-accuracy-only GPS request regularly fails indoors (a
+    // church's roofing blocks the signal), and used to surface as a
+    // misleading "check your connection" error. A real fallback chain is
+    // required, not just a friendlier error message on the same single
+    // attempt.
+    expect(service, contains('LocationAccuracy.medium'));
+    expect(service, contains('LocationAccuracy.reduced'));
+    expect(
+      service,
+      contains('could not get a location fix. GPS can be unreliable indoors'),
+    );
     expect(
       migration,
       contains('on conflict ("churchId", "userId") where status = \'open\''),

@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../models/user_profile.dart';
 import '../../providers/user_role_provider.dart';
 import '../../services/attendance_service.dart';
+import '../../services/notification_service.dart';
 import '../../models/attendance_record.dart';
 import '../../widgets/ui/app_card.dart';
 
@@ -162,14 +163,20 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     } catch (e) {
       debugPrint('Could not check active service: $e');
       if (!mounted) return;
+      // A GPS timeout indoors and a genuine network outage need different
+      // messages and different fixes -- showing the same "check your
+      // connection" text for both sent someone with a perfectly good
+      // connection off looking for a problem that did not exist.
+      final detail = e.toString().replaceFirst('Exception: ', '').trim();
       setState(() {
-        _checkInPrompt = const AttendanceCheckInPrompt(
+        _checkInPrompt = AttendanceCheckInPrompt(
           hasActiveService: false,
           canMarkPresent: false,
           isInsideGeofence: false,
           alreadyMarked: false,
-          message:
-              'Could not reach attendance right now. Tap Recheck and make sure your connection is active.',
+          message: detail.isNotEmpty
+              ? detail
+              : 'Could not reach attendance right now. Tap Recheck and make sure your connection is active.',
         );
       });
     } finally {
@@ -498,6 +505,20 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                     label: 'Service schedule',
                     isReady: status.hasServiceSchedule,
                   ),
+                  if (status.requiresBackgroundLocation &&
+                      status.batteryOptimizationIgnored != null)
+                    _buildSetupRow(
+                      context,
+                      label: 'Battery optimization allows background use',
+                      isReady: status.batteryOptimizationIgnored == true,
+                      onFix: () async {
+                        await NotificationService()
+                            .openBatteryOptimizationSettings();
+                        if (context.mounted) {
+                          await _refreshSetupStatus(user.churchId);
+                        }
+                      },
+                    ),
                   if (status.activeServiceName != null) ...[
                     const SizedBox(height: 6),
                     Text(
@@ -999,6 +1020,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     BuildContext context, {
     required String label,
     required bool isReady,
+    VoidCallback? onFix,
   }) {
     return Padding(
       padding: const EdgeInsets.only(top: 6),
@@ -1016,6 +1038,16 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ),
+          if (!isReady && onFix != null)
+            TextButton(
+              onPressed: onFix,
+              style: TextButton.styleFrom(
+                minimumSize: Size.zero,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: const Text('Fix'),
+            ),
         ],
       ),
     );
