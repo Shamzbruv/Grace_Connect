@@ -7,6 +7,10 @@ class ChurchStats {
   final int sundaySchoolKids;
   final int ministryCount;
   final List<double> weeklyTrend;
+  // Short label (e.g. "Aug 3") per weeklyTrend point, same length and order.
+  // A trend line with no axis labels is unreadable as anything but a vague
+  // shape -- this is what lets the chart actually say which week is which.
+  final List<String> weeklyTrendLabels;
 
   const ChurchStats({
     required this.attendanceThisWeek,
@@ -17,6 +21,7 @@ class ChurchStats {
     required this.sundaySchoolKids,
     required this.ministryCount,
     required this.weeklyTrend,
+    this.weeklyTrendLabels = const [],
   });
 
   factory ChurchStats.fromMap(Map<String, dynamic> data) {
@@ -30,6 +35,8 @@ class ChurchStats {
       ministryCount: data['ministryCount'] ?? 0,
       weeklyTrend: List<double>.from(
           (data['weeklyTrend'] ?? []).map((x) => x.toDouble())),
+      weeklyTrendLabels: List<String>.from(
+          (data['weeklyTrendLabels'] ?? []).map((x) => x.toString())),
     );
   }
 

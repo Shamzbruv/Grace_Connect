@@ -4,6 +4,8 @@ import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../providers/user_role_provider.dart';
+import '../../services/attendance_analytics_service.dart';
+import '../../widgets/charts/attendance_trend_chart.dart';
 import '../../widgets/ui/app_scaffold.dart';
 
 class ChurchOverviewDetailScreen extends StatefulWidget {
@@ -87,10 +89,21 @@ class _ChurchOverviewDetailScreenState
         .order('timestamp', ascending: false)
         .limit(100);
 
+    List<ServiceAttendanceSummary> chartSummaries = const [];
+    try {
+      chartSummaries = await AttendanceAnalyticsService()
+          .recentServiceSummaries(churchId);
+    } catch (_) {
+      // The raw list below still renders even if the aggregate table isn't
+      // reachable (e.g. RLS denies this role) -- charts are additive, not a
+      // hard dependency for this screen's core purpose.
+    }
+
     return _OverviewDetailData(
       title: 'Attendance',
       icon: Icons.event_available_outlined,
       emptyLabel: 'No attendance records this week.',
+      chartSummaries: chartSummaries,
       rows: [
         for (final row in rows)
           _OverviewRow(
@@ -217,7 +230,11 @@ class _OverviewDetailList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    if (data.rows.isEmpty) {
+    final chartSummaries = data.chartSummaries;
+    // The chart draws from a different, longer-window table than the raw
+    // row list (this week's individual check-ins) -- an empty week of rows
+    // must not hide weeks of real chart history that still exist.
+    if (data.rows.isEmpty && (chartSummaries == null || chartSummaries.isEmpty)) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
@@ -235,9 +252,16 @@ class _OverviewDetailList extends StatelessWidget {
 
     return ListView.separated(
       padding: const EdgeInsets.all(16),
-      itemCount: data.rows.length,
+      itemCount: data.rows.length + (chartSummaries != null ? 1 : 0),
       separatorBuilder: (_, __) => const SizedBox(height: 10),
       itemBuilder: (context, index) {
+        if (chartSummaries != null) {
+          if (index == 0) {
+            return AttendanceTrendChart(summaries: chartSummaries);
+          }
+          index -= 1;
+        }
+        if (data.rows.isEmpty) return const SizedBox.shrink();
         final row = data.rows[index];
         return DecoratedBox(
           decoration: BoxDecoration(
@@ -263,12 +287,14 @@ class _OverviewDetailData {
     required this.icon,
     required this.rows,
     required this.emptyLabel,
+    this.chartSummaries,
   });
 
   final String title;
   final IconData icon;
   final List<_OverviewRow> rows;
   final String emptyLabel;
+  final List<ServiceAttendanceSummary>? chartSummaries;
 }
 
 class _OverviewRow {
