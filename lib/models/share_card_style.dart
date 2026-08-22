@@ -41,6 +41,7 @@ class ShareCardStyle {
     this.darkenOpacity = 0.25,
     this.font = ShareCardFont.poppins,
     this.textColor = ShareCardTextColor.white,
+    this.fontScale = 1.0,
   });
 
   final int backgroundIndex;
@@ -48,6 +49,10 @@ class ShareCardStyle {
   final double darkenOpacity;
   final ShareCardFont font;
   final ShareCardTextColor textColor;
+  // Multiplies the card's base quote/attribution font sizes. 1.0 is the
+  // original default; the slider runs roughly 0.6-1.6 so a long quote can
+  // be shrunk to fit and a short one can be made bolder on the card.
+  final double fontScale;
 
   ShareCardStyle copyWith({
     int? backgroundIndex,
@@ -55,6 +60,7 @@ class ShareCardStyle {
     double? darkenOpacity,
     ShareCardFont? font,
     ShareCardTextColor? textColor,
+    double? fontScale,
   }) {
     return ShareCardStyle(
       backgroundIndex: backgroundIndex ?? this.backgroundIndex,
@@ -62,6 +68,7 @@ class ShareCardStyle {
       darkenOpacity: darkenOpacity ?? this.darkenOpacity,
       font: font ?? this.font,
       textColor: textColor ?? this.textColor,
+      fontScale: fontScale ?? this.fontScale,
     );
   }
 }

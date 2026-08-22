@@ -9,10 +9,10 @@ import '../../models/share_card_style.dart';
 import '../../theme/app_colors.dart';
 
 /// The square, exportable quote/scripture card: a catalogue background
-/// (optionally blurred/darkened), the quote text in the chosen font and
-/// color, and the Grace Connect watermark. Every card built from this
-/// widget carries the watermark -- there is no "share without branding"
-/// path, by design (anything leaving the app should say where it's from).
+/// (optionally blurred/darkened) and the quote text in the chosen font,
+/// size, and color. No watermark -- it used to overlay the bottom of the
+/// card and collided with the text on longer quotes, so it was removed
+/// rather than reserving space for it.
 class ShareableQuoteCard extends StatelessWidget {
   const ShareableQuoteCard({
     super.key,
@@ -66,11 +66,11 @@ class ShareableQuoteCard extends StatelessWidget {
                   fadeInDuration: Duration.zero,
                   // A background that's still downloading, or failed to
                   // (offline, storage outage), must never crash the whole
-                  // card or show a blank hole -- the quote and watermark are
-                  // the part that actually has to reach whoever it's shared
-                  // with. _share() precaches this same URL before capture,
-                  // so in the normal path this placeholder never actually
-                  // paints -- it's the fallback for whatever precache missed.
+                  // card or show a blank hole -- the quote is the part that
+                  // actually has to reach whoever it's shared with.
+                  // _share() precaches this same URL before capture, so in
+                  // the normal path this placeholder never actually paints
+                  // -- it's the fallback for whatever precache missed.
                   placeholder: (context, url) =>
                       Container(color: AppColors.primary),
                   errorWidget: (context, url, error) =>
@@ -81,7 +81,7 @@ class ShareableQuoteCard extends StatelessWidget {
             if (style.darkenOpacity > 0)
               Container(color: Colors.black.withValues(alpha: style.darkenOpacity)),
             Padding(
-              padding: const EdgeInsets.fromLTRB(28, 40, 28, 64),
+              padding: const EdgeInsets.fromLTRB(28, 40, 28, 40),
               child: Align(
                 alignment: _textAlignmentFor(background.safeTextArea),
                 child: Column(
@@ -94,7 +94,7 @@ class ShareableQuoteCard extends StatelessWidget {
                         style.font.familyName,
                         textStyle: TextStyle(
                           color: textColor,
-                          fontSize: 24,
+                          fontSize: 24 * style.fontScale,
                           fontWeight: FontWeight.w700,
                           height: 1.35,
                           shadows: [
@@ -115,7 +115,7 @@ class ShareableQuoteCard extends StatelessWidget {
                           style.font.familyName,
                           textStyle: TextStyle(
                             color: textColor.withValues(alpha: 0.9),
-                            fontSize: 16,
+                            fontSize: 16 * style.fontScale,
                             fontWeight: FontWeight.w600,
                             fontStyle: FontStyle.italic,
                           ),
@@ -124,50 +124,6 @@ class ShareableQuoteCard extends StatelessWidget {
                     ],
                   ],
                 ),
-              ),
-            ),
-            const Positioned(
-              left: 0,
-              right: 0,
-              bottom: 16,
-              child: _GraceConnectWatermark(),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _GraceConnectWatermark extends StatelessWidget {
-  const _GraceConnectWatermark();
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: 0.28),
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Image.asset(
-              'assets/logo.png',
-              width: 18,
-              height: 18,
-              errorBuilder: (context, error, stackTrace) =>
-                  const SizedBox(width: 18, height: 18),
-            ),
-            const SizedBox(width: 6),
-            Text(
-              'Grace Connect',
-              style: GoogleFonts.poppins(
-                color: Colors.white,
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
               ),
             ),
           ],

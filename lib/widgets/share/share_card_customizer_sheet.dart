@@ -14,8 +14,8 @@ import 'shareable_quote_card.dart';
 
 /// Opens the background/style customizer, then shares the flattened card as
 /// an image. This is the one entry point both Daily Word and Bible verse
-/// sharing use, so a change to the customizer or the branding watermark
-/// only has to happen in one place.
+/// sharing use, so a change to the customizer only has to happen in one
+/// place.
 Future<void> showShareCardCustomizer(
   BuildContext context, {
   required String quoteText,
@@ -304,6 +304,17 @@ class _ShareCardCustomizerSheetState
                       : '${(style.darkenOpacity * 100).round()}%',
                   onChanged: (value) => setState(
                     () => _style = style.copyWith(darkenOpacity: value),
+                  ),
+                ),
+                Text('Text size', style: theme.textTheme.labelLarge),
+                Slider(
+                  value: style.fontScale,
+                  min: 0.6,
+                  max: 1.6,
+                  divisions: 20,
+                  label: '${(style.fontScale * 100).round()}%',
+                  onChanged: (value) => setState(
+                    () => _style = style.copyWith(fontScale: value),
                   ),
                 ),
                 const SizedBox(height: 8),

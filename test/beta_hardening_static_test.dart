@@ -332,9 +332,9 @@ void main() {
       ).readAsStringSync();
 
       expect(gradle, contains('"love.graceconnect"'));
-      expect(gradle, contains('versionCode 33'));
+      expect(gradle, contains('versionCode 34'));
       expect(gradle, contains('versionName "1.0.30-beta"'));
-      expect(pubspec, contains('version: "1.0.30-beta+33"'));
+      expect(pubspec, contains('version: "1.0.30-beta+34"'));
       expect(activity, contains('package love.graceconnect'));
       expect(manifest, contains('love.graceconnect.MainActivity'));
       expect(manifest, contains('default_notification_icon'));

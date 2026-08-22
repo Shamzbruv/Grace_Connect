@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../models/daily_motivation.dart';
@@ -80,8 +81,50 @@ class _DailyWordScreenState extends State<DailyWordScreen> {
     );
   }
 
-  Future<void> _shareDailyWordImage(DailyMotivation motivation) {
-    return showShareCardCustomizer(
+  /// The Daily Word is the app's own wording, not scripture -- a member
+  /// posting it as-is isn't skipping any required editing step the way
+  /// sharing an unedited verse image would be, so a plain-text option
+  /// sits alongside the image customizer here. Bible verses only ever go
+  /// through the customizer (see bible_reader_screen.dart's
+  /// _shareSelectedVerses), no bypass.
+  Future<void> _shareDailyWord(DailyMotivation motivation) async {
+    final choice = await showModalBottomSheet<_DailyWordShareChoice>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.text_fields_outlined),
+              title: const Text('Share as text'),
+              subtitle: const Text('Original wording, no image or editing'),
+              onTap: () => Navigator.of(context)
+                  .pop(_DailyWordShareChoice.originalText),
+            ),
+            ListTile(
+              leading: const Icon(Icons.image_outlined),
+              title: const Text('Customize & share image'),
+              subtitle: const Text('Pick a background, font, size, and color'),
+              onTap: () => Navigator.of(context)
+                  .pop(_DailyWordShareChoice.customizeImage),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (choice == null || !mounted) return;
+    if (choice == _DailyWordShareChoice.originalText) {
+      await SharePlus.instance.share(ShareParams(
+        text: '${motivation.message}\n\n${motivation.scriptureReference}',
+        subject: motivation.title,
+      ));
+      return;
+    }
+    if (!mounted) return;
+    await showShareCardCustomizer(
       context,
       quoteText: motivation.message,
       attribution: motivation.scriptureReference,
@@ -169,7 +212,7 @@ class _DailyWordScreenState extends State<DailyWordScreen> {
                   const SizedBox(height: 12),
                 ],
                 FilledButton.icon(
-                  onPressed: () => _shareDailyWordImage(data.selected!),
+                  onPressed: () => _shareDailyWord(data.selected!),
                   icon: const Icon(Icons.ios_share_outlined),
                   label: const Text('Share Daily Word'),
                 ),
@@ -599,3 +642,5 @@ class _DailyWordData {
   final DailyMotivation? selected;
   final List<DailyMotivation> recent;
 }
+
+enum _DailyWordShareChoice { originalText, customizeImage }

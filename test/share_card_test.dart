@@ -103,6 +103,7 @@ void main() {
       darkenOpacity: 0.2,
       font: ShareCardFont.lora,
       textColor: ShareCardTextColor.gold,
+      fontScale: 1.2,
     );
     final updated = original.copyWith(blurSigma: 8);
     expect(updated.blurSigma, 8);
@@ -110,11 +111,16 @@ void main() {
     expect(updated.darkenOpacity, original.darkenOpacity);
     expect(updated.font, original.font);
     expect(updated.textColor, original.textColor);
+    expect(updated.fontScale, original.fontScale);
+  });
+
+  test('ShareCardStyle.fontScale defaults to 1.0', () {
+    const style = ShareCardStyle(backgroundIndex: 0);
+    expect(style.fontScale, 1.0);
   });
 
   group('ShareableQuoteCard', () {
-    testWidgets('renders the quote, attribution, and the branding watermark',
-        (tester) async {
+    testWidgets('renders the quote and attribution', (tester) async {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
@@ -128,16 +134,14 @@ void main() {
         ),
       );
       // Real asset decoding is unavailable in this test environment, but
-      // the text layer, layout, and watermark build independently of
-      // whether the background image itself finished decoding.
+      // the text layer and layout build independently of whether the
+      // background image itself finished decoding.
       await tester.pump();
 
       expect(find.text('For God so loved the world.'), findsOneWidget);
       expect(find.text('John 3:16 (KJV)'), findsOneWidget);
-      // The watermark is mandatory on every card -- there is no path that
-      // omits it, so it must render unconditionally (even if the asset
-      // itself can't decode, errorBuilder keeps the text label showing).
-      expect(find.text('Grace Connect'), findsOneWidget);
+      // No watermark -- removed after it collided with long quote text.
+      expect(find.text('Grace Connect'), findsNothing);
     });
 
     testWidgets('omits the attribution line when none is given',
@@ -156,8 +160,30 @@ void main() {
       await tester.pump();
 
       expect(find.text('Be still and know.'), findsOneWidget);
-      // The watermark still always renders.
-      expect(find.text('Grace Connect'), findsOneWidget);
+    });
+
+    testWidgets('fontScale scales the rendered quote text size',
+        (tester) async {
+      Future<double> quoteFontSizeFor(double fontScale) async {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: ShareableQuoteCard(
+                background: _sampleBackground(),
+                style: ShareCardStyle(backgroundIndex: 0, fontScale: fontScale),
+                quoteText: 'Be still and know.',
+              ),
+            ),
+          ),
+        );
+        await tester.pump();
+        final text = tester.widget<Text>(find.text('Be still and know.'));
+        return text.style!.fontSize!;
+      }
+
+      final small = await quoteFontSizeFor(0.6);
+      final large = await quoteFontSizeFor(1.6);
+      expect(large, greaterThan(small));
     });
   });
 }

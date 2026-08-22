@@ -1,0 +1,5 @@
+Grace Connect 1.0.30-beta+34
+
+- Removed the "Grace Connect" watermark from shared quote/scripture images. It used to sit at the bottom of the card and could overlap the quote text itself on longer passages.
+- Added a text size slider to the share customizer, so a long quote can be shrunk to fit the card, or a short one made bigger.
+- Daily Word sharing now offers a choice: share the original wording as plain text with no editing, or open the customizer to build a background image. Scripture sharing still always goes through the customizer.
