@@ -137,6 +137,24 @@ class NotificationService {
       description: 'Direct message notifications',
       soundName: 'grace_message',
     ),
+    'message_request_received': _NotificationSoundProfile(
+      channelId: 'grace_messages_channel_v1',
+      channelName: 'Grace Connect Messages',
+      description: 'Message request notifications',
+      soundName: 'grace_message',
+    ),
+    'message_request_accepted': _NotificationSoundProfile(
+      channelId: 'grace_messages_channel_v1',
+      channelName: 'Grace Connect Messages',
+      description: 'Message request notifications',
+      soundName: 'grace_message',
+    ),
+    'message_request_denied': _NotificationSoundProfile(
+      channelId: 'grace_messages_channel_v1',
+      channelName: 'Grace Connect Messages',
+      description: 'Message request notifications',
+      soundName: 'grace_message',
+    ),
     'grace_support_offer': _NotificationSoundProfile(
       channelId: 'grace_messages_channel_v1',
       channelName: 'Grace Connect Messages',
@@ -763,6 +781,9 @@ class NotificationService {
 
     if (normalizedType == 'message' ||
         normalizedType == 'direct_message' ||
+        normalizedType == 'message_request_received' ||
+        normalizedType == 'message_request_accepted' ||
+        normalizedType == 'message_request_denied' ||
         normalizedType == 'anonymous_private_message') {
       return route?.trim().isNotEmpty == true ? route : '/inbox';
     }

@@ -470,6 +470,17 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
             },
             onGenerateRoute: (settings) {
               final uri = Uri.tryParse(settings.name ?? '');
+              if (uri?.path == '/inbox') {
+                return MaterialPageRoute(
+                  builder: (_) => _protected(
+                    InboxScreen(
+                      initialTab:
+                          uri?.queryParameters['tab'] == 'requests' ? 1 : 0,
+                    ),
+                    feature: AppFeature.directMessages,
+                  ),
+                );
+              }
               if (uri?.path == '/daily_word') {
                 return MaterialPageRoute(
                   builder: (_) => _protected(

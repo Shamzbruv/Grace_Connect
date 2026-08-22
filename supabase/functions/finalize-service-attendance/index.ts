@@ -4,33 +4,35 @@ import {
   requireCronSecret,
   serviceClient,
 } from "../_shared/grace.ts";
+import {
+  attendanceServiceIsPastDue,
+} from "../_shared/attendance_finalization.ts";
 
 type ServiceScheduleRow = {
   serviceId?: string;
   churchId?: string;
   name?: string;
   dayOfWeek?: number;
+  startTime?: string;
   endTime?: string;
   checkInClosesMinutesAfter?: number;
+  minimumDwellMinutes?: number;
   attendanceEnabled?: boolean;
 };
 
 type MemberRow = {
+  attendanceUserId?: string;
   id?: string;
   uid?: string;
   fullName?: string;
   photoUrl?: string;
-  joinDate?: string;
   roles?: string[];
   appPrivileges?: string[];
 };
 
-type AttendanceRow = {
-  user_id?: string;
-  present?: boolean;
-  status?: string;
-  method?: string;
-  timestamp?: string;
+type ChurchAliasRow = {
+  id?: string;
+  placeId?: string;
 };
 
 const leaderRoles = new Set([
@@ -68,16 +70,6 @@ function normalizeRole(value: string): string {
     .replace(/^_|_$/g, "");
 }
 
-function parseTimeToMinutes(value?: string): number | null {
-  const match = String(value ?? "").match(/^(\d{1,2}):(\d{2})/);
-  if (!match) return null;
-  const hour = Number(match[1]);
-  const minute = Number(match[2]);
-  if (!Number.isInteger(hour) || !Number.isInteger(minute)) return null;
-  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
-  return hour * 60 + minute;
-}
-
 function jamaicaDateInfo(daysBack = 0) {
   const base = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000);
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -102,52 +94,20 @@ function jamaicaDateInfo(daysBack = 0) {
     Sun: 7,
   };
   const isoDate = `${value("year")}-${value("month")}-${value("day")}`;
-  const minuteOfDay = Number(value("hour")) * 60 + Number(value("minute"));
   const startUtc = new Date(`${isoDate}T05:00:00.000Z`);
   const endUtc = new Date(startUtc);
   endUtc.setUTCDate(endUtc.getUTCDate() + 1);
   return {
     isoDate,
     dayOfWeek: weekdayMap[value("weekday")] ?? 7,
-    minuteOfDay,
     startUtc,
     endUtc,
     daysBack,
   };
 }
 
-function serviceClosedAtUtc(
-  isoDate: string,
-  schedule: ServiceScheduleRow,
-): Date | null {
-  const endMinutes = parseTimeToMinutes(schedule.endTime);
-  if (endMinutes == null) return null;
-  const closeMinutes = endMinutes +
-    Number(schedule.checkInClosesMinutesAfter ?? 30);
-  const closedAt = new Date(`${isoDate}T05:00:00.000Z`);
-  closedAt.setUTCMinutes(closedAt.getUTCMinutes() + closeMinutes);
-  return closedAt;
-}
-
-function scheduleIsPastDue(
-  info: ReturnType<typeof jamaicaDateInfo>,
-  schedule: ServiceScheduleRow,
-): boolean {
-  const endMinutes = parseTimeToMinutes(schedule.endTime);
-  if (endMinutes == null) return false;
-  const closeMinutes = endMinutes +
-    Number(schedule.checkInClosesMinutesAfter ?? 30);
-  return info.daysBack > 0 || info.minuteOfDay > closeMinutes;
-}
-
 function memberUserId(member: MemberRow): string {
-  const uid = String(member.uid ?? "").trim();
-  return uid || String(member.id ?? "").trim();
-}
-
-function memberJoinDate(member: MemberRow): Date | null {
-  const parsed = new Date(String(member.joinDate ?? ""));
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
+  return String(member.attendanceUserId ?? "").trim();
 }
 
 function isSundaySchool(schedule: ServiceScheduleRow): boolean {
@@ -165,6 +125,28 @@ function isLeader(member: MemberRow): boolean {
 
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function aliasesForChurch(
+  churchId: string,
+  churches: ChurchAliasRow[],
+): { aliases: string[]; identity: string } {
+  const match = churches.find((church) =>
+    String(church.id ?? "").trim() === churchId ||
+    String(church.placeId ?? "").trim() === churchId
+  );
+  if (!match) return { aliases: [churchId], identity: churchId };
+  const aliases = Array.from(
+    new Set([
+      churchId,
+      String(match.id ?? "").trim(),
+      String(match.placeId ?? "").trim(),
+    ].filter(Boolean)),
+  );
+  return {
+    aliases,
+    identity: String(match.id ?? "").trim() || churchId,
+  };
+}
 
 async function sendSundaySchoolReport(
   client: ReturnType<typeof serviceClient>,
@@ -216,6 +198,11 @@ Deno.serve(async (request) => {
   >;
   const requestedChurchId = String(body.church_id ?? "").trim();
 
+  const { data: churchAliasData } = await client
+    .from("churches")
+    .select("id, placeId");
+  const churchAliasRows = (churchAliasData ?? []) as ChurchAliasRow[];
+
   let churchIds: string[] = [];
   if (requestedChurchId) {
     churchIds = [requestedChurchId];
@@ -251,12 +238,17 @@ Deno.serve(async (request) => {
   let absencesCreated = 0;
   let reportsCreated = 0;
   let careAlertsUpdated = 0;
+  const processedChurches = new Set<string>();
 
   for (const churchId of churchIds) {
+    const church = aliasesForChurch(churchId, churchAliasRows);
+    if (processedChurches.has(church.identity)) continue;
+    processedChurches.add(church.identity);
+
     const { data: membershipRows } = await client
       .from("church_memberships")
       .select("user_id")
-      .eq("church_id", churchId)
+      .in("church_id", church.aliases)
       .eq("membership_status", "active");
 
     const memberIds = Array.from(
@@ -266,12 +258,7 @@ Deno.serve(async (request) => {
       ),
     );
 
-    const memberSelect =
-      "id, uid, fullName, photoUrl, joinDate, roles, appPrivileges";
-    const { data: legacyMembers, error: legacyMemberError } = await client
-      .from("users")
-      .select(memberSelect)
-      .eq("placeId", churchId);
+    const memberSelect = "id, uid, fullName, photoUrl, roles, appPrivileges";
     const { data: membersById, error: memberByIdError } = memberIds.length === 0
       ? { data: [] as MemberRow[], error: null }
       : await client.from("users").select(memberSelect).in("id", memberIds);
@@ -280,27 +267,35 @@ Deno.serve(async (request) => {
         ? { data: [] as MemberRow[], error: null }
         : await client.from("users").select(memberSelect).in("uid", memberIds);
 
-    if (legacyMemberError && memberByIdError && memberByUidError) continue;
-
-    const membersByUserId = new Map<string, MemberRow>();
-    for (
-      const member of [
-        ...(legacyMembers ?? []),
-        ...(membersById ?? []),
-        ...(membersByUid ?? []),
-      ] as MemberRow[]
-    ) {
-      const userId = memberUserId(member);
-      if (userId) membersByUserId.set(userId, member);
+    if (memberByIdError && memberByUidError) {
+      console.error(
+        `Attendance profile display lookup failed for ${churchId}; closeout will continue with canonical membership IDs.`,
+      );
     }
-    const churchMembers = Array.from(membersByUserId.values());
-    if (churchMembers.length === 0) continue;
+
+    const profiles = [
+      ...(membersById ?? []),
+      ...(membersByUid ?? []),
+    ] as MemberRow[];
+    // church_memberships.user_id is the canonical auth identity. Profile IDs
+    // and legacy uid mirrors are display-data lookup keys only and can never
+    // become a second attendance identity.
+    const churchMembers = memberIds.map((membershipUserId) => {
+      const profile = profiles.find((candidate) =>
+        String(candidate.id ?? "").trim() === membershipUserId ||
+        String(candidate.uid ?? "").trim() === membershipUserId
+      );
+      return {
+        ...(profile ?? {}),
+        attendanceUserId: membershipUserId,
+      } satisfies MemberRow;
+    });
     const sundaySchoolLeaders = churchMembers.filter(isLeader);
     for (const info of targetDates) {
       const { data: schedules, error: scheduleError } = await client
         .from("service_schedules")
         .select("*")
-        .eq("churchId", churchId)
+        .in("churchId", church.aliases)
         .eq("dayOfWeek", info.dayOfWeek)
         .eq("attendanceEnabled", true);
       if (scheduleError) continue;
@@ -308,12 +303,17 @@ Deno.serve(async (request) => {
       for (const schedule of (schedules ?? []) as ServiceScheduleRow[]) {
         servicesChecked++;
         const serviceId = String(schedule.serviceId ?? "").trim();
-        if (!serviceId || !scheduleIsPastDue(info, schedule)) continue;
+        const scheduleChurchId = String(schedule.churchId ?? "").trim() ||
+          churchId;
+        if (
+          !serviceId ||
+          !attendanceServiceIsPastDue(info.isoDate, schedule)
+        ) continue;
 
         const { data: finalized, error: finalizedError } = await client
           .from("attendance_finalized_services")
           .select("church_id, report_sent_at")
-          .eq("church_id", churchId)
+          .eq("church_id", scheduleChurchId)
           .eq("service_id", serviceId)
           .eq("service_date", info.isoDate)
           .maybeSingle();
@@ -322,7 +322,7 @@ Deno.serve(async (request) => {
           if (isSundaySchool(schedule) && !finalized.report_sent_at) {
             reportsCreated += await sendSundaySchoolReport(
               client,
-              churchId,
+              scheduleChurchId,
               serviceId,
               info.isoDate,
               sundaySchoolLeaders,
@@ -331,98 +331,29 @@ Deno.serve(async (request) => {
           continue;
         }
 
-        const { data: attendanceRows, error: attendanceError } = await client
-          .from("attendance")
-          .select("user_id, present, status, method")
-          .eq("church_id", churchId)
-          .eq("service_id", serviceId)
-          .gte("timestamp", info.startUtc.toISOString())
-          .lt("timestamp", info.endUtc.toISOString());
-        if (attendanceError) continue;
-
-        const attendanceByUserId = new Map<string, AttendanceRow>();
-        for (const row of (attendanceRows ?? []) as AttendanceRow[]) {
-          const userId = String(row.user_id ?? "").trim();
-          if (userId) attendanceByUserId.set(userId, row);
-        }
-
-        let presentCount = 0;
-        let lateCount = 0;
-        let remoteCount = 0;
-        let absentCount = 0;
-        const absentRows: Record<string, unknown>[] = [];
-        const timestamp =
-          serviceClosedAtUtc(info.isoDate, schedule)?.toISOString() ??
-            new Date().toISOString();
-
-        for (const member of churchMembers) {
-          const primaryUserId = memberUserId(member);
-          const alternateUserId = String(member.id ?? "").trim();
-          if (!primaryUserId) continue;
-          const joinedAt = memberJoinDate(member);
-          if (joinedAt && joinedAt >= info.endUtc) continue;
-          const attendance = attendanceByUserId.get(primaryUserId) ||
-            (alternateUserId
-              ? attendanceByUserId.get(alternateUserId)
-              : undefined);
-
-          if (!attendance) {
-            absentCount++;
-            absentRows.push({
-              user_id: primaryUserId,
-              church_id: churchId,
-              service_id: serviceId,
-              timestamp,
-              method: "auto_absent",
-              present: false,
-              status: "absent",
-              service_name: schedule.name ?? "Church Service",
-            });
-            continue;
-          }
-
-          const status = String(attendance.status ?? "");
-          const method = String(attendance.method ?? "");
-          if (attendance.present === false || status === "absent") {
-            absentCount++;
-          } else if (method === "remote" || status === "remote_verified") {
-            remoteCount++;
-          } else if (status === "late") {
-            lateCount++;
-          } else {
-            presentCount++;
-          }
-        }
-
-        if (absentRows.length > 0) {
-          const { data: insertedCount, error: insertError } = await client.rpc(
-            "insert_absent_attendance_rows",
-            { p_rows: absentRows },
-          );
-          // Never mark a service finalized if its absences were not saved;
-          // otherwise that service can never be repaired by a later cron run.
-          if (insertError) continue;
-          absencesCreated += Number(insertedCount ?? 0);
-        }
-
-        const { data: markerInserted, error: finalizeError } = await client.rpc(
-          "finalize_attendance_service",
+        // Population, absence insertion, claim expiry, totals, and the marker
+        // are one database transaction. The database derives members only
+        // from active church_memberships and uses membership.user_id exactly.
+        const { data: closeoutData, error: finalizeError } = await client.rpc(
+          "finalize_attendance_service_v2",
           {
-            p_church_id: churchId,
+            p_church_id: scheduleChurchId,
             p_service_id: serviceId,
             p_service_date: info.isoDate,
             p_service_name: schedule.name ?? "Church Service",
           },
         );
+        const closeout = closeoutData as Record<string, unknown> | null;
         // Do not send duplicate reports or count a service as finalized when
         // its durable finalization marker could not be saved.
-        if (finalizeError || markerInserted !== true) continue;
+        if (finalizeError || closeout?.finalized !== true) continue;
+        absencesCreated += Number(closeout.absences_created ?? 0);
         servicesFinalized++;
 
         if (isSundaySchool(schedule)) {
           reportsCreated += await sendSundaySchoolReport(
             client,
-            churchId,
+            scheduleChurchId,
             serviceId,
             info.isoDate,
             sundaySchoolLeaders,

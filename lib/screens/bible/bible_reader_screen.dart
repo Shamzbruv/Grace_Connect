@@ -13,6 +13,7 @@ import '../../services/bible_service.dart';
 import '../../services/direct_message_service.dart';
 import '../../services/user_service.dart';
 import '../../theme/app_colors.dart';
+import '../../widgets/message_request_composer.dart';
 import '../../widgets/share/share_card_customizer_sheet.dart';
 import '../messages/message_thread_screen.dart';
 
@@ -642,13 +643,14 @@ class _BibleReaderScreenState extends State<BibleReaderScreen>
             }
 
             Future<void> sendTo(UserProfile recipient) async {
+              final messageService = DirectMessageService();
               try {
                 final conversation =
-                    await DirectMessageService().getOrCreateConversation(
+                    await messageService.getOrCreateConversation(
                   currentUser: currentUser,
                   otherUser: recipient,
                 );
-                await DirectMessageService().sendMessage(
+                await messageService.sendMessage(
                   conversationId: conversation.id,
                   text: text,
                   recipientUserId: recipient.uid,
@@ -673,6 +675,17 @@ class _BibleReaderScreenState extends State<BibleReaderScreen>
                 );
               } catch (error) {
                 if (!sheetContext.mounted) return;
+                if (messageService.isMessageRequestRequiredError(error)) {
+                  Navigator.pop(sheetContext);
+                  if (!mounted) return;
+                  await showMessageRequestComposer(
+                    this.context,
+                    recipient: recipient,
+                    initialMessage: text,
+                    messageService: messageService,
+                  );
+                  return;
+                }
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(content: Text('Could not send verse: $error')),
                 );

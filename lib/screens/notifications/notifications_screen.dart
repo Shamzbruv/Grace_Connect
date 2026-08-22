@@ -4,15 +4,11 @@ import 'package:timeago/timeago.dart' as timeago;
 
 import '../../models/app_notification.dart';
 import '../../models/bible_nudge.dart';
-import '../../models/user_profile.dart';
 import '../../providers/user_role_provider.dart';
 import '../../services/bible_nudge_service.dart';
 import '../../services/community_service.dart';
-import '../../services/direct_message_service.dart';
 import '../../services/notification_service.dart';
-import '../../services/user_service.dart';
 import '../community/post_detail_screen.dart';
-import '../messages/message_thread_screen.dart';
 import '../../widgets/ui/app_feedback.dart';
 import '../../widgets/ui/app_scaffold.dart';
 
@@ -110,6 +106,18 @@ class NotificationsScreen extends StatelessWidget {
       return;
     }
 
+    if (notification.type == 'message_request_received' ||
+        notification.type == 'message_request_accepted' ||
+        notification.type == 'message_request_denied') {
+      await notificationService.markAsRead(notification.id);
+      if (!context.mounted) return;
+      final tab = notification.type == 'message_request_accepted'
+          ? 'messages'
+          : 'requests';
+      Navigator.pushNamed(context, '/inbox?tab=$tab');
+      return;
+    }
+
     await notificationService.markAsRead(notification.id);
     if (!context.mounted) return;
 
@@ -153,7 +161,21 @@ class NotificationsScreen extends StatelessWidget {
     if (notification.type == 'bible_nudge_response' &&
         notification.entityTable == 'bible_nudges' &&
         notification.entityId?.isNotEmpty == true) {
-      await _openBibleNudgeMessageThread(context, notification);
+      final accepted = notification.title.toLowerCase().contains('accepted');
+      final actorId = notification.actorId?.trim() ?? '';
+      if (accepted && actorId.isNotEmpty) {
+        Navigator.pushNamed(
+          context,
+          '/public_profile?id=${Uri.encodeComponent(actorId)}',
+        );
+      } else {
+        Navigator.pushNamed(
+          context,
+          notification.route?.trim().isNotEmpty == true
+              ? notification.route!.trim()
+              : '/notifications',
+        );
+      }
       return;
     }
 
@@ -161,146 +183,6 @@ class NotificationsScreen extends StatelessWidget {
     if (route != null && route.isNotEmpty && context.mounted) {
       Navigator.pushNamed(context, route);
     }
-  }
-
-  Future<void> _openBibleNudgeMessageThread(
-    BuildContext context,
-    AppNotification notification,
-  ) async {
-    final currentUser = context.read<UserRoleProvider>().userProfile;
-    if (currentUser == null) return;
-
-    try {
-      final nudge =
-          await BibleNudgeService().getNudge(notification.entityId ?? '');
-      if (!context.mounted) return;
-      if (nudge != null && nudge.status != 'accepted') {
-        Navigator.pushNamed(context, notification.route ?? '/notifications');
-        return;
-      }
-
-      final otherUser = await _resolveBibleNudgeOtherUser(
-        currentUser: currentUser,
-        notification: notification,
-        nudge: nudge,
-      );
-      if (!context.mounted) return;
-      if (otherUser == null) {
-        AppFeedback.show(
-          context,
-          'That member profile could not be opened.',
-          type: AppFeedbackType.warning,
-        );
-        return;
-      }
-
-      final conversation = await DirectMessageService().getOrCreateConversation(
-        currentUser: currentUser,
-        otherUser: otherUser,
-      );
-      if (!context.mounted) return;
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => MessageThreadScreen(
-            conversation: conversation,
-            otherUser: otherUser,
-          ),
-        ),
-      );
-    } catch (error) {
-      if (!context.mounted) return;
-      AppFeedback.show(
-        context,
-        'Could not open message: $error',
-        type: AppFeedbackType.error,
-      );
-    }
-  }
-
-  Future<UserProfile?> _resolveBibleNudgeOtherUser({
-    required UserProfile currentUser,
-    required AppNotification notification,
-    BibleNudge? nudge,
-  }) async {
-    final userService = UserService();
-    final candidateIds = <String>[
-      if (notification.actorId?.trim().isNotEmpty == true)
-        notification.actorId!.trim(),
-      if (nudge != null && currentUser.uid == nudge.senderId) nudge.recipientId,
-      if (nudge != null && currentUser.uid == nudge.recipientId) nudge.senderId,
-      if (nudge != null) nudge.recipientId,
-      if (nudge != null) nudge.senderId,
-    ];
-
-    for (final id in candidateIds) {
-      if (id.isEmpty || id == currentUser.uid) continue;
-      final profile = await userService.getUserProfile(id);
-      if (profile != null) return profile;
-    }
-
-    final candidateNames = <String>[
-      if (nudge?.recipientName.trim().isNotEmpty == true)
-        nudge!.recipientName.trim(),
-      if (nudge?.senderName.trim().isNotEmpty == true) nudge!.senderName.trim(),
-      if (notification.actorName.trim().isNotEmpty)
-        notification.actorName.trim(),
-      _nameFromBibleNudgeBody(notification.body),
-    ].where((name) => name.isNotEmpty).toSet();
-
-    for (final name in candidateNames) {
-      final profile = await userService.findBestPersonMatch(name);
-      if (profile != null && profile.uid != currentUser.uid) return profile;
-    }
-
-    if (nudge?.status == 'accepted') {
-      final fallbackId = candidateIds.firstWhere(
-        (id) => id.isNotEmpty && id != currentUser.uid,
-        orElse: () => '',
-      );
-      if (fallbackId.isNotEmpty) {
-        return UserProfile(
-          uid: fallbackId,
-          email: '',
-          fullName: _fallbackBibleNudgeName(currentUser, notification, nudge),
-          phoneNumber: '',
-          placeId: nudge?.churchId ?? currentUser.churchId,
-          placeName: '',
-          roles: const ['Member'],
-          joinDate: DateTime.now(),
-          allowMessages: true,
-        );
-      }
-    }
-
-    return null;
-  }
-
-  String _fallbackBibleNudgeName(
-    UserProfile currentUser,
-    AppNotification notification,
-    BibleNudge? nudge,
-  ) {
-    if (nudge != null) {
-      if (currentUser.uid == nudge.senderId &&
-          nudge.recipientName.trim().isNotEmpty) {
-        return nudge.recipientName.trim();
-      }
-      if (currentUser.uid == nudge.recipientId &&
-          nudge.senderName.trim().isNotEmpty) {
-        return nudge.senderName.trim();
-      }
-    }
-    if (notification.actorName.trim().isNotEmpty) {
-      return notification.actorName.trim();
-    }
-    final bodyName = _nameFromBibleNudgeBody(notification.body);
-    return bodyName.isNotEmpty ? bodyName : 'Member';
-  }
-
-  String _nameFromBibleNudgeBody(String body) {
-    final acceptedIndex = body.toLowerCase().indexOf(' accepted');
-    if (acceptedIndex <= 0) return '';
-    return body.substring(0, acceptedIndex).trim();
   }
 }
 
@@ -390,6 +272,17 @@ class _NotificationTile extends StatelessWidget {
                         ),
                       ),
                     ],
+                    if (notification.type == 'message_request_received') ...[
+                      const SizedBox(height: 10),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: FilledButton.icon(
+                          onPressed: onTap,
+                          icon: const Icon(Icons.mark_email_unread_outlined),
+                          label: const Text('Review request'),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -413,6 +306,9 @@ class _NotificationTile extends StatelessWidget {
       'family_response' => Icons.how_to_reg_outlined,
       'bible_nudge_request' => Icons.menu_book_outlined,
       'bible_nudge_response' => Icons.mark_chat_read_outlined,
+      'message_request_received' => Icons.mark_email_unread_outlined,
+      'message_request_accepted' => Icons.mark_chat_read_outlined,
+      'message_request_denied' => Icons.do_not_disturb_alt_outlined,
       _ => Icons.notifications_outlined,
     };
   }

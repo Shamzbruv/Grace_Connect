@@ -14,6 +14,7 @@ import '../../services/direct_message_service.dart';
 import '../../services/bible_nudge_service.dart';
 import '../../services/family_service.dart';
 import '../../widgets/profile_photo_viewer.dart';
+import '../../widgets/message_request_composer.dart';
 import '../../widgets/ui/app_feedback.dart';
 import '../messages/message_thread_screen.dart';
 
@@ -234,6 +235,14 @@ class _MembersListScreenState extends State<MembersListScreen> {
     } catch (error) {
       if (!mounted) return;
       final otherUser = UserProfile.fromMap(data);
+      if (_messageService.isMessageRequestRequiredError(error)) {
+        await showMessageRequestComposer(
+          context,
+          recipient: otherUser,
+          messageService: _messageService,
+        );
+        return;
+      }
       AppFeedback.show(
         context,
         _messageAccessHelpForMember(otherUser, error),
@@ -249,15 +258,14 @@ class _MembersListScreenState extends State<MembersListScreen> {
     final isOtherChurch = currentUser?.churchId.isNotEmpty == true &&
         member.churchId.isNotEmpty &&
         member.churchId != currentUser!.churchId;
-    final looksLikeAccessRule = errorText.contains('bible nudge') ||
-        errorText.contains('outside your church') ||
+    final looksLikeAccessRule = errorText.contains('message request') ||
         errorText.contains('profile was not found') ||
         errorText.contains('not accepting messages') ||
         errorText.contains('not available') ||
         errorText.contains('blocked');
 
     if (isOtherChurch && looksLikeAccessRule) {
-      return 'This person is outside your church. Send a Bible Nudge first. Once both people accept, you can view their profile and message each other anytime.';
+      return 'This person must approve a message request before a private conversation can begin.';
     }
 
     return 'Could not open message: $error';
@@ -270,12 +278,12 @@ class _MembersListScreenState extends State<MembersListScreen> {
 
     final senderChurch = sender.churchId.trim();
     final recipientChurch = recipient.churchId.trim();
-    if (senderChurch.isNotEmpty &&
-        recipientChurch.isNotEmpty &&
+    if (senderChurch.isEmpty ||
+        recipientChurch.isEmpty ||
         senderChurch == recipientChurch) {
       AppFeedback.show(
         context,
-        'Bible Nudge is only for people outside your church. Use Message for members of your church.',
+        'Bible Nudge is only for members of two different churches. It does not unlock private messages.',
         type: AppFeedbackType.info,
       );
       return;
@@ -376,7 +384,11 @@ class _MembersListScreenState extends State<MembersListScreen> {
     final canMessage = !isOwnProfile &&
         !isPrivate &&
         (isSameChurch || memberProfile.allowMessages);
-    final canNudge = !isOwnProfile && !isPrivate && !isSameChurch;
+    final canNudge = !isOwnProfile &&
+        !isPrivate &&
+        (currentUser?.placeId ?? '').trim().isNotEmpty &&
+        memberProfile.placeId.trim().isNotEmpty &&
+        !isSameChurch;
 
     showModalBottomSheet(
       context: context,

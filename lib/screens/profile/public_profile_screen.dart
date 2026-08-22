@@ -3,11 +3,16 @@ import 'package:provider/provider.dart';
 
 import '../../models/post.dart';
 import '../../models/social_profile.dart';
+import '../../models/user_profile.dart';
 import '../../providers/user_role_provider.dart';
 import '../../services/community_service.dart';
+import '../../services/direct_message_service.dart';
 import '../../services/social_profile_service.dart';
+import '../../services/user_service.dart';
+import '../../widgets/message_request_composer.dart';
 import '../../widgets/profile_photo_viewer.dart';
 import '../../widgets/ui/app_scaffold.dart';
+import '../messages/message_thread_screen.dart';
 
 class PublicProfileScreen extends StatefulWidget {
   const PublicProfileScreen({
@@ -24,10 +29,12 @@ class PublicProfileScreen extends StatefulWidget {
 class _PublicProfileScreenState extends State<PublicProfileScreen> {
   final SocialProfileService _service = SocialProfileService();
   final CommunityService _communityService = CommunityService();
+  final DirectMessageService _messageService = DirectMessageService();
   late Future<SocialProfile?> _profileFuture;
   late Future<List<Post>> _postsFuture;
   String _followStatus = 'none';
   bool _updatingFollow = false;
+  bool _startingMessage = false;
   int? _followerCountOverride;
 
   @override
@@ -94,9 +101,77 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
     }
   }
 
+  Future<void> _startMessage(SocialProfile profile) async {
+    if (_startingMessage) return;
+    final currentUser = context.read<UserRoleProvider>().userProfile;
+    if (currentUser == null) return;
+
+    setState(() => _startingMessage = true);
+    try {
+      final recipient = await UserService().getUserProfile(profile.userId) ??
+          UserProfile(
+            uid: profile.userId,
+            email: '',
+            fullName: profile.displayName,
+            phoneNumber: '',
+            placeId: profile.churchId,
+            placeName: profile.churchName,
+            roles: const ['Member'],
+            joinDate: DateTime.now(),
+            photoUrl: profile.avatarUrl,
+            allowMessages: profile.acceptsMessages,
+          );
+      final conversation = await _messageService.getOrCreateConversation(
+        currentUser: currentUser,
+        otherUser: recipient,
+      );
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => MessageThreadScreen(
+            conversation: conversation,
+            otherUser: recipient,
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      if (_messageService.isMessageRequestRequiredError(error)) {
+        final recipient = await UserService().getUserProfile(profile.userId) ??
+            UserProfile(
+              uid: profile.userId,
+              email: '',
+              fullName: profile.displayName,
+              phoneNumber: '',
+              placeId: profile.churchId,
+              placeName: profile.churchName,
+              roles: const ['Member'],
+              joinDate: DateTime.now(),
+              photoUrl: profile.avatarUrl,
+              allowMessages: profile.acceptsMessages,
+            );
+        if (!mounted) return;
+        await showMessageRequestComposer(
+          context,
+          recipient: recipient,
+          messageService: _messageService,
+        );
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not start message: $error')),
+      );
+    } finally {
+      if (mounted) setState(() => _startingMessage = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final currentUserId = context.watch<UserRoleProvider>().userProfile?.uid;
+    final currentProfile = context.watch<UserRoleProvider>().userProfile;
+    final currentUserId = _messageService.currentUserId.isNotEmpty
+        ? _messageService.currentUserId
+        : currentProfile?.uid;
 
     return AppScaffold(
       title: 'Public Profile',
@@ -175,11 +250,18 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                   ),
                   const SizedBox(height: 10),
                   OutlinedButton.icon(
-                    onPressed: profile.acceptsMessages
-                        ? () => Navigator.of(context).pushNamed('/inbox')
+                    onPressed: profile.acceptsMessages && !_startingMessage
+                        ? () => _startMessage(profile)
                         : null,
-                    icon: const Icon(Icons.chat_bubble_outline),
-                    label: const Text('Message'),
+                    icon: _startingMessage
+                        ? const SizedBox.square(
+                            dimension: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.chat_bubble_outline),
+                    label: Text(
+                      _startingMessage ? 'Opening…' : 'Message',
+                    ),
                   ),
                 ],
                 const SizedBox(height: 24),

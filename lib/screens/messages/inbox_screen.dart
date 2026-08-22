@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../../models/direct_conversation.dart';
+import '../../models/direct_message_request.dart';
 import '../../models/user_profile.dart';
 import '../../providers/user_role_provider.dart';
 import '../../services/direct_message_service.dart';
@@ -12,10 +13,16 @@ import '../../services/user_service.dart';
 import '../../widgets/ui/app_card.dart';
 import '../../widgets/ui/app_loader.dart';
 import '../../widgets/ui/app_scaffold.dart';
+import '../../widgets/message_request_composer.dart';
 import 'message_thread_screen.dart';
 
 class InboxScreen extends StatefulWidget {
-  const InboxScreen({super.key});
+  const InboxScreen({
+    super.key,
+    this.initialTab = 0,
+  }) : assert(initialTab == 0 || initialTab == 1);
+
+  final int initialTab;
 
   @override
   State<InboxScreen> createState() => _InboxScreenState();
@@ -61,6 +68,15 @@ class _InboxScreenState extends State<InboxScreen> {
             );
           } catch (error) {
             if (!mounted) return;
+            if (_messageService.isMessageRequestRequiredError(error)) {
+              navigator.pop();
+              await showMessageRequestComposer(
+                context,
+                recipient: member,
+                messageService: _messageService,
+              );
+              return;
+            }
             messenger.showSnackBar(
               SnackBar(content: Text('Could not start message: $error')),
             );
@@ -104,73 +120,428 @@ class _InboxScreenState extends State<InboxScreen> {
       ),
       body: currentUser == null
           ? const Center(child: AppLoader())
-          : StreamBuilder<List<DirectConversation>>(
-              stream: _messageService.watchConversations(),
-              builder: (context, snapshot) {
-                if (snapshot.hasError) {
-                  return Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Text('Could not load inbox: ${snapshot.error}'),
-                    ),
-                  );
-                }
-
-                if (!snapshot.hasData) {
-                  return const Center(child: AppLoader());
-                }
-
-                final conversations = snapshot.data!;
-                if (conversations.isEmpty) {
-                  return Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.inbox_outlined,
-                            size: 56,
-                            color:
-                                Theme.of(context).colorScheme.onSurfaceVariant,
+          : DefaultTabController(
+              length: 2,
+              initialIndex: widget.initialTab,
+              child: Column(
+                children: [
+                  StreamBuilder<int>(
+                    stream: _messageService.watchPendingMessageRequestCount(),
+                    builder: (context, snapshot) {
+                      final pendingCount = snapshot.data ?? 0;
+                      return TabBar(
+                        tabs: [
+                          const Tab(
+                            icon: Icon(Icons.chat_bubble_outline),
+                            text: 'Messages',
                           ),
-                          const SizedBox(height: 16),
-                          Text(
-                            'No messages yet',
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                          const SizedBox(height: 12),
-                          FilledButton.icon(
-                            onPressed: _openMemberPicker,
-                            icon: const Icon(Icons.edit_outlined),
-                            label: const Text('Start a Message'),
-                          ),
-                          const SizedBox(height: 10),
-                          OutlinedButton.icon(
-                            onPressed: () =>
-                                Navigator.of(context).pushNamed('/grace_rooms'),
-                            icon: const Icon(Icons.forum_outlined),
-                            label: const Text('Open Grace Rooms'),
+                          Tab(
+                            icon: Badge(
+                              isLabelVisible: pendingCount > 0,
+                              label: Text('$pendingCount'),
+                              child:
+                                  const Icon(Icons.mark_email_unread_outlined),
+                            ),
+                            text: 'Requests',
                           ),
                         ],
+                      );
+                    },
+                  ),
+                  Expanded(
+                    child: TabBarView(
+                      children: [
+                        _MessagesPane(
+                          currentUser: currentUser,
+                          messageService: _messageService,
+                          onStartMessage: _openMemberPicker,
+                        ),
+                        _MessageRequestsPane(
+                          messageService: _messageService,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+    );
+  }
+}
+
+class _MessagesPane extends StatelessWidget {
+  const _MessagesPane({
+    required this.currentUser,
+    required this.messageService,
+    required this.onStartMessage,
+  });
+
+  final UserProfile currentUser;
+  final DirectMessageService messageService;
+  final VoidCallback onStartMessage;
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<List<DirectConversation>>(
+      stream: messageService.watchConversations(),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Text('Could not load inbox: ${snapshot.error}'),
+            ),
+          );
+        }
+        if (!snapshot.hasData) return const Center(child: AppLoader());
+
+        final conversations = snapshot.data!;
+        if (conversations.isEmpty) {
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.inbox_outlined,
+                    size: 56,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'No messages yet',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 12),
+                  FilledButton.icon(
+                    onPressed: onStartMessage,
+                    icon: const Icon(Icons.edit_outlined),
+                    label: const Text('Start a Message'),
+                  ),
+                  const SizedBox(height: 10),
+                  OutlinedButton.icon(
+                    onPressed: () =>
+                        Navigator.of(context).pushNamed('/grace_rooms'),
+                    icon: const Icon(Icons.forum_outlined),
+                    label: const Text('Open Grace Rooms'),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+
+        return ListView.builder(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 88),
+          itemCount: conversations.length,
+          itemBuilder: (context, index) => _ConversationTile(
+            conversation: conversations[index],
+            currentUser: currentUser,
+            messageService: messageService,
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _MessageRequestsPane extends StatelessWidget {
+  const _MessageRequestsPane({
+    required this.messageService,
+  });
+
+  final DirectMessageService messageService;
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<List<DirectMessageRequest>>(
+      stream: messageService.watchMessageRequests(),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Text(
+                'Could not load message requests: ${snapshot.error}',
+              ),
+            ),
+          );
+        }
+        if (!snapshot.hasData) return const Center(child: AppLoader());
+        final requests = snapshot.data!;
+        if (requests.isEmpty) {
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.mark_email_read_outlined,
+                    size: 56,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    'No message requests',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'People outside your church must ask before starting a private conversation.',
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+
+        return ListView.builder(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 88),
+          itemCount: requests.length,
+          itemBuilder: (context, index) => _MessageRequestTile(
+            request: requests[index],
+            messageService: messageService,
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _MessageRequestTile extends StatefulWidget {
+  const _MessageRequestTile({
+    required this.request,
+    required this.messageService,
+  });
+
+  final DirectMessageRequest request;
+  final DirectMessageService messageService;
+
+  @override
+  State<_MessageRequestTile> createState() => _MessageRequestTileState();
+}
+
+class _MessageRequestTileState extends State<_MessageRequestTile> {
+  bool _saving = false;
+
+  Future<void> _respond(bool accepted) async {
+    final responseController = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(accepted ? 'Accept request?' : 'Decline request?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              accepted
+                  ? 'Their first message will be delivered and a private conversation will open.'
+                  : 'They will be notified and cannot request you again for 30 days.',
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: responseController,
+              minLines: 2,
+              maxLines: 4,
+              maxLength: 500,
+              decoration: InputDecoration(
+                labelText: accepted ? 'Optional response' : 'Optional reason',
+                alignLabelWithHint: true,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: Text(accepted ? 'Accept' : 'Decline'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) {
+      responseController.dispose();
+      return;
+    }
+
+    setState(() => _saving = true);
+    try {
+      await widget.messageService.respondToMessageRequest(
+        request: widget.request,
+        accepted: accepted,
+        responseMessage: responseController.text,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            accepted
+                ? 'Request accepted. Their first message is now in Messages.'
+                : 'Request declined. The 30-day wait is now active.',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not respond: $error')),
+      );
+    } finally {
+      responseController.dispose();
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _cancel() async {
+    setState(() => _saving = true);
+    try {
+      await widget.messageService.cancelMessageRequest(widget.request);
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not cancel request: $error')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final request = widget.request;
+    final authUserId = widget.messageService.currentUserId;
+    final incoming = request.isIncomingFor(authUserId);
+    final theme = Theme.of(context);
+    return FutureBuilder<UserProfile?>(
+      future: widget.messageService.getMessageRequestPeer(request),
+      builder: (context, snapshot) {
+        final peer = snapshot.data;
+        final name = peer?.fullName.trim().isNotEmpty == true
+            ? peer!.fullName.trim()
+            : 'Grace Connect member';
+        final statusColor = switch (request.status) {
+          'accepted' => Colors.green,
+          'denied' => theme.colorScheme.error,
+          'cancelled' => theme.colorScheme.outline,
+          _ => theme.colorScheme.primary,
+        };
+
+        return AppCard(
+          margin: const EdgeInsets.only(bottom: 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  CircleAvatar(
+                    backgroundImage: peer?.photoUrl.isNotEmpty == true
+                        ? NetworkImage(peer!.photoUrl)
+                        : null,
+                    child: peer?.photoUrl.isNotEmpty == true
+                        ? null
+                        : Text(name.characters.first.toUpperCase()),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          incoming ? name : 'To $name',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        Text(
+                          DateFormat('MMM d, yyyy · h:mm a')
+                              .format(request.createdAt),
+                          style: theme.textTheme.bodySmall,
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 9,
+                      vertical: 5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: statusColor.withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      request.status.toUpperCase(),
+                      style: TextStyle(
+                        color: statusColor,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w900,
                       ),
                     ),
-                  );
-                }
-
-                return ListView.builder(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 88),
-                  itemCount: conversations.length,
-                  itemBuilder: (context, index) {
-                    return _ConversationTile(
-                      conversation: conversations[index],
-                      currentUser: currentUser,
-                      messageService: _messageService,
-                    );
-                  },
-                );
-              },
-            ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Text('Why they want to message',
+                  style: theme.textTheme.labelLarge),
+              const SizedBox(height: 4),
+              Text(request.reason),
+              const SizedBox(height: 12),
+              Text('First message', style: theme.textTheme.labelLarge),
+              const SizedBox(height: 4),
+              Text(request.intendedMessage),
+              if (request.responseMessage?.isNotEmpty == true) ...[
+                const SizedBox(height: 12),
+                Text('Response', style: theme.textTheme.labelLarge),
+                const SizedBox(height: 4),
+                Text(request.responseMessage!),
+              ],
+              if (!incoming && request.retryAvailableAt != null) ...[
+                const SizedBox(height: 10),
+                Text(
+                  'You can request again after ${DateFormat('MMM d, yyyy · h:mm a').format(request.retryAvailableAt!)}.',
+                  style: theme.textTheme.bodySmall,
+                ),
+              ],
+              if (request.isPending) ...[
+                const SizedBox(height: 16),
+                if (incoming)
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: _saving ? null : () => _respond(false),
+                          child: const Text('Decline'),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: FilledButton(
+                          onPressed: _saving ? null : () => _respond(true),
+                          child: const Text('Accept'),
+                        ),
+                      ),
+                    ],
+                  )
+                else
+                  OutlinedButton.icon(
+                    onPressed: _saving ? null : _cancel,
+                    icon: const Icon(Icons.cancel_outlined),
+                    label: const Text('Cancel request'),
+                  ),
+              ],
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -188,13 +559,16 @@ class _ConversationTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final viewerId = messageService.currentUserId.isNotEmpty
+        ? messageService.currentUserId
+        : currentUser.uid;
     return FutureBuilder<UserProfile?>(
       future: messageService.getConversationPeer(
         conversation,
-        currentUser.uid,
+        viewerId,
       ),
       builder: (context, snapshot) {
-        final fallbackPeerId = conversation.otherMemberId(currentUser.uid);
+        final fallbackPeerId = conversation.otherMemberId(viewerId);
         final otherUser = snapshot.data ??
             (fallbackPeerId.isEmpty
                 ? null
@@ -214,7 +588,7 @@ class _ConversationTile extends StatelessWidget {
             : 'Member';
         final lastMessage = conversation.lastMessage?.trim();
         final timestamp = conversation.lastMessageAt;
-        if (conversation.lastSenderId != currentUser.uid) {
+        if (conversation.lastSenderId != viewerId) {
           messageService.markConversationDelivered(conversation.id);
         }
 

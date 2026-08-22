@@ -18,6 +18,7 @@ import '../../services/feed_scroll_service.dart';
 import '../../services/moderation_service.dart';
 import '../../services/saved_items_service.dart';
 import '../../services/membership_service.dart';
+import '../../services/notification_service.dart';
 import '../../services/user_service.dart';
 import '../../models/community_feed_mode.dart';
 import '../../models/church_model.dart';
@@ -34,7 +35,9 @@ import 'package:image_picker/image_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../access/app_access_context.dart';
 import '../../widgets/inbox_icon_button.dart';
+import '../../widgets/message_request_composer.dart';
 import '../../widgets/community_video_player.dart';
 import '../church/church_public_profile_screen.dart';
 import '../live_streaming/live_streaming_screen.dart';
@@ -90,7 +93,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
   final Set<String> _loadingChurchNameIds = {};
   final Map<String, List<String>> _postLikeOverrides = {};
   final Set<String> _prefetchedVideoPosterUrls = {};
-  String _feedScope = 'church';
+  String _feedScope = CommunityFeedMode.discover.storageValue;
   List<String>? _selectedFeedChurchIds;
   String? _selectedFeedLabel;
   bool _postVisibleToAllChurches = false;
@@ -139,31 +142,36 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
     if (!mounted) return;
     final dataSaver = prefs.getBool('data_saver') ?? false;
     final uid = _auth.currentUser?.id ?? 'guest';
-    final savedScope = prefs.getString('community_feed_scope_$uid') ?? 'church';
+    final savedScope = prefs.getString('community_feed_scope_$uid');
     final savedChurchIds =
         prefs.getStringList('community_feed_church_ids_$uid');
     final savedLabel = prefs.getString('community_feed_label_$uid');
-    final normalizedScope = savedScope == 'all' ? 'discover' : savedScope;
-    final validScope = normalizedScope == 'discover' ||
-            normalizedScope == 'following' ||
-            normalizedScope == 'custom' ||
-            normalizedScope == 'church'
-        ? normalizedScope
-        : 'church';
+    final profileChurchId =
+        Provider.of<UserRoleProvider>(context, listen: false)
+                .userProfile
+                ?.placeId ??
+            '';
+    AppAccessContext? access;
+    try {
+      access = Provider.of<AppAccessContext>(context, listen: false);
+    } catch (_) {
+      // Compatibility fallback for older standalone feed routes.
+    }
+    final hasActiveChurchMembership =
+        access?.hasActiveChurchMembership ?? profileChurchId.trim().isNotEmpty;
+    final initialScope = resolveInitialCommunityFeedScope(
+      savedScope: savedScope,
+      customChurchIds: savedChurchIds,
+      forceDiscover: _hasLimitedAccess || !hasActiveChurchMembership,
+    );
     setState(() {
       _showMediaPreviews =
           !dataSaver && (prefs.getBool('community_show_media') ?? true);
       _confirmBeforePosting =
           prefs.getBool('community_confirm_before_posting') ?? false;
-      final nextScope = _hasLimitedAccess
-          ? 'discover'
-          : validScope == 'custom' &&
-                  (savedChurchIds == null || savedChurchIds.isEmpty)
-              ? 'church'
-              : validScope;
-      _feedScope = nextScope;
-      _selectedFeedChurchIds = nextScope == 'custom' ? savedChurchIds : null;
-      _selectedFeedLabel = nextScope == 'custom' ? savedLabel : null;
+      _feedScope = initialScope;
+      _selectedFeedChurchIds = initialScope == 'custom' ? savedChurchIds : null;
+      _selectedFeedLabel = initialScope == 'custom' ? savedLabel : null;
     });
   }
 
@@ -1038,8 +1046,12 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
     } catch (error) {
       if (!mounted) return;
       final fallbackAuthor = _profileFromPostAuthor(post);
-      if (_shouldOfferBibleNudgeForPost(post, currentUser, error)) {
-        await _showBibleNudgeRequiredPrompt(fallbackAuthor);
+      if (_messageService.isMessageRequestRequiredError(error)) {
+        await showMessageRequestComposer(
+          context,
+          recipient: fallbackAuthor,
+          messageService: _messageService,
+        );
         return;
       }
       AppFeedback.show(
@@ -1302,76 +1314,20 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
     );
   }
 
-  bool _shouldOfferBibleNudgeForPost(
-    Post post,
-    UserProfile currentUser,
-    Object error,
-  ) {
-    return _isDifferentKnownChurch(post.placeId, currentUser.churchId) &&
-        _isBibleNudgeAccessIssue(error);
-  }
-
-  bool _shouldOfferBibleNudgeForProfile(
-    UserProfile otherUser,
-    UserProfile currentUser,
-    Object error,
-  ) {
-    return _isDifferentKnownChurch(otherUser.churchId, currentUser.churchId) &&
-        _isBibleNudgeAccessIssue(error);
-  }
-
   bool _isDifferentKnownChurch(String otherChurchId, String currentChurchId) {
     final other = otherChurchId.trim();
     final current = currentChurchId.trim();
     return other.isNotEmpty && (current.isEmpty || other != current);
   }
 
-  bool _isBibleNudgeAccessIssue(Object error) {
+  bool _isMessageAccessIssue(Object error) {
     final message = error.toString().toLowerCase();
-    return message.contains('bible nudge') ||
-        message.contains('outside your church') ||
+    return message.contains('message request') ||
         message.contains('member profile was not found') ||
         message.contains('profile was not found') ||
         message.contains('not accepting messages') ||
         message.contains('not available') ||
         message.contains('blocked');
-  }
-
-  Future<void> _showBibleNudgeRequiredPrompt(UserProfile recipient) async {
-    if (!mounted) return;
-
-    final displayName = recipient.fullName.trim().isNotEmpty
-        ? recipient.fullName.trim()
-        : recipient.email.trim().isNotEmpty
-            ? recipient.email.trim()
-            : 'this member';
-
-    final shouldSend = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text('Bible Nudge required'),
-          content: Text(
-            'To view $displayName\'s profile or send a message, send a Bible Nudge first. Once both of you accept, you can view the profile and message each other anytime.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, false),
-              child: const Text('Not now'),
-            ),
-            FilledButton.icon(
-              onPressed: () => Navigator.pop(dialogContext, true),
-              icon: const Icon(Icons.menu_book_outlined),
-              label: const Text('Bible Nudge'),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (shouldSend == true && mounted) {
-      await _sendBibleNudge(recipient);
-    }
   }
 
   String _messageAccessHelpForPost(
@@ -1383,10 +1339,10 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
       post.placeId,
       currentUser.churchId,
     );
-    final isAccessIssue = _isBibleNudgeAccessIssue(error);
+    final isAccessIssue = _isMessageAccessIssue(error);
 
     if (isOtherChurch && isAccessIssue) {
-      return 'This person is outside your church. Send a Bible Nudge first. Once both people accept, you can view their profile and message each other anytime.';
+      return 'This person must approve a message request before a private conversation can begin.';
     }
 
     return 'Could not open message: $error';
@@ -1558,7 +1514,19 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final userProvider = Provider.of<UserRoleProvider>(context);
-    final churchId = userProvider.userProfile?.placeId ?? "";
+    final profileChurchId = userProvider.userProfile?.placeId ?? '';
+    AppAccessContext? access;
+    try {
+      access = Provider.of<AppAccessContext>(context);
+    } catch (_) {
+      // Older standalone routes do not provide AppAccessContext. The profile
+      // remains a safe compatibility fallback for those routes.
+    }
+    final hasActiveChurchMembership =
+        access?.hasActiveChurchMembership ?? profileChurchId.trim().isNotEmpty;
+    // Membership is authoritative. A stale placeId must not put a former or
+    // pending member back into church-only feeds or hide public navigation.
+    final churchId = hasActiveChurchMembership ? profileChurchId : '';
     final browseOnly = _isBrowseOnly(churchId);
     final feedChurchIds = churchId.isEmpty ? null : _feedChurchIds(churchId);
     final effectiveScope = _effectiveFeedScope(churchId);
@@ -1586,6 +1554,54 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                 : () => Scaffold.maybeOf(actionContext)?.openDrawer(),
           ),
         ),
+        if (!hasActiveChurchMembership)
+          StreamBuilder<int>(
+            stream: userProvider.userProfile == null
+                ? const Stream<int>.empty()
+                : NotificationService().watchUnreadCount(
+                    userProvider.userProfile!.uid,
+                  ),
+            builder: (context, snapshot) {
+              final unreadCount = snapshot.data ?? 0;
+              return Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  IconButton(
+                    key: const ValueKey('churchless-feed-notifications'),
+                    tooltip: 'Notifications',
+                    icon: const Icon(Icons.notifications_outlined),
+                    onPressed: () =>
+                        Navigator.pushNamed(context, '/notifications'),
+                  ),
+                  if (unreadCount > 0)
+                    Positioned(
+                      right: 8,
+                      top: 8,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 5,
+                          vertical: 2,
+                        ),
+                        constraints: const BoxConstraints(minWidth: 18),
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.error,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          unreadCount > 99 ? '99+' : '$unreadCount',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: theme.colorScheme.onError,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            },
+          ),
         if (!browseOnly) const InboxIconButton(),
       ],
       drawer: browseOnly ? null : _buildFeedSettingsDrawer(context, churchId),
@@ -1726,7 +1742,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
     }
 
     if (itemIndex == 0) return _buildStoriesSection(context, churchId);
-    if (itemIndex == 1) return _buildFeedScopeSummary(context);
+    if (itemIndex == 1) return _buildFeedScopeSummary(context, churchId);
     if (itemIndex == 2) return const Divider(height: 1);
 
     var contentIndex = itemIndex - 3;
@@ -1797,12 +1813,13 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
     );
   }
 
-  Widget _buildFeedScopeSummary(BuildContext context) {
+  Widget _buildFeedScopeSummary(
+    BuildContext context,
+    String activeChurchId,
+  ) {
     final theme = Theme.of(context);
-    final profileChurchId =
-        context.read<UserRoleProvider>().userProfile?.placeId ?? '';
-    final effectiveScope = _effectiveFeedScope(profileChurchId);
-    final subtitle = _isBrowseOnly(profileChurchId)
+    final effectiveScope = _effectiveFeedScope(activeChurchId);
+    final subtitle = _isBrowseOnly(activeChurchId)
         ? 'Showing public posts shared across Grace Connect'
         : switch (effectiveScope) {
             'discover' => 'Showing public posts across Grace Connect',
@@ -1907,6 +1924,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
 
   Widget _buildFeedSettingsDrawer(BuildContext context, String ownChurchId) {
     final theme = Theme.of(context);
+    final effectiveScope = _effectiveFeedScope(ownChurchId);
 
     void applyScope({
       required String scope,
@@ -1938,7 +1956,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
             const SizedBox(height: 16),
             _FeedScopeChip(
               label: 'My Church',
-              selected: _feedScope == 'church',
+              selected: effectiveScope == 'church',
               icon: Icons.church_outlined,
               onSelected: ownChurchId.trim().isEmpty
                   ? null
@@ -1954,7 +1972,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
             const SizedBox(height: 10),
             _FeedScopeChip(
               label: 'Discover',
-              selected: _feedScope == 'discover' || _feedScope == 'all',
+              selected: effectiveScope == 'discover',
               icon: Icons.public_outlined,
               onSelected: () => applyScope(scope: 'discover'),
             ),
@@ -2518,12 +2536,12 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
 
     final senderChurch = sender.churchId.trim();
     final recipientChurch = recipient.churchId.trim();
-    if (senderChurch.isNotEmpty &&
-        recipientChurch.isNotEmpty &&
+    if (senderChurch.isEmpty ||
+        recipientChurch.isEmpty ||
         senderChurch == recipientChurch) {
       AppFeedback.show(
         context,
-        'Bible Nudge is only for people outside your church. Use Message for members of your church.',
+        'Bible Nudge is only for members of two different churches. It does not unlock private messages.',
         type: AppFeedbackType.info,
       );
       return;
@@ -2614,8 +2632,12 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
       );
     } catch (error) {
       if (!mounted) return;
-      if (_shouldOfferBibleNudgeForProfile(otherUser, currentUser, error)) {
-        await _showBibleNudgeRequiredPrompt(otherUser);
+      if (_messageService.isMessageRequestRequiredError(error)) {
+        await showMessageRequestComposer(
+          context,
+          recipient: otherUser,
+          messageService: _messageService,
+        );
         return;
       }
       AppFeedback.show(
@@ -2635,10 +2657,10 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
       otherUser.churchId,
       currentUser.churchId,
     );
-    final isAccessIssue = _isBibleNudgeAccessIssue(error);
+    final isAccessIssue = _isMessageAccessIssue(error);
 
     if (isOtherChurch && isAccessIssue) {
-      return 'This person is outside your church. Send a Bible Nudge first. Once both people accept, you can view their profile and message each other anytime.';
+      return 'This person must approve a message request before a private conversation can begin.';
     }
 
     return 'Could not open message: $error';
@@ -3878,6 +3900,29 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
       );
     } catch (error) {
       if (!mounted) return;
+      if (_messageService.isMessageRequestRequiredError(error)) {
+        final recipient = await UserService().getUserProfile(story.authorId) ??
+            UserProfile(
+              uid: story.authorId,
+              email: '',
+              fullName: story.authorName,
+              phoneNumber: '',
+              placeId: story.churchId,
+              placeName: '',
+              roles: const ['Member'],
+              joinDate: DateTime.now(),
+              photoUrl: story.authorPhoto ?? '',
+              allowMessages: true,
+            );
+        if (!mounted) return;
+        await showMessageRequestComposer(
+          context,
+          recipient: recipient,
+          initialMessage: cleanText,
+          messageService: _messageService,
+        );
+        return;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Could not send status reply: $error')),
       );

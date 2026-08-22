@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
@@ -27,6 +29,7 @@ class DailyWordScreen extends StatefulWidget {
 
 class _DailyWordScreenState extends State<DailyWordScreen> {
   final _service = DailyMotivationService();
+  final _dailyWordShareKey = GlobalKey();
   late Future<_DailyWordData> _future;
 
   @override
@@ -81,12 +84,48 @@ class _DailyWordScreenState extends State<DailyWordScreen> {
     );
   }
 
-  /// The Daily Word is the app's own wording, not scripture -- a member
-  /// posting it as-is isn't skipping any required editing step the way
-  /// sharing an unedited verse image would be, so a plain-text option
-  /// sits alongside the image customizer here. Bible verses only ever go
-  /// through the customizer (see bible_reader_screen.dart's
-  /// _shareSelectedVerses), no bypass.
+  Future<void> _shareOriginalDailyWordImage(
+    DailyMotivation motivation,
+  ) async {
+    try {
+      await WidgetsBinding.instance.endOfFrame;
+      final boundary = _dailyWordShareKey.currentContext?.findRenderObject()
+          as RenderRepaintBoundary?;
+      if (boundary == null) {
+        throw Exception('Daily Word card is not ready yet.');
+      }
+
+      final image = await boundary.toImage(pixelRatio: 3);
+      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      final pngBytes = byteData?.buffer.asUint8List();
+      if (pngBytes == null || pngBytes.isEmpty) {
+        throw Exception('Could not prepare Daily Word image.');
+      }
+
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [
+            XFile.fromData(
+              pngBytes,
+              mimeType: 'image/png',
+              name:
+                  'grace_daily_word_${DateFormat('yyyyMMdd').format(motivation.publishDate.toLocal())}.png',
+            ),
+          ],
+          text: 'Grace Connect Daily Word • ${motivation.scriptureReference}',
+          subject: motivation.title,
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      AppFeedback.show(
+        context,
+        'Could not share Daily Word image: $error',
+        type: AppFeedbackType.error,
+      );
+    }
+  }
+
   Future<void> _shareDailyWord(DailyMotivation motivation) async {
     final choice = await showModalBottomSheet<_DailyWordShareChoice>(
       context: context,
@@ -98,11 +137,11 @@ class _DailyWordScreenState extends State<DailyWordScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.text_fields_outlined),
-              title: const Text('Share as text'),
-              subtitle: const Text('Original wording, no image or editing'),
+              leading: const Icon(Icons.image_outlined),
+              title: const Text('Original'),
+              subtitle: const Text('Share the Daily Word card as shown'),
               onTap: () => Navigator.of(context)
-                  .pop(_DailyWordShareChoice.originalText),
+                  .pop(_DailyWordShareChoice.originalImage),
             ),
             ListTile(
               leading: const Icon(Icons.image_outlined),
@@ -116,11 +155,8 @@ class _DailyWordScreenState extends State<DailyWordScreen> {
       ),
     );
     if (choice == null || !mounted) return;
-    if (choice == _DailyWordShareChoice.originalText) {
-      await SharePlus.instance.share(ShareParams(
-        text: '${motivation.message}\n\n${motivation.scriptureReference}',
-        subject: motivation.title,
-      ));
+    if (choice == _DailyWordShareChoice.originalImage) {
+      await _shareOriginalDailyWordImage(motivation);
       return;
     }
     if (!mounted) return;
@@ -202,7 +238,10 @@ class _DailyWordScreenState extends State<DailyWordScreen> {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(18, 12, 18, 28),
               children: [
-                _DailyWordHero(motivation: data!.selected!),
+                RepaintBoundary(
+                  key: _dailyWordShareKey,
+                  child: _DailyWordHero(motivation: data!.selected!),
+                ),
                 const SizedBox(height: 12),
                 if (data.selected!.hasStudyQuiz) ...[
                   _QuizStudyNotice(
@@ -643,4 +682,4 @@ class _DailyWordData {
   final List<DailyMotivation> recent;
 }
 
-enum _DailyWordShareChoice { originalText, customizeImage }
+enum _DailyWordShareChoice { originalImage, customizeImage }

@@ -2,4 +2,8 @@ Grace Connect 1.0.30-beta+34
 
 - Removed the "Grace Connect" watermark from shared quote/scripture images. It used to sit at the bottom of the card and could overlap the quote text itself on longer passages.
 - Added a text size slider to the share customizer, so a long quote can be shrunk to fit the card, or a short one made bigger.
-- Daily Word sharing now offers a choice: share the original wording as plain text with no editing, or open the customizer to build a background image. Scripture sharing still always goes through the customizer.
+- Daily Word sharing now puts Original first and shares the complete styled Daily Word card as an image; the custom image designer remains available as the second option. Plain-text sharing has been removed.
+- Auto-attendance now keeps a server-backed dwell claim for the exact service occurrence, handles overnight services, and finalizes attendance atomically so a completed on-site countdown cannot race with an absent mark.
+- Added permission-based message requests for people outside the same active church. Requests include a reason and first message; acceptance delivers that message, while denial applies a 30-day cooldown and notifies the sender.
+- Bible Nudges remain available only between members of different active churches and no longer grant private-message access.
+- Discover is now the default feed. People without an active church also have a notification bell and unread count directly in the feed.

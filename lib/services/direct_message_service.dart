@@ -6,6 +6,7 @@ import 'package:uuid/uuid.dart';
 
 import '../models/direct_conversation.dart';
 import '../models/direct_message.dart';
+import '../models/direct_message_request.dart';
 import '../models/user_profile.dart';
 import 'notification_service.dart';
 import 'user_service.dart';
@@ -16,6 +17,7 @@ class DirectMessageService {
   static const Duration _realtimeQuietTimeout = Duration(seconds: 18);
 
   String get _currentUid => _supabase.auth.currentUser?.id ?? '';
+  String get currentUserId => _currentUid;
 
   Future<List<DirectConversation>> fetchConversations() async {
     final rows = await _supabase
@@ -76,6 +78,179 @@ class DirectMessageService {
             .length);
   }
 
+  Future<List<DirectMessageRequest>> fetchMessageRequests() async {
+    final rows = await _supabase
+        .from('direct_message_requests')
+        .select()
+        .order('created_at', ascending: false)
+        .limit(100);
+    return _normalizeMessageRequests(rows);
+  }
+
+  Stream<List<DirectMessageRequest>> watchMessageRequests() async* {
+    var lastKnown = <DirectMessageRequest>[];
+    try {
+      lastKnown = await fetchMessageRequests();
+      yield lastKnown;
+    } catch (error) {
+      debugPrint('Could not load message requests before realtime: $error');
+    }
+
+    try {
+      await for (final requests in _supabase
+          .from('direct_message_requests')
+          .stream(primaryKey: ['id'])
+          .order('created_at', ascending: false)
+          .map(_normalizeMessageRequests)
+          .timeout(
+            _realtimeQuietTimeout,
+            onTimeout: (sink) => sink.add(lastKnown),
+          )) {
+        lastKnown = requests;
+        yield requests;
+      }
+    } catch (error) {
+      debugPrint(
+        'Message-request realtime unavailable, keeping last known data: $error',
+      );
+      yield lastKnown;
+    }
+  }
+
+  Stream<int> watchPendingMessageRequestCount() {
+    final uid = _currentUid;
+    if (uid.isEmpty) return const Stream<int>.empty();
+    return watchMessageRequests().map(
+      (requests) => requests
+          .where((request) => request.isPending && request.recipientId == uid)
+          .length,
+    );
+  }
+
+  Future<DirectMessageRequest?> getMessageRequest(String requestId) async {
+    final cleanId = requestId.trim();
+    if (cleanId.isEmpty) return null;
+    final row = await _supabase
+        .from('direct_message_requests')
+        .select()
+        .eq('id', cleanId)
+        .maybeSingle();
+    return row == null ? null : DirectMessageRequest.fromMap(row);
+  }
+
+  Future<DirectMessageRequest> sendMessageRequest({
+    required UserProfile recipient,
+    required String reason,
+    required String intendedMessage,
+  }) async {
+    final cleanReason = reason.trim();
+    final cleanMessage = intendedMessage.trim();
+    if (_currentUid.isEmpty) {
+      throw Exception('Sign in before sending a message request.');
+    }
+    if (recipient.uid.trim().isEmpty || recipient.uid == _currentUid) {
+      throw Exception('Choose another person for this message request.');
+    }
+    if (cleanReason.length < 3) {
+      throw Exception('Tell them why you would like to message.');
+    }
+    if (cleanMessage.isEmpty) {
+      throw Exception('Write the first message you want them to receive.');
+    }
+
+    final requestId = const Uuid().v4();
+    final data = await _supabase.rpc(
+      'request_direct_message',
+      params: {
+        'recipient_user_id': recipient.uid,
+        'request_reason': cleanReason,
+        'first_message': cleanMessage,
+        'client_request_id': requestId,
+      },
+    );
+    final map = _mapFromRpcResult(data);
+    if (map == null) {
+      throw Exception('The message request could not be saved.');
+    }
+    final request = DirectMessageRequest.fromMap(map);
+    await _sendMessageRequestPush(request.id, event: 'request');
+    return request;
+  }
+
+  Future<DirectMessageRequestDecision> respondToMessageRequest({
+    required DirectMessageRequest request,
+    required bool accepted,
+    String responseMessage = '',
+  }) async {
+    if (_currentUid.isEmpty || request.recipientId != _currentUid) {
+      throw Exception('Only the recipient can answer this message request.');
+    }
+    final data = await _supabase.rpc(
+      'respond_to_direct_message_request',
+      params: {
+        'target_request_id': request.id,
+        'accept_request': accepted,
+        'response_note': responseMessage.trim(),
+      },
+    );
+    final map = _mapFromRpcResult(data);
+    if (map == null) {
+      throw Exception('The message request response was incomplete.');
+    }
+    final decision = DirectMessageRequestDecision.fromMap(map);
+    await _sendMessageRequestPush(
+      request.id,
+      event: accepted ? 'accepted' : 'denied',
+    );
+    return decision;
+  }
+
+  Future<DirectMessageRequest> cancelMessageRequest(
+    DirectMessageRequest request,
+  ) async {
+    if (_currentUid.isEmpty || request.senderId != _currentUid) {
+      throw Exception('Only the sender can cancel this message request.');
+    }
+    final data = await _supabase.rpc(
+      'cancel_direct_message_request',
+      params: {'target_request_id': request.id},
+    );
+    final map = _mapFromRpcResult(data);
+    if (map == null) {
+      throw Exception('The message request could not be cancelled.');
+    }
+    return DirectMessageRequest.fromMap(map);
+  }
+
+  Future<UserProfile?> getMessageRequestPeer(
+    DirectMessageRequest request,
+  ) {
+    final peerId = request.senderId == _currentUid
+        ? request.recipientId
+        : request.senderId;
+    return UserService().getUserProfile(peerId);
+  }
+
+  Future<void> _sendMessageRequestPush(
+    String requestId, {
+    required String event,
+  }) async {
+    if (requestId.trim().isEmpty) return;
+    try {
+      final response = await _supabase.functions.invoke(
+        'send-message-request-push',
+        body: {'requestId': requestId.trim(), 'event': event},
+      ).timeout(const Duration(seconds: 12));
+      if (response.data case final Map data when data['ok'] == false) {
+        debugPrint('Message-request push queued with warning: $data');
+      }
+    } catch (error) {
+      // The transaction already created the in-app notification. Keep the
+      // consent decision successful while surfacing push failures in logs.
+      debugPrint('Message-request push skipped: $error');
+    }
+  }
+
   Stream<int> watchUnreadCountForConversation(String conversationId) {
     final uid = _currentUid;
     if (uid.isEmpty) return const Stream<int>.empty();
@@ -129,17 +304,6 @@ class DirectMessageService {
       throw Exception('You cannot message yourself.');
     }
 
-    final key = _participantKey(currentUser.uid, otherUser.uid);
-    final existing = await _supabase
-        .from('direct_conversations')
-        .select()
-        .eq('participant_key', key)
-        .maybeSingle();
-
-    if (existing != null) {
-      return DirectConversation.fromMap(existing);
-    }
-
     try {
       final rpcConversation =
           await _tryGetOrCreateConversationViaRpc(otherUser.uid);
@@ -147,47 +311,11 @@ class DirectMessageService {
         return rpcConversation;
       }
     } on PostgrestException catch (error) {
-      throw Exception(_conversationErrorMessage(error));
+      throw _conversationException(error);
     }
-
-    final sameChurch = currentUser.churchId.trim().isNotEmpty &&
-        currentUser.churchId == otherUser.churchId;
-    if (!otherUser.allowMessages && !sameChurch) {
-      throw Exception('This member is not accepting messages right now.');
-    }
-
-    final conversationChurchId = currentUser.churchId.trim().isNotEmpty
-        ? currentUser.churchId.trim()
-        : otherUser.churchId.trim().isNotEmpty
-            ? otherUser.churchId.trim()
-            : 'public';
-
-    try {
-      final inserted = await _supabase
-          .from('direct_conversations')
-          .insert({
-            'church_id': conversationChurchId,
-            'member_ids': [currentUser.uid, otherUser.uid],
-            'participant_key': key,
-            'created_by': currentUser.uid,
-            'last_message_at': DateTime.now().toUtc().toIso8601String(),
-          })
-          .select()
-          .single();
-
-      return DirectConversation.fromMap(inserted);
-    } on PostgrestException catch (error) {
-      if (error.code != '23505') {
-        throw Exception(_conversationErrorMessage(error));
-      }
-
-      final conversation = await _supabase
-          .from('direct_conversations')
-          .select()
-          .eq('participant_key', key)
-          .single();
-      return DirectConversation.fromMap(conversation);
-    }
+    throw Exception(
+      'Messaging access is unavailable until the latest update is applied.',
+    );
   }
 
   Future<DirectConversation?> _tryGetOrCreateConversationViaRpc(
@@ -224,20 +352,37 @@ class DirectMessageService {
             message.contains('not found');
   }
 
-  String _conversationErrorMessage(PostgrestException error) {
+  Object _conversationException(PostgrestException error) {
     final message = error.message.toLowerCase();
+    final details = error.details?.toString().toLowerCase() ?? '';
+    if (message.contains('message request is required') ||
+        details.contains('message_request_required')) {
+      return MessageRequestRequiredException(error.message);
+    }
+    if (message.contains('send another request after') ||
+        details.contains('message_request_cooldown')) {
+      return MessageRequestCooldownException(error.message);
+    }
     if (message.contains('operator does not exist: uuid = text') ||
         message.contains('schema cache') ||
         message.contains('get_or_create_direct_conversation')) {
-      return 'Messaging access was out of date. Refresh the app and try again. If this person is outside your church, send a Bible Nudge first and wait for them to accept it.';
+      return Exception(
+        'Messaging access is out of date. Refresh the app and try again.',
+      );
     }
     if (message.contains('row-level security') ||
         message.contains('violates row-level security') ||
         error.code == '42501') {
-      return 'Messaging is blocked by the current database policy. Apply the latest Supabase migration, then try again.';
+      return Exception(
+        'Messaging is blocked by the current privacy policy. Refresh and try again.',
+      );
     }
-    return error.message;
+    return Exception(error.message);
   }
+
+  bool isMessageRequestRequiredError(Object error) =>
+      error is MessageRequestRequiredException ||
+      error.toString().toLowerCase().contains('message request is required');
 
   Future<DirectConversation> getOrCreateConversationWithUserId({
     required UserProfile currentUser,
@@ -252,7 +397,7 @@ class DirectMessageService {
           await _tryGetOrCreateConversationViaRpc(otherUserId);
       if (rpcConversation != null) return rpcConversation;
     } on PostgrestException catch (error) {
-      throw Exception(_conversationErrorMessage(error));
+      throw _conversationException(error);
     }
 
     final otherUser = await UserService().getUserProfile(otherUserId);
@@ -548,11 +693,6 @@ class DirectMessageService {
     return rows.isNotEmpty;
   }
 
-  String _participantKey(String a, String b) {
-    final sorted = [a, b]..sort();
-    return '${sorted[0]}:${sorted[1]}';
-  }
-
   List<DirectConversation> _normalizeConversations(List<dynamic> rows) {
     final conversationsById = <String, DirectConversation>{};
     for (final row in rows) {
@@ -571,6 +711,19 @@ class DirectMessageService {
       return bDate.compareTo(aDate);
     });
     return conversations;
+  }
+
+  List<DirectMessageRequest> _normalizeMessageRequests(List<dynamic> rows) {
+    final byId = <String, DirectMessageRequest>{};
+    for (final row in rows) {
+      final request = DirectMessageRequest.fromMap(
+        Map<String, dynamic>.from(row),
+      );
+      if (request.id.isNotEmpty) byId[request.id] = request;
+    }
+    final requests = byId.values.toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return requests;
   }
 
   String _previewForMessage(
@@ -694,4 +847,22 @@ class DirectMessageService {
     }
     return value;
   }
+}
+
+class MessageRequestRequiredException implements Exception {
+  const MessageRequestRequiredException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
+class MessageRequestCooldownException implements Exception {
+  const MessageRequestCooldownException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
 }

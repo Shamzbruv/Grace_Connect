@@ -18,11 +18,11 @@ class BibleNudgeService {
 
     final senderChurch = sender.churchId.trim();
     final recipientChurch = recipient.churchId.trim();
-    if (senderChurch.isNotEmpty &&
-        recipientChurch.isNotEmpty &&
+    if (senderChurch.isEmpty ||
+        recipientChurch.isEmpty ||
         senderChurch == recipientChurch) {
       throw Exception(
-        'Bible Nudge is only for people outside your church. Use Message for members of your church.',
+        'Bible Nudge is only for members of two different churches. It does not unlock private messages.',
       );
     }
 
@@ -43,16 +43,7 @@ class BibleNudgeService {
         .single();
 
     final nudge = BibleNudge.fromMap(row);
-    await _notify(
-      targetUserId: recipient.uid,
-      actorUserId: sender.uid,
-      type: 'bible_nudge_request',
-      title: 'Bible Nudge',
-      body:
-          '${sender.fullName.isEmpty ? 'Someone' : sender.fullName} wants to study the Bible with you.',
-      placeId: sender.churchId,
-      entityId: nudge.id,
-    );
+    await _sendPush(nudge.id, event: 'request');
     return nudge;
   }
 
@@ -75,18 +66,7 @@ class BibleNudgeService {
       await _updateNudgeStatus(nudge.id, status);
     }
 
-    await _notify(
-      targetUserId: nudge.senderId,
-      actorUserId: nudge.recipientId,
-      type: 'bible_nudge_response',
-      title: accepted ? 'Bible Nudge accepted' : 'Bible Nudge declined',
-      body: accepted
-          ? '${nudge.recipientName} accepted. Send a message to plan Bible study.'
-          : '${nudge.recipientName} declined the Bible Nudge.',
-      placeId: nudge.churchId,
-      entityId: nudge.id,
-      route: accepted ? '/inbox' : '/notifications',
-    );
+    await _sendPush(nudge.id, event: accepted ? 'accepted' : 'declined');
   }
 
   Future<void> _updateNudgeStatus(String nudgeId, String status) async {
@@ -103,6 +83,21 @@ class BibleNudgeService {
             message.contains('not found');
   }
 
+  Future<void> _sendPush(String nudgeId, {required String event}) async {
+    if (nudgeId.trim().isEmpty) return;
+    try {
+      final response = await _supabase.functions.invoke(
+        'send-bible-nudge-push',
+        body: {'nudgeId': nudgeId.trim(), 'event': event},
+      ).timeout(const Duration(seconds: 12));
+      if (response.data case final Map data when data['ok'] == false) {
+        debugPrint('Bible Nudge push queued with warning: $data');
+      }
+    } catch (error) {
+      debugPrint('Bible Nudge push skipped: $error');
+    }
+  }
+
   Future<BibleNudge?> getNudge(String nudgeId) async {
     if (nudgeId.isEmpty) return null;
     try {
@@ -116,36 +111,6 @@ class BibleNudgeService {
     } catch (error) {
       debugPrint('Could not fetch Bible Nudge: $error');
       return null;
-    }
-  }
-
-  Future<void> _notify({
-    required String targetUserId,
-    required String actorUserId,
-    required String type,
-    required String title,
-    required String body,
-    required String placeId,
-    required String entityId,
-    String route = '/notifications',
-  }) async {
-    try {
-      await _supabase.rpc(
-        'create_notification',
-        params: {
-          'target_user_id': targetUserId,
-          'actor_user_id': actorUserId,
-          'notification_type': type,
-          'notification_title': title,
-          'notification_body': body,
-          'notification_place_id': placeId,
-          'notification_entity_table': 'bible_nudges',
-          'notification_entity_id': entityId,
-          'notification_route': route,
-        },
-      );
-    } catch (error) {
-      debugPrint('Bible Nudge notification skipped: $error');
     }
   }
 }

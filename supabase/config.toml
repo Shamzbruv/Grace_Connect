@@ -83,6 +83,15 @@ verify_jwt = false
 [functions.send-membership-request-push]
 verify_jwt = false
 
+[functions.send-message-request-push]
+verify_jwt = false
+
+[functions.retry-message-request-pushes]
+verify_jwt = false
+
+[functions.send-bible-nudge-push]
+verify_jwt = false
+
 [functions.send-grace-room-invitations]
 verify_jwt = false
 

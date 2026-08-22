@@ -37,6 +37,21 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "love.graceconnect/attendance"
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "scheduleGeofenceRefreshes" -> {
+                    val refreshes = call.argument<List<Number>>("epochMillis")
+                        ?.map { it.toLong() }
+                        .orEmpty()
+                    AttendanceGeofenceRefreshWorker.schedule(this, refreshes)
+                    result.success(null)
+                }
+                else -> result.notImplemented()
+            }
+        }
     }
 
     private fun setSecureScreen(enabled: Boolean) {

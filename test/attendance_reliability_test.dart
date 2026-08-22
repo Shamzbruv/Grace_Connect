@@ -269,6 +269,13 @@ void main() {
     expect(service, contains('Duration(seconds: 5)'));
     expect(service, contains('Duration(minutes: 1)'));
     expect(service, contains("rpc('record_my_attendance'"));
+    expect(
+      service,
+      contains("record['user_id']?.toString() != currentUserId"),
+      reason: 'an offline check-in must never cross accounts on a shared '
+          'device because the RPC derives identity from current auth.uid()',
+    );
+    expect(service, contains('remaining.add(encoded);'));
     expect(service, contains(".select('id, present')"));
     expect(service, contains('decoded[\'present\'] == true'));
     expect(migration,
@@ -337,15 +344,195 @@ void main() {
     expect(idRepair, contains('where id is null'));
     expect(finalizer, contains('const targetDates = Array.from('));
     expect(finalizer, contains('{ length: 15 }'));
-    expect(finalizer, contains('insert_absent_attendance_rows'));
-    expect(finalizer, contains('"finalize_attendance_service"'));
+    expect(finalizer, isNot(contains('insert_absent_attendance_rows')));
+    expect(finalizer, contains('"finalize_attendance_service_v2"'));
     expect(finalizer, contains('"send_attendance_finalized_report"'));
-    expect(finalizer, contains('const uid = String(member.uid ?? "").trim()'));
     expect(
       finalizer,
-      contains('if (finalizeError || markerInserted !== true) continue'),
+      contains('return String(member.attendanceUserId ?? "").trim()'),
+    );
+    expect(finalizer, isNot(contains('legacyMembers')));
+    expect(finalizer, isNot(contains('joinDate')));
+    expect(
+      finalizer,
+      contains('if (finalizeError || closeout?.finalized !== true) continue'),
     );
     expect(mapPicker, contains('await _moveCameraToSelectedPosition();'));
+  });
+
+  test('presence, closeout, and overnight occurrence stay race safe', () {
+    final service =
+        File('lib/services/attendance_service.dart').readAsStringSync();
+    final finalizer = File(
+      'supabase/functions/finalize-service-attendance/index.ts',
+    ).readAsStringSync();
+    final helper = File(
+      'supabase/functions/_shared/attendance_finalization.ts',
+    ).readAsStringSync();
+    final migration = File(
+      'supabase/migrations/'
+      '20260822025758_attendance_presence_state_race_guard.sql',
+    ).readAsStringSync();
+    final worker = File(
+      'android/app/src/main/kotlin/love/graceconnect/'
+      'AttendanceGeofenceRefreshWorker.kt',
+    ).readAsStringSync();
+    final activity = File(
+      'android/app/src/main/kotlin/love/graceconnect/MainActivity.kt',
+    ).readAsStringSync();
+    final gradle = File('android/app/build.gradle').readAsStringSync();
+
+    // The foreground/UI path must continue observing Android location and
+    // must commit the idempotent attendance write when the visible countdown
+    // reaches zero. Re-entering the screen cannot overlap polls or restart it.
+    expect(service, contains('_activeServicePollTimer = Timer.periodic('));
+    expect(service, contains('if (_isPollingLocation || !_isMonitoring)'));
+    expect(service, contains('_activeServicePollTimer?.cancel();'));
+    expect(service, contains('if (canMarkPresent && autoCheckInEnabled)'));
+    expect(service, contains("prefs.getBool('auto_check_in') ?? false"));
+    expect(service, contains('serviceDateKey: serviceDateKey'));
+
+    // A verified claim is user-bound, cached only after the RPC explicitly
+    // accepts it, and is cancelled only after durable clear-outside evidence.
+    expect(service,
+        contains("final claimKey = '\$userId|\$churchId|\$serviceId|"));
+    expect(service, contains("acceptedStatus == 'pending'"));
+    expect(service, contains("acceptedStatus == 'confirmed'"));
+    expect(
+      service,
+      contains('hasSustainedClearOutsideEvidence('),
+    );
+    expect(service, contains('await _cancelPresenceClaim('));
+    expect(service, contains('_syncedPresenceClaims.clear();'));
+
+    // A client-side direct insert used to bypass the same advisory lock used
+    // by closeout. All writes now go through the hardened occurrence RPC.
+    expect(
+      service,
+      isNot(contains(".from('attendance').insert")),
+    );
+    expect(service, contains("rpc('record_my_attendance'"));
+
+    // Current + previous weekday resolution and a logical service date keep
+    // post-midnight attendance attached to the service that began yesterday.
+    expect(service, contains('previousWeekday'));
+    expect(service, contains('if (!scheduledEnd.isAfter(scheduledStart))'));
+    expect(service, contains('scheduledEnd.add(const Duration(days: 1))'));
+    expect(service, contains('final logicalServiceDate = serviceDateKey'));
+    expect(service, contains('prompt.serviceStartTime'));
+    expect(service, contains('prompt.serviceDateKey'));
+
+    // ENTER/DWELL are transition-based. Re-adding persisted geofences at the
+    // opening of every check-in window gives an already-inside member an
+    // initial ENTER even while Flutter is closed.
+    expect(activity, contains('scheduleGeofenceRefreshes'));
+    expect(service, contains('_scheduleAndroidGeofenceRefreshes(churchId)'));
+    expect(worker, contains('NativeGeofenceApiImpl(applicationContext)'));
+    expect(worker, contains('reCreateAfterReboot()'));
+    expect(worker, contains('ExistingWorkPolicy.KEEP'));
+    expect(gradle, contains('androidx.work:work-runtime-ktx'));
+
+    // SQL owns the occurrence identity and the monotonic state transition.
+    expect(migration, contains('add column if not exists service_date date'));
+    expect(migration, contains('alter column service_date set not null'));
+    expect(
+      migration,
+      contains(
+        'attendance_one_record_per_member_service_occurrence_idx',
+      ),
+    );
+    expect(
+      migration,
+      contains('drop index if exists public.'
+          'attendance_one_record_per_member_service_day_idx'),
+    );
+    expect(migration, contains('enable row level security'));
+    expect(
+      migration,
+      contains('revoke insert, update, delete on table public.attendance'),
+    );
+    expect(migration, contains('record_my_attendance_presence'));
+    expect(migration, contains("now() - interval '75 minutes'"));
+    expect(
+      migration,
+      contains(
+        'Automatic attendance requires a completed server presence claim.',
+      ),
+    );
+    expect(
+      migration,
+      contains('claim.first_inside_at\n        + make_interval'),
+    );
+    expect(
+      migration,
+      contains('and claim.service_date = new.service_date'),
+    );
+    expect(
+      migration,
+      contains('Confirmed attendance cannot be overwritten by closeout.'),
+    );
+
+    // Finalization is one transaction and derives identity/history only from
+    // authoritative active memberships. Profile IDs and account joinDate are
+    // not permitted to create duplicate or pre-membership absences.
+    final atomicStart = migration.indexOf(
+      'create or replace function public.finalize_attendance_service_v2',
+    );
+    final pendingCheck = migration.indexOf(
+      "and claim.status = 'pending'",
+      atomicStart,
+    );
+    final absenceInsert = migration.indexOf(
+      'insert into public.attendance (',
+      atomicStart,
+    );
+    final markerInsert = migration.indexOf(
+      'insert into public.attendance_finalized_services (',
+      atomicStart,
+    );
+    expect(atomicStart, greaterThanOrEqualTo(0));
+    expect(pendingCheck, greaterThan(atomicStart));
+    expect(absenceInsert, greaterThan(pendingCheck));
+    expect(markerInsert, greaterThan(absenceInsert));
+    final atomicEnd = migration.indexOf(
+      '-- The scheduled Edge job is migrated to the atomic v2 RPC below.',
+      atomicStart,
+    );
+    final atomicBody = migration.substring(atomicStart, atomicEnd);
+    expect(atomicBody, contains("membership.membership_status = 'active'"));
+    expect(atomicBody, contains('membership.user_id::text as user_id'));
+    expect(atomicBody, contains('membership.reviewed_at'));
+    expect(atomicBody, contains('membership.created_at'));
+    expect(atomicBody, contains('membership.requested_at'));
+    expect(atomicBody, isNot(contains('public.users')));
+    expect(atomicBody, isNot(contains('joinDate')));
+    expect(atomicBody, contains('attendance.service_date = p_service_date'));
+    expect(
+      migration,
+      contains('revoke execute on function public.'
+          'insert_absent_attendance_rows(jsonb)'),
+    );
+
+    // Edge and SQL intentionally use the same parser, overnight rule, dwell
+    // range, delivery buffer, and strict post-boundary readiness check.
+    expect(helper, contains(r'^([01]?\d|2[0-3]):([0-5]\d)'));
+    expect(helper, contains('endSeconds <= startSeconds'));
+    expect(helper, contains('ATTENDANCE_DELIVERY_BUFFER_MINUTES = 15'));
+    expect(helper, contains('now.getTime() > readyAt.getTime()'));
+    expect(finalizer, contains('attendanceServiceIsPastDue'));
+    expect(finalizer, contains('finalize_attendance_service_v2'));
+    expect(finalizer, isNot(contains('legacyMembers')));
+    expect(finalizer, isNot(contains('joinDate')));
+
+    final careAlertStart = migration.indexOf(
+      'create or replace function public.refresh_attendance_priority_list',
+    );
+    final careAlertBody = migration.substring(careAlertStart);
+    expect(careAlertStart, greaterThanOrEqualTo(0));
+    expect(careAlertBody, contains('membership.user_id::text as user_id'));
+    expect(careAlertBody, contains('membership.reviewed_at'));
+    expect(careAlertBody, isNot(contains('u."placeId"')));
+    expect(careAlertBody, isNot(contains('joinDate')));
   });
 
   test(
@@ -363,7 +550,8 @@ void main() {
     // old code only enforced/required this on Android, so iOS could
     // "start monitoring" on While-Using-App access and then silently stop
     // the moment the phone locked -- indistinguishable from being broken.
-    expect(service, contains('bool get _needsAlwaysLocationPermission => !kIsWeb;'));
+    expect(service,
+        contains('bool get _needsAlwaysLocationPermission => !kIsWeb;'));
     expect(
       service,
       isNot(contains(
@@ -377,7 +565,8 @@ void main() {
     );
     expect(
       service,
-      isNot(contains('if (_usesNativeAndroidGeofence) {\n      final foreground =')),
+      isNot(contains(
+          'if (_usesNativeAndroidGeofence) {\n      final foreground =')),
       reason: 'requestAutoAttendancePermissions must request Always on both '
           'platforms, not branch away from it on iOS',
     );
@@ -396,7 +585,8 @@ void main() {
           'if (value && !kIsWeb && defaultTargetPlatform == TargetPlatform.android)')),
       reason: 'the disclosure dialog must show on iOS too, not Android only',
     );
-    expect(screen, contains('final isIOS = defaultTargetPlatform == TargetPlatform.iOS;'));
+    expect(screen,
+        contains('final isIOS = defaultTargetPlatform == TargetPlatform.iOS;'));
     expect(screen, contains('"Allow While Using App"'));
     expect(screen, contains('"Always"'));
     expect(screen, contains('"While using the app"'));

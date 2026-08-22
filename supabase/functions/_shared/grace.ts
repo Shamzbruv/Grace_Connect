@@ -1,4 +1,7 @@
-import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+import {
+  createClient,
+  SupabaseClient,
+} from "https://esm.sh/@supabase/supabase-js@2.45.4";
 
 export const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -15,7 +18,9 @@ export function jsonResponse(body: unknown, status = 200): Response {
 }
 
 export function handleOptions(request: Request): Response | null {
-  return request.method === "OPTIONS" ? new Response("ok", { headers: corsHeaders }) : null;
+  return request.method === "OPTIONS"
+    ? new Response("ok", { headers: corsHeaders })
+    : null;
 }
 
 export function serviceClient(): SupabaseClient {
@@ -39,9 +44,14 @@ export function anonClient(accessToken?: string): SupabaseClient {
   });
 }
 
-export function requireCronSecret(request: Request, secretName: string): Response | null {
+export function requireCronSecret(
+  request: Request,
+  secretName: string,
+): Response | null {
   const expected = Deno.env.get(secretName);
-  if (!expected) return jsonResponse({ error: "Server configuration is incomplete." }, 500);
+  if (!expected) {
+    return jsonResponse({ error: "Server configuration is incomplete." }, 500);
+  }
   const received = request.headers.get("x-cron-secret") ?? "";
   if (received !== expected) return jsonResponse({ error: "Forbidden." }, 403);
   return null;
@@ -58,7 +68,9 @@ export function accessTokenFromRequest(request: Request): string | null {
   return header.startsWith("Bearer ") ? header.slice("Bearer ".length) : null;
 }
 
-export async function authenticatedUser(request: Request): Promise<{ id: string; email?: string }> {
+export async function authenticatedUser(
+  request: Request,
+): Promise<{ id: string; email?: string }> {
   const token = accessTokenFromRequest(request);
   if (!token) throw new Error("Not authenticated.");
   const { data, error } = await anonClient(token).auth.getUser(token);
@@ -66,7 +78,10 @@ export async function authenticatedUser(request: Request): Promise<{ id: string;
   return { id: data.user.id, email: data.user.email ?? undefined };
 }
 
-export async function userProfile(client: SupabaseClient, uid: string): Promise<Record<string, unknown>> {
+export async function userProfile(
+  client: SupabaseClient,
+  uid: string,
+): Promise<Record<string, unknown>> {
   const { data, error } = await client
     .from("users")
     .select("*")
@@ -86,7 +101,9 @@ export function profileQuizChurchId(profile: Record<string, unknown>): string {
   return profileChurchId(profile) || GLOBAL_VISITOR_CHURCH_ID;
 }
 
-export function profileQuizScope(profile: Record<string, unknown>): "church" | "global" {
+export function profileQuizScope(
+  profile: Record<string, unknown>,
+): "church" | "global" {
   return profileChurchId(profile) ? "church" : "global";
 }
 
@@ -101,18 +118,23 @@ export function jamaicaDateString(date = new Date()): string {
     month: "2-digit",
     day: "2-digit",
   }).formatToParts(date);
-  const value = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+  const value = (type: string) =>
+    parts.find((part) => part.type === type)?.value ?? "";
   return `${value("year")}-${value("month")}-${value("day")}`;
 }
 
-export function hasReachedJamaicaHour(hour: number, from = new Date()): boolean {
+export function hasReachedJamaicaHour(
+  hour: number,
+  from = new Date(),
+): boolean {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/Jamaica",
     hour: "2-digit",
     minute: "2-digit",
     hourCycle: "h23",
   }).formatToParts(from);
-  const value = (type: string) => Number(parts.find((part) => part.type === type)?.value ?? "0");
+  const value = (type: string) =>
+    Number(parts.find((part) => part.type === type)?.value ?? "0");
   const currentHour = value("hour");
   const currentMinute = value("minute");
   return currentHour > hour || (currentHour === hour && currentMinute >= 0);
@@ -120,7 +142,9 @@ export function hasReachedJamaicaHour(hour: number, from = new Date()): boolean 
 
 export function nextJamaicaRefresh(hour: number, from = new Date()): Date {
   const today = jamaicaDateString(from);
-  let refresh = new Date(`${today}T${String(hour + 5).padStart(2, "0")}:00:00.000Z`);
+  let refresh = new Date(
+    `${today}T${String(hour + 5).padStart(2, "0")}:00:00.000Z`,
+  );
   if (from >= refresh) {
     const tomorrow = new Date(refresh);
     tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
@@ -135,8 +159,12 @@ export function jamaicaMonthStart(date = new Date()): Date {
     year: "numeric",
     month: "2-digit",
   }).formatToParts(date);
-  const year = Number(parts.find((part) => part.type === "year")?.value ?? "1970");
-  const month = Number(parts.find((part) => part.type === "month")?.value ?? "1");
+  const year = Number(
+    parts.find((part) => part.type === "year")?.value ?? "1970",
+  );
+  const month = Number(
+    parts.find((part) => part.type === "month")?.value ?? "1",
+  );
   return new Date(Date.UTC(year, month - 1, 1, 5, 0, 0, 0));
 }
 
@@ -146,7 +174,9 @@ export function jamaicaMonthDateKey(monthStart = jamaicaMonthStart()): string {
   return `${year}-${month}-01`;
 }
 
-export function jamaicaMonthRange(monthStart = jamaicaMonthStart()): { start: Date; end: Date } {
+export function jamaicaMonthRange(
+  monthStart = jamaicaMonthStart(),
+): { start: Date; end: Date } {
   const start = new Date(Date.UTC(
     monthStart.getUTCFullYear(),
     monthStart.getUTCMonth(),
@@ -185,7 +215,9 @@ export function parseJamaicaMonthKey(value?: string | null): Date {
   if (!value) return jamaicaMonthStart();
   const match = String(value).trim().match(/^(\d{4})-(\d{2})/);
   if (!match) return jamaicaMonthStart();
-  return new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, 1, 5, 0, 0, 0));
+  return new Date(
+    Date.UTC(Number(match[1]), Number(match[2]) - 1, 1, 5, 0, 0, 0),
+  );
 }
 
 export function jamaicaMonthLabel(monthStart: Date): string {
@@ -202,14 +234,18 @@ export function wordCount(text: string): number {
 
 export function shortPreview(text: string, max = 120): string {
   const collapsed = text.replace(/\s+/g, " ").trim();
-  return collapsed.length <= max ? collapsed : `${collapsed.slice(0, max - 1).trim()}…`;
+  return collapsed.length <= max
+    ? collapsed
+    : `${collapsed.slice(0, max - 1).trim()}…`;
 }
 
 export function safeJsonParse<T>(value: string): T | null {
   try {
     const first = value.indexOf("{");
     const last = value.lastIndexOf("}");
-    const json = first >= 0 && last > first ? value.slice(first, last + 1) : value;
+    const json = first >= 0 && last > first
+      ? value.slice(first, last + 1)
+      : value;
     return JSON.parse(json) as T;
   } catch (_) {
     return null;
@@ -358,8 +394,9 @@ export async function callGeminiJson(
 
     if (!response.ok) {
       const body = await response.text().catch(() => "");
-      const diagnostic =
-        `Gemini request failed: HTTP ${response.status} ${body.slice(0, 500)}`;
+      const diagnostic = `Gemini request failed: HTTP ${response.status} ${
+        body.slice(0, 500)
+      }`;
       console.error(diagnostic);
       return { data: null, diagnostic };
     }
@@ -467,11 +504,14 @@ function base64Url(input: ArrayBuffer | Uint8Array | string): string {
   const bytes = typeof input === "string"
     ? new TextEncoder().encode(input)
     : input instanceof ArrayBuffer
-      ? new Uint8Array(input)
-      : input;
+    ? new Uint8Array(input)
+    : input;
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(
+    /=+$/,
+    "",
+  );
 }
 
 function pemToArrayBuffer(pem: string): ArrayBuffer {
@@ -485,7 +525,9 @@ function pemToArrayBuffer(pem: string): ArrayBuffer {
   return bytes.buffer;
 }
 
-async function googleAccessToken(serviceAccount: Record<string, string>): Promise<string> {
+async function googleAccessToken(
+  serviceAccount: Record<string, string>,
+): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
   const header = base64Url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
   const claim = base64Url(JSON.stringify({
@@ -522,24 +564,80 @@ async function googleAccessToken(serviceAccount: Record<string, string>): Promis
   return String(tokenPayload.access_token ?? "");
 }
 
-export function notificationSoundProfile(type: string): { channelId: string; sound: string } {
-  const normalized = String(type || "general").toLowerCase().replace(/[^a-z0-9_]+/g, "_");
+export function notificationSoundProfile(
+  type: string,
+): { channelId: string; sound: string } {
+  const normalized = String(type || "general").toLowerCase().replace(
+    /[^a-z0-9_]+/g,
+    "_",
+  );
   const profiles: Record<string, { channelId: string; sound: string }> = {
-    general: { channelId: "grace_default_channel_v1", sound: "grace_default.wav" },
-    announcement: { channelId: "grace_default_channel_v1", sound: "grace_default.wav" },
-    daily_motivation: { channelId: "grace_daily_word_channel_v1", sound: "grace_daily.wav" },
-    daily_devotional: { channelId: "grace_daily_word_channel_v1", sound: "grace_daily.wav" },
-    daily_bible_quiz: { channelId: "grace_daily_quiz_channel_v1", sound: "grace_quiz.wav" },
+    general: {
+      channelId: "grace_default_channel_v1",
+      sound: "grace_default.wav",
+    },
+    announcement: {
+      channelId: "grace_default_channel_v1",
+      sound: "grace_default.wav",
+    },
+    daily_motivation: {
+      channelId: "grace_daily_word_channel_v1",
+      sound: "grace_daily.wav",
+    },
+    daily_devotional: {
+      channelId: "grace_daily_word_channel_v1",
+      sound: "grace_daily.wav",
+    },
+    daily_bible_quiz: {
+      channelId: "grace_daily_quiz_channel_v1",
+      sound: "grace_quiz.wav",
+    },
     quiz: { channelId: "grace_daily_quiz_channel_v1", sound: "grace_quiz.wav" },
-    monthly_quiz_winners: { channelId: "grace_daily_quiz_channel_v1", sound: "grace_quiz.wav" },
+    monthly_quiz_winners: {
+      channelId: "grace_daily_quiz_channel_v1",
+      sound: "grace_quiz.wav",
+    },
     prayer: { channelId: "grace_prayer_channel_v1", sound: "grace_prayer.wav" },
-    prayer_request: { channelId: "grace_prayer_channel_v1", sound: "grace_prayer.wav" },
-    message: { channelId: "grace_messages_channel_v1", sound: "grace_message.wav" },
-    direct_message: { channelId: "grace_messages_channel_v1", sound: "grace_message.wav" },
-    live_stream: { channelId: "grace_live_channel_v1", sound: "grace_live.wav" },
-    bible_streak_reminder: { channelId: "grace_daily_word_channel_v1", sound: "grace_daily.wav" },
-    grace_room_invitation: { channelId: "grace_default_channel_v1", sound: "grace_default.wav" },
-    event_rsvp_reminder: { channelId: "grace_default_channel_v1", sound: "grace_default.wav" },
+    prayer_request: {
+      channelId: "grace_prayer_channel_v1",
+      sound: "grace_prayer.wav",
+    },
+    message: {
+      channelId: "grace_messages_channel_v1",
+      sound: "grace_message.wav",
+    },
+    direct_message: {
+      channelId: "grace_messages_channel_v1",
+      sound: "grace_message.wav",
+    },
+    message_request_received: {
+      channelId: "grace_messages_channel_v1",
+      sound: "grace_message.wav",
+    },
+    message_request_accepted: {
+      channelId: "grace_messages_channel_v1",
+      sound: "grace_message.wav",
+    },
+    message_request_denied: {
+      channelId: "grace_messages_channel_v1",
+      sound: "grace_message.wav",
+    },
+    live_stream: {
+      channelId: "grace_live_channel_v1",
+      sound: "grace_live.wav",
+    },
+    bible_streak_reminder: {
+      channelId: "grace_daily_word_channel_v1",
+      sound: "grace_daily.wav",
+    },
+    grace_room_invitation: {
+      channelId: "grace_default_channel_v1",
+      sound: "grace_default.wav",
+    },
+    event_rsvp_reminder: {
+      channelId: "grace_default_channel_v1",
+      sound: "grace_default.wav",
+    },
   };
   return profiles[normalized] ?? profiles.general;
 }
@@ -644,7 +742,10 @@ async function sendFcmMessage(
         body: JSON.stringify({ message }),
       },
     );
-    const body = await response.json().catch(() => ({})) as Record<string, unknown>;
+    const body = await response.json().catch(() => ({})) as Record<
+      string,
+      unknown
+    >;
     if (response.ok) {
       return {
         sent: true,
@@ -657,9 +758,10 @@ async function sendFcmMessage(
     const details = Array.isArray(providerError.details)
       ? providerError.details as Array<Record<string, unknown>>
       : [];
-    const invalidToken = response.status === 404 || details.some((detail) =>
-      String(detail.errorCode ?? "") === "UNREGISTERED"
-    );
+    const invalidToken = response.status === 404 ||
+      details.some((detail) =>
+        String(detail.errorCode ?? "") === "UNREGISTERED"
+      );
     return { sent: false, invalidToken, providerCode };
   } catch (_error) {
     return { sent: false, invalidToken: false, providerCode: "NETWORK_ERROR" };
@@ -723,7 +825,9 @@ export async function sendTopicPush(
   if (outboxError || !outbox?.id) {
     return {
       sent: false,
-      reason: `Unable to reserve push delivery: ${outboxError?.message ?? "outbox unavailable"}`,
+      reason: `Unable to reserve push delivery: ${
+        outboxError?.message ?? "outbox unavailable"
+      }`,
     };
   }
 
@@ -732,7 +836,10 @@ export async function sendTopicPush(
     if (outbox?.id) {
       await client
         .from("system_notification_outbox")
-        .update({ status: "skipped", error_message: "Firebase service account secret missing." })
+        .update({
+          status: "skipped",
+          error_message: "Firebase service account secret missing.",
+        })
         .eq("id", outbox.id);
     }
     return { sent: false, reason: "Firebase service account secret missing." };
@@ -746,7 +853,9 @@ export async function sendTopicPush(
 
     const serviceAccount = JSON.parse(serviceAccountJson);
     const projectId = String(serviceAccount.project_id ?? "");
-    if (!projectId) throw new Error("Firebase project configuration is incomplete.");
+    if (!projectId) {
+      throw new Error("Firebase project configuration is incomplete.");
+    }
     const accessToken = await googleAccessToken(serviceAccount);
 
     // Registered installations receive a token-addressed message. App builds
@@ -756,7 +865,7 @@ export async function sendTopicPush(
     const registrationPageSize = 500;
     const registrations: Array<{ id: string; token: string }> = [];
     let registryAvailable = true;
-    for (let from = 0; ; from += registrationPageSize) {
+    for (let from = 0;; from += registrationPageSize) {
       const registrationsResult = await client
         .from("push_device_registrations")
         .select("id,token")
@@ -769,7 +878,9 @@ export async function sendTopicPush(
         registrations.length = 0;
         break;
       }
-      const page = (registrationsResult.data ?? []) as Array<{ id: string; token: string }>;
+      const page = (registrationsResult.data ?? []) as Array<
+        { id: string; token: string }
+      >;
       registrations.push(...page);
       if (page.length < registrationPageSize) break;
     }
@@ -780,14 +891,16 @@ export async function sendTopicPush(
     const invalidRegistrationIds: string[] = [];
     for (let offset = 0; offset < registrations.length; offset += 100) {
       const batch = registrations.slice(offset, offset + 100);
-      const results = await Promise.allSettled(batch.map(async (registration) => ({
-        registration,
-        result: await sendFcmMessageWithRetry(
-          projectId,
-          accessToken,
-          fcmMessage({ token: registration.token }, params),
-        ),
-      })));
+      const results = await Promise.allSettled(
+        batch.map(async (registration) => ({
+          registration,
+          result: await sendFcmMessageWithRetry(
+            projectId,
+            accessToken,
+            fcmMessage({ token: registration.token }, params),
+          ),
+        })),
+      );
       for (const settled of results) {
         if (settled.status === "rejected") {
           directFailed += 1;
@@ -807,7 +920,11 @@ export async function sendTopicPush(
     }
 
     if (invalidRegistrationIds.length > 0) {
-      for (let offset = 0; offset < invalidRegistrationIds.length; offset += 200) {
+      for (
+        let offset = 0;
+        offset < invalidRegistrationIds.length;
+        offset += 200
+      ) {
         await client
           .from("push_device_registrations")
           .update({ enabled: false, updated_at: new Date().toISOString() })
@@ -834,11 +951,15 @@ export async function sendTopicPush(
         accessToken,
         fcmMessage(fallbackTarget, params),
       );
-    if (fallback.providerMessageId) providerIds.push(fallback.providerMessageId);
+    if (fallback.providerMessageId) {
+      providerIds.push(fallback.providerMessageId);
+    }
 
     if (!fallback.sent && directSent === 0) {
       throw new Error(
-        `Push provider rejected all delivery paths (${fallback.providerCode ?? "unknown"}).`,
+        `Push provider rejected all delivery paths (${
+          fallback.providerCode ?? "unknown"
+        }).`,
       );
     }
 
@@ -865,7 +986,9 @@ export async function sendTopicPush(
         : undefined,
     };
   } catch (error) {
-    const reason = error instanceof Error ? error.message : "Push delivery failed.";
+    const reason = error instanceof Error
+      ? error.message
+      : "Push delivery failed.";
     if (outbox?.id) {
       await client
         .from("system_notification_outbox")
@@ -894,14 +1017,16 @@ export async function createInAppNotifications(
 ): Promise<number> {
   const pageSize = 500;
   const userIds = new Set<string>();
-  for (let from = 0; ; from += pageSize) {
+  for (let from = 0;; from += pageSize) {
     let query = client
       .from("users")
       .select("id, uid")
       .order("id", { ascending: true })
       .range(from, from + pageSize - 1);
     if (params.churchId) query = query.eq("placeId", params.churchId);
-    if (params.preferenceColumn) query = query.eq(params.preferenceColumn, true);
+    if (params.preferenceColumn) {
+      query = query.eq(params.preferenceColumn, true);
+    }
     const { data: users, error } = await query;
     if (error || !users) return 0;
     for (const user of users) {
@@ -931,7 +1056,7 @@ export async function createInAppNotifications(
   // of showing members duplicates.
   if (params.entityTable && params.entityId) {
     const existingUserIds = new Set<string>();
-    for (let from = 0; ; from += pageSize) {
+    for (let from = 0;; from += pageSize) {
       const { data: existingRows, error: existingError } = await client
         .from("notifications")
         .select("user_id")
@@ -954,7 +1079,9 @@ export async function createInAppNotifications(
   let inserted = 0;
   for (let offset = 0; offset < rows.length; offset += pageSize) {
     const chunk = rows.slice(offset, offset + pageSize);
-    const { error: insertError } = await client.from("notifications").insert(chunk);
+    const { error: insertError } = await client.from("notifications").insert(
+      chunk,
+    );
     if (insertError) continue;
     inserted += chunk.length;
   }
