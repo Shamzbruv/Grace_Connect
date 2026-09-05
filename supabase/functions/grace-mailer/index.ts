@@ -627,7 +627,8 @@ async function sendPasswordReset(
 ): Promise<Response> {
   requireResendKey();
   const email = normalizeEmail(body.email);
-  const redirectTo = allowedRedirect(body.redirectTo, { allowNativeApp: true });
+  // Recovery must work from existing mobile releases without an app update.
+  const redirectTo = "https://graceconnect.love/reset-password.html";
   await verifyPublicMailCaptcha(request, "password-reset", body.captchaToken);
   await consumePublicMailRateLimit(request, "password-reset", email);
   const supabase = serviceClient();
@@ -649,15 +650,15 @@ async function sendPasswordReset(
     throw recoveryResult.error;
   }
 
-  const resetUrl = actionLinkFromGenerateLink(
-    recoveryResult.data as Record<string, unknown>,
-  );
+  const tokenHash = recoveryResult.data.properties?.hashed_token;
+  if (!tokenHash) throw new Error("Unable to create a password recovery link.");
+  const resetUrl = `${redirectTo}?token_hash=${encodeURIComponent(tokenHash)}&type=recovery`;
 
   const emailBody = brandedEmail({
     title: "Reset Your Grace Connect Password",
     preview: "Use this secure Grace Connect link to create a new password.",
     body:
-      "<p>Hello,</p><p>We received a request to reset your Grace Connect password.</p><p>Tap the button below to create a new password in the app. This link is time-sensitive and should only be used by you.</p>",
+      "<p>Hello,</p><p>We received a request to reset your Grace Connect password.</p><p>Tap the button below to create a new password securely on the Grace Connect website, then return to the app and sign in with your new password. This link is time-sensitive and should only be used by you.</p>",
     ctaLabel: "Reset Password",
     ctaUrl: resetUrl,
   });
