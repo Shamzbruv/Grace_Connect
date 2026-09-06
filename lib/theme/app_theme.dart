@@ -16,8 +16,10 @@ class AppTheme {
     ).copyWith(
       primary: AppColors.primary, // Deep Navy
       onPrimary: Colors.white,
-      secondary: AppColors.secondary, // Gold
-      onSecondary: Colors.black,
+      secondary: const Color(0xFF805500),
+      onSecondary: Colors.white,
+      secondaryContainer: const Color(0xFFFFE3AC),
+      onSecondaryContainer: const Color(0xFF291800),
       tertiary: AppColors.tertiary,
       surface: AppColors.surface,
       onSurface: AppColors.textPrimary,
@@ -40,7 +42,8 @@ class AppTheme {
       tertiary: AppColors.tertiary,
       surface: AppColors.surfaceDark, // Deep Charcoal/Navy
       onSurface: AppColors.textPrimaryDark,
-      error: AppColors.error,
+      error: const Color(0xFFFFB4AB),
+      onError: const Color(0xFF690005),
     );
 
     return _buildTheme(colorScheme);
@@ -61,12 +64,6 @@ class AppTheme {
         backgroundColor: Colors.transparent,
         elevation: 0,
         centerTitle: true,
-        iconTheme: IconThemeData(color: colorScheme.onSurface),
-        titleTextStyle: GoogleFonts.outfit(
-          color: colorScheme.onSurface,
-          fontSize: 20,
-          fontWeight: FontWeight.w600,
-        ),
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(

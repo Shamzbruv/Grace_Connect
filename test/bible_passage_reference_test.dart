@@ -2,6 +2,16 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:grace_connect/models/bible_passage_reference.dart';
 
 void main() {
+  test('opens the typography used by published Daily Word references', () {
+    for (final dash in ['-', '‐', '‑', '‒', '–', '—', '−']) {
+      final passage = BiblePassageReference.tryParse('Psalm\u00a099:1${dash}2');
+      expect(passage?.book.name, 'Psalms');
+      expect(passage?.chapter, 99);
+      expect(passage?.endVerse, 2);
+    }
+    expect(BiblePassageReference.tryParse('Job 36:27‑30')?.endVerse, 30);
+    expect(BiblePassageReference.tryParseChapter('psalms 99')?.chapter, 99);
+  });
   test('parses a Daily Word verse and range into the local Bible reader', () {
     final single = BiblePassageReference.tryParse('Ephesians 4:29');
     expect(single, isNotNull);

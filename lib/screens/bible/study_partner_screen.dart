@@ -229,7 +229,9 @@ class _StudyPartnerScreenState extends State<StudyPartnerScreen>
             final isMatched = req.status == 'matched';
 
             return Card(
-              color: isMatched ? Colors.green[50] : Colors.white,
+              color: isMatched
+                  ? Theme.of(context).colorScheme.secondaryContainer
+                  : Theme.of(context).colorScheme.surface,
               elevation: 2,
               margin: const EdgeInsets.only(bottom: 12),
               child: ListTile(

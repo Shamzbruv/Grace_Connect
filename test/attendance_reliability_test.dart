@@ -6,6 +6,20 @@ import 'package:grace_connect/services/attendance_dwell_session.dart';
 import 'package:grace_connect/services/attendance_service.dart';
 
 void main() {
+  test('approximate location cannot report attendance setup as ready', () {
+    const status = AttendanceSetupStatus(
+      autoCheckInEnabled: true,
+      locationServicesEnabled: true,
+      permission: LocationPermission.always,
+      hasChurchLocation: true,
+      hasServiceSchedule: true,
+      requiresBackgroundLocation: true,
+      preciseLocationEnabled: false,
+    );
+    expect(status.canMonitor, isFalse);
+    expect(status.blockers, contains(contains('Enable precise location')));
+  });
+
   test('Android auto-attendance requires background location readiness', () {
     const status = AttendanceSetupStatus(
       autoCheckInEnabled: true,
@@ -428,8 +442,13 @@ void main() {
     expect(activity, contains('scheduleGeofenceRefreshes'));
     expect(service, contains('_scheduleAndroidGeofenceRefreshes(churchId)'));
     expect(worker, contains('NativeGeofenceApiImpl(applicationContext)'));
-    expect(worker, contains('reCreateAfterReboot()'));
-    expect(worker, contains('ExistingWorkPolicy.KEEP'));
+    expect(worker, contains('api.createGeofence(geofence)'));
+    expect(worker, contains('suspendCancellableCoroutine<Unit>'));
+    expect(
+        worker,
+        contains(
+            'PeriodicWorkRequestBuilder<AttendanceGeofenceRefreshWorker>(7, TimeUnit.DAYS)'));
+    expect(worker, contains('ExistingPeriodicWorkPolicy.UPDATE'));
     expect(gradle, contains('androidx.work:work-runtime-ktx'));
 
     // SQL owns the occurrence identity and the monotonic state transition.

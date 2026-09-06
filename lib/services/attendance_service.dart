@@ -60,6 +60,8 @@ Future<void> attendanceGeofenceTriggered(
         ),
       );
     }
+    final auth = Supabase.instance.client.auth;
+    if (auth.currentSession?.isExpired == true) await auth.refreshSession();
     await AttendanceService().handleNativeGeofenceEvent(params);
   } catch (error, stackTrace) {
     debugPrint('Native attendance geofence callback failed: $error');
@@ -83,6 +85,9 @@ class AttendanceSetupStatus {
   // makes auto-attendance look like it "stopped working" until the member
   // reopens the app.
   final bool? batteryOptimizationIgnored;
+  final bool? preciseLocationEnabled;
+  final double? radiusMeters;
+  final String? lastNativeEvent;
 
   const AttendanceSetupStatus({
     required this.autoCheckInEnabled,
@@ -93,6 +98,9 @@ class AttendanceSetupStatus {
     this.requiresBackgroundLocation = false,
     this.activeServiceName,
     this.batteryOptimizationIgnored,
+    this.preciseLocationEnabled,
+    this.radiusMeters,
+    this.lastNativeEvent,
   });
 
   bool get hasLocationPermission =>
@@ -107,6 +115,7 @@ class AttendanceSetupStatus {
       autoCheckInEnabled &&
       locationServicesEnabled &&
       hasAutoAttendanceLocationPermission &&
+      preciseLocationEnabled != false &&
       hasChurchLocation &&
       hasServiceSchedule;
 
@@ -124,6 +133,10 @@ class AttendanceSetupStatus {
       );
     }
     if (!hasChurchLocation) missing.add('Church geofence location is not set.');
+    if (preciseLocationEnabled == false) {
+      missing.add(
+          'Enable precise location in the app’s system location settings. Approximate location cannot detect a church-sized geofence.');
+    }
     if (!hasServiceSchedule) missing.add('No service schedule is configured.');
     if (requiresBackgroundLocation && batteryOptimizationIgnored == false) {
       missing.add(
@@ -245,12 +258,7 @@ class AttendanceService {
   }
 
   Future<void> _initializeNotifications() async {
-    const androidSettings =
-        AndroidInitializationSettings('ic_stat_grace_connect');
-    const iosSettings = DarwinInitializationSettings();
-    const settings =
-        InitializationSettings(android: androidSettings, iOS: iosSettings);
-    await _notificationsPlugin.initialize(settings);
+    await NotificationService().initializeLocalNotifications();
   }
 
   Future<void> initialize() {
@@ -260,6 +268,7 @@ class AttendanceService {
 
   Future<void> _initialize() async {
     final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
     final autoCheckInEnabled = prefs.getBool('auto_check_in') ?? false;
     _startPendingAttendanceSync();
     unawaited(flushPendingAttendance());
@@ -270,20 +279,6 @@ class AttendanceService {
       return;
     }
     _monitoringRequested = true;
-
-    // Several screens initialize this singleton. Keep the existing listener so
-    // navigating or tapping Recheck cannot restart the dwell countdown.
-    if (_isMonitoring &&
-        (_positionStreamSubscription != null || _usesNativeAndroidGeofence)) {
-      if (_usesNativeAndroidGeofence) {
-        await _registerAndroidNativeGeofence();
-      } else {
-        unawaited(_pollCurrentLocationForAttendance());
-      }
-      return;
-    }
-
-    _clearMonitoringState(resetRestartAttempts: false);
 
     final serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
@@ -316,6 +311,22 @@ class AttendanceService {
       );
       return;
     }
+
+    // Several screens initialize this singleton. Keep the existing listener so
+    // navigating or tapping Recheck cannot restart the dwell countdown.
+    if (_isMonitoring &&
+        (_positionStreamSubscription != null || _usesNativeAndroidGeofence)) {
+      if (_usesNativeAndroidGeofence) {
+        final registered = await _registerAndroidNativeGeofence();
+        _setMonitoring(registered);
+        unawaited(_pollCurrentLocationForAttendance());
+      } else {
+        unawaited(_pollCurrentLocationForAttendance());
+      }
+      return;
+    }
+
+    _clearMonitoringState(resetRestartAttempts: false);
 
     if (permission == LocationPermission.whileInUse ||
         permission == LocationPermission.always) {
@@ -673,6 +684,7 @@ class AttendanceService {
       churchLocation.longitude.toStringAsFixed(6),
       churchLocation.radiusMeters.toStringAsFixed(1),
       dwellMinutes.join(','),
+      'wake-checks-v1',
     ].join('|');
   }
 
@@ -736,9 +748,16 @@ class AttendanceService {
     }
 
     final dwellMinutes = await _configuredNativeDwellMinutes(churchId);
+    // Small church boundaries are kept exact for attendance. A wider fence
+    // only wakes the GPS verification path; it never proves on-site dwell.
+    final wakeMinutes = churchLocation.radiusMeters < 100
+        ? <int>{1, dwellMinutes.last + 1, dwellMinutes.last * 2 + 1}
+        : <int>{};
     final geofenceIds = dwellMinutes
         .map((minutes) => _nativeGeofenceId(churchId, minutes))
-        .toList(growable: false);
+        .toList()
+      ..addAll(wakeMinutes
+          .map((minutes) => '${_nativeGeofenceId(churchId, minutes)}_wake'));
     final geofenceSignature = _nativeGeofenceSignature(
       churchId,
       churchLocation,
@@ -784,6 +803,25 @@ class AttendanceService {
               GeofenceEvent.exit,
               GeofenceEvent.dwell,
             },
+            iosSettings: const IosGeofenceSettings(initialTrigger: false),
+            androidSettings: AndroidGeofenceSettings(
+              initialTriggers: const {GeofenceEvent.enter},
+              loiteringDelay: Duration(minutes: minutes),
+              notificationResponsiveness: const Duration(minutes: 1),
+            ),
+          ),
+          attendanceGeofenceTriggered,
+        );
+      }
+      for (final minutes in wakeMinutes) {
+        await NativeGeofenceManager.instance.createGeofence(
+          Geofence(
+            id: '${_nativeGeofenceId(churchId, minutes)}_wake',
+            location: Location(
+                latitude: churchLocation.latitude,
+                longitude: churchLocation.longitude),
+            radiusMeters: 150,
+            triggers: const {GeofenceEvent.enter, GeofenceEvent.dwell},
             iosSettings: const IosGeofenceSettings(initialTrigger: false),
             androidSettings: AndroidGeofenceSettings(
               initialTriggers: const {GeofenceEvent.enter},
@@ -854,6 +892,9 @@ class AttendanceService {
           if (opensAt.isAfter(now.add(const Duration(seconds: 15)))) {
             refreshAt.add(opensAt.millisecondsSinceEpoch);
           }
+          if (scheduledStart.isAfter(now.add(const Duration(seconds: 15)))) {
+            refreshAt.add(scheduledStart.millisecondsSinceEpoch);
+          }
         }
       }
       final refreshes = refreshAt.toList()..sort();
@@ -892,6 +933,11 @@ class AttendanceService {
     GeofenceCallbackParams params,
   ) async {
     if (!_usesNativeAndroidGeofence || params.geofences.isEmpty) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
+    if (prefs.getBool('auto_check_in') != true) return;
+    await prefs.setString('attendance_last_native_event',
+        '${params.event.name} at ${DateTime.now().toUtc().toIso8601String()}');
 
     final user = _supabase.auth.currentUser;
     if (user == null) {
@@ -910,6 +956,13 @@ class AttendanceService {
         .any((geofence) => geofence.id.startsWith(expectedPrefix))) {
       debugPrint(
           'Attendance geofence ignored after church membership changed.');
+      return;
+    }
+
+    if (params.geofences.every((geofence) => geofence.id.endsWith('_wake'))) {
+      // Verify a fresh precise position against the original church radius.
+      // Do not backdate arrival from time spent in the wider wake-up fence.
+      await _checkLocationLogic(await _getReliablePosition());
       return;
     }
 
@@ -2122,6 +2175,7 @@ class AttendanceService {
       'Marked Present! ✅',
       body,
       details,
+      payload: jsonEncode({'route': '/attendance', 'type': 'attendance'}),
     );
   }
 
@@ -2484,9 +2538,17 @@ class AttendanceService {
 
   Future<AttendanceSetupStatus> getSetupStatus(String churchId) async {
     final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
     final autoCheckInEnabled = prefs.getBool('auto_check_in') ?? false;
     final locationServicesEnabled = await Geolocator.isLocationServiceEnabled();
     final permission = await Geolocator.checkPermission();
+    bool? preciseLocationEnabled;
+    if (!kIsWeb &&
+        (permission == LocationPermission.always ||
+            permission == LocationPermission.whileInUse)) {
+      preciseLocationEnabled = await Geolocator.getLocationAccuracy() ==
+          LocationAccuracyStatus.precise;
+    }
 
     final churchLocation = await _getChurchLocation(churchId);
 
@@ -2496,7 +2558,8 @@ class AttendanceService {
       final schedules = await _supabase
           .from('service_schedules')
           .select('serviceId')
-          .eq('churchId', churchId)
+          .inFilter('churchId', await _churchAliases(churchId))
+          .eq('attendanceEnabled', true)
           .limit(1);
       hasSchedule = schedules.isNotEmpty;
 
@@ -2525,6 +2588,9 @@ class AttendanceService {
       requiresBackgroundLocation: _needsAlwaysLocationPermission,
       activeServiceName: activeServiceName,
       batteryOptimizationIgnored: batteryOptimizationIgnored,
+      preciseLocationEnabled: preciseLocationEnabled,
+      radiusMeters: churchLocation?.radiusMeters,
+      lastNativeEvent: prefs.getString('attendance_last_native_event'),
     );
   }
 

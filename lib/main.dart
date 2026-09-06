@@ -28,6 +28,7 @@ import 'screens/admin/schedule_management_screen.dart';
 import 'screens/admin/admin_stream_settings_screen.dart';
 import 'screens/admin/daily_motivation_admin_screen.dart';
 import 'screens/admin/daily_bible_quiz_admin_screen.dart';
+import 'screens/notifications/notification_target_screen.dart';
 import 'screens/landing/landing_page.dart';
 import 'screens/login screen/login_screen.dart';
 import 'screens/login screen/auth_callback_screen.dart';
@@ -470,6 +471,18 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
             },
             onGenerateRoute: (settings) {
               final uri = Uri.tryParse(settings.name ?? '');
+              if (uri?.path == '/notification_target' ||
+                  uri?.path == '/notification_detail') {
+                return MaterialPageRoute(
+                  settings: settings,
+                  builder: (_) => _protected(NotificationTargetScreen(
+                    table: uri?.path == '/notification_detail'
+                        ? 'notifications'
+                        : uri?.queryParameters['table'] ?? '',
+                    id: uri?.queryParameters['id'] ?? '',
+                  )),
+                );
+              }
               if (uri?.path == '/inbox') {
                 return MaterialPageRoute(
                   builder: (_) => _protected(
@@ -553,7 +566,15 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
               }
 
               return MaterialPageRoute(
-                builder: (_) => const LandingPage(),
+                builder: (_) => Scaffold(
+                  appBar: AppBar(title: const Text('Page unavailable')),
+                  body: const Center(
+                      child: Padding(
+                    padding: EdgeInsets.all(24),
+                    child: Text(
+                        'This link is no longer available. Go back to continue using Grace Connect.'),
+                  )),
+                ),
                 settings: settings,
               );
             },

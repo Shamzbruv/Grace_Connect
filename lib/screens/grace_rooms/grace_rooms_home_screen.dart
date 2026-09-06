@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../services/grace_rooms_service.dart';
+import '../../theme/app_colors.dart';
 import '../../widgets/ui/app_scaffold.dart';
 
 class GraceRoomsHomeScreen extends StatefulWidget {
@@ -167,7 +168,10 @@ class _GraceRoomCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final accent = _parseColor(room.accentHex, theme.colorScheme.primary);
+    final accent = AppColors.readableAccent(
+      _parseColor(room.accentHex, theme.colorScheme.primary),
+      theme.colorScheme.surface,
+    );
     return Material(
       color: Colors.transparent,
       child: InkWell(

@@ -1,6 +1,9 @@
 <en-US>
-Grace Connect 1.0.29-beta:
-- Fixes Daily Word and Bible Quiz generation, which had silently stopped producing new content.
-- Confirms Android now targets the API level Google Play currently requires.
-- Adds a map-loading diagnostic and a battery-optimization warning for auto-attendance.
+- Fixed password recovery links and email guidance.
+- Grace Rooms now update messages live and recover after reconnecting.
+- Fixed Daily Word Bible links, including verse ranges.
+- Chapter quizzes guide you to read the chapter first.
+- Improved background attendance detection and setup diagnostics.
+- Notifications open the relevant content.
+- Improved light-mode contrast and Bible navigation.
 </en-US>

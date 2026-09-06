@@ -325,8 +325,17 @@ class GraceRoomsService {
     }
   }
 
-  Stream<List<GraceRoomMessage>> watchMessages(String roomId) {
-    return _supabase
+  Stream<List<GraceRoomMessage>> watchMessages(String roomId) async* {
+    // A REST session can be ready before Realtime receives its auth event.
+    // Apply it before joining so participant-only message policies see the
+    // signed-in member from the first subscription.
+    final token = _supabase.auth.currentSession?.accessToken;
+    if (token == null) {
+      yield const <GraceRoomMessage>[];
+      return;
+    }
+    await _supabase.realtime.setAuth(token);
+    yield* _supabase
         .from('grace_room_messages')
         .stream(primaryKey: ['id'])
         .eq('room_id', roomId)
@@ -360,16 +369,18 @@ class GraceRoomsService {
           .select()
           .eq('room_id', roomId)
           .gte('created_at', cutoff.toIso8601String())
-          .order('created_at')
+          .order('created_at', ascending: false)
           .limit(200);
       return rows
           .map(
               (row) => GraceRoomMessage.fromMap(Map<String, dynamic>.from(row)))
           .where(_isActiveMessage)
+          .toList()
+          .reversed
           .toList();
     } catch (error) {
       debugPrint('Grace Room messages unavailable: $error');
-      return const [];
+      rethrow;
     }
   }
 

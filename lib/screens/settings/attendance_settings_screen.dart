@@ -1,4 +1,7 @@
 import 'package:flutter/foundation.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:provider/provider.dart';
+import '../../providers/user_role_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -16,10 +19,12 @@ class AttendanceSettingsScreen extends StatefulWidget {
       _AttendanceSettingsScreenState();
 }
 
-class _AttendanceSettingsScreenState extends State<AttendanceSettingsScreen> {
+class _AttendanceSettingsScreenState extends State<AttendanceSettingsScreen>
+    with WidgetsBindingObserver {
   bool _autoCheckIn = false;
   bool _isLoading = true;
   bool? _batteryOptimizationIgnored;
+  Future<AttendanceSetupStatus>? _diagnostics;
 
   bool get _isAndroid =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
@@ -27,16 +32,34 @@ class _AttendanceSettingsScreenState extends State<AttendanceSettingsScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadSettings();
     if (_isAndroid) _loadBatteryOptimizationStatus();
   }
 
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
     setState(() {
       _autoCheckIn = prefs.getBool('auto_check_in') ?? false;
       _isLoading = false;
+      _diagnostics = AttendanceService().getSetupStatus(
+          context.read<UserRoleProvider>().userProfile?.placeId ?? '');
     });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _loadSettings();
+      if (_isAndroid) _loadBatteryOptimizationStatus();
+    }
   }
 
   Future<void> _loadBatteryOptimizationStatus() async {
@@ -82,6 +105,7 @@ class _AttendanceSettingsScreenState extends State<AttendanceSettingsScreen> {
     } else {
       AttendanceService().stopMonitoring();
     }
+    if (mounted) await _loadSettings();
   }
 
   Future<bool> _showBackgroundLocationDisclosure() async {
@@ -244,30 +268,82 @@ class _AttendanceSettingsScreenState extends State<AttendanceSettingsScreen> {
                     title: const Text('Auto-Register Attendance',
                         style: TextStyle(fontWeight: FontWeight.w600)),
                     subtitle: Text(_autoCheckIn
-                        ? 'Active (Monitoring location)'
+                        ? (AttendanceService().isMonitoring
+                            ? 'Monitoring enabled'
+                            : 'Enabled — setup needs attention')
                         : 'Disabled'),
                     value: _autoCheckIn,
                     onChanged: _toggleAutoCheckIn,
                   ),
                   if (_autoCheckIn) ...[
                     const SizedBox(height: 16),
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                          color: Colors.green.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                              color: Colors.green.withValues(alpha: 0.3))),
-                      child: Row(
-                        children: const [
-                          Icon(Icons.check_circle, color: Colors.green),
-                          SizedBox(width: 10),
-                          Expanded(
-                              child: Text(
-                                  'You are all set. We will notify you when you are marked present.',
-                                  style: TextStyle(color: Colors.green))),
-                        ],
-                      ),
+                    FutureBuilder<AttendanceSetupStatus>(
+                      future: _diagnostics,
+                      builder: (context, snapshot) {
+                        final status = snapshot.data;
+                        if (snapshot.hasError) {
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                  'Could not check setup. Check your connection and tap Recheck.'),
+                              TextButton(
+                                onPressed: _loadSettings,
+                                child: const Text('Recheck'),
+                              ),
+                            ],
+                          );
+                        }
+                        if (status == null) {
+                          return const LinearProgressIndicator();
+                        }
+                        final ready = status.blockers.isEmpty &&
+                            AttendanceService().isMonitoring;
+                        return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                  ready
+                                      ? 'Ready for the next scheduled service'
+                                      : 'Auto-attendance needs attention',
+                                  style: theme.textTheme.titleMedium),
+                              for (final blocker in status.blockers)
+                                Padding(
+                                    padding: const EdgeInsets.only(top: 8),
+                                    child: Text(blocker)),
+                              const SizedBox(height: 8),
+                              Text(status.activeServiceName == null
+                                  ? 'No service is open for attendance right now.'
+                                  : 'Current service: ${status.activeServiceName}'),
+                              if (status.radiusMeters != null &&
+                                  status.radiusMeters! < 100)
+                                const Padding(
+                                    padding: EdgeInsets.only(top: 8),
+                                    child: Text(
+                                        'The church radius is smaller than 100 metres. Background detection can be unreliable at this size. Ask your church administrator to check that the saved pin and radius cover the church grounds.')),
+                              if (status.lastNativeEvent != null)
+                                Padding(
+                                    padding: const EdgeInsets.only(top: 8),
+                                    child: Text(
+                                        'Last background detection: ${status.lastNativeEvent}')),
+                              const SizedBox(height: 8),
+                              Text(AttendanceService().lastDebugStatus),
+                              Wrap(spacing: 8, children: [
+                                TextButton(
+                                    onPressed: () async {
+                                      await AttendanceService().initialize();
+                                      if (mounted) await _loadSettings();
+                                    },
+                                    child: const Text('Recheck')),
+                                TextButton(
+                                    onPressed: Geolocator.openAppSettings,
+                                    child: const Text('Location permissions')),
+                                TextButton(
+                                    onPressed: Geolocator.openLocationSettings,
+                                    child: const Text('Device location')),
+                              ]),
+                            ]);
+                      },
                     ),
                     if (_isAndroid && _batteryOptimizationIgnored == false) ...[
                       const SizedBox(height: 12),

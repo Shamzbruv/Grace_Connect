@@ -4,9 +4,9 @@ Use this checklist for the Grace Connect internal testing upload.
 
 ## Release
 
-- Release name: `Grace Connect 1.0.28-beta (30)`
-- App bundle: `build/app/outputs/bundle/release/grace-connect-1.0.28-beta+30.aab`
-- Preserved previous bundle: `build/app/outputs/bundle/release/app-release.aab`
+- Release name: `Grace Connect 1.0.31-beta (35)`
+- App bundle: `build/app/outputs/bundle/release/grace-connect-1.0.31-beta+35.aab`
+- Previous bundle backup: `../.release_backups/20260905/grace-connect-1.0.30-beta+34.aab`
 - Release notes: `release_notes/internal-testing-en-US.txt`
 - Package ID: `love.graceconnect`
 - Compile/target SDK: Android 16 / API 36

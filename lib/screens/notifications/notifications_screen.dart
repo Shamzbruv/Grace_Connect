@@ -8,7 +8,6 @@ import '../../providers/user_role_provider.dart';
 import '../../services/bible_nudge_service.dart';
 import '../../services/community_service.dart';
 import '../../services/notification_service.dart';
-import '../community/post_detail_screen.dart';
 import '../../widgets/ui/app_feedback.dart';
 import '../../widgets/ui/app_scaffold.dart';
 
@@ -100,89 +99,7 @@ class NotificationsScreen extends StatelessWidget {
     CommunityService communityService,
     AppNotification notification,
   ) async {
-    if (notification.type == 'membership_request_received') {
-      if (!context.mounted) return;
-      Navigator.pushNamed(context, '/membership_requests');
-      return;
-    }
-
-    if (notification.type == 'message_request_received' ||
-        notification.type == 'message_request_accepted' ||
-        notification.type == 'message_request_denied') {
-      await notificationService.markAsRead(notification.id);
-      if (!context.mounted) return;
-      final tab = notification.type == 'message_request_accepted'
-          ? 'messages'
-          : 'requests';
-      Navigator.pushNamed(context, '/inbox?tab=$tab');
-      return;
-    }
-
-    await notificationService.markAsRead(notification.id);
-    if (!context.mounted) return;
-
-    final isPostNotification =
-        notification.type == 'like' || notification.type == 'comment';
-    final isCommunityEntity = notification.entityTable == 'community_posts' ||
-        notification.entityTable == 'community_comments';
-
-    if (isPostNotification || isCommunityEntity) {
-      try {
-        final post = await communityService.fetchPostForNotification(
-          entityTable: notification.entityTable,
-          entityId: notification.entityId,
-        );
-        if (!context.mounted) return;
-        if (post != null) {
-          Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (_) => PostDetailScreen(post: post),
-            ),
-          );
-          return;
-        }
-        AppFeedback.show(
-          context,
-          'That post is no longer available.',
-          type: AppFeedbackType.warning,
-        );
-        return;
-      } catch (error) {
-        if (!context.mounted) return;
-        AppFeedback.show(
-          context,
-          'Could not open post: $error',
-          type: AppFeedbackType.error,
-        );
-        return;
-      }
-    }
-
-    if (notification.type == 'bible_nudge_response' &&
-        notification.entityTable == 'bible_nudges' &&
-        notification.entityId?.isNotEmpty == true) {
-      final accepted = notification.title.toLowerCase().contains('accepted');
-      final actorId = notification.actorId?.trim() ?? '';
-      if (accepted && actorId.isNotEmpty) {
-        Navigator.pushNamed(
-          context,
-          '/public_profile?id=${Uri.encodeComponent(actorId)}',
-        );
-      } else {
-        Navigator.pushNamed(
-          context,
-          notification.route?.trim().isNotEmpty == true
-              ? notification.route!.trim()
-              : '/notifications',
-        );
-      }
-      return;
-    }
-
-    final route = notification.route;
-    if (route != null && route.isNotEmpty && context.mounted) {
-      Navigator.pushNamed(context, route);
-    }
+    notificationService.openNotification(notification);
   }
 }
 

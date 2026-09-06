@@ -1,6 +1,20 @@
 import 'package:flutter/material.dart';
 
 class AppColors {
+  /// Keep decorative brand colors readable when they are used as foregrounds.
+  static Color readableAccent(Color accent, Color background) {
+    var result = accent;
+    final target =
+        background.computeLuminance() > 0.5 ? Colors.black : Colors.white;
+    for (var step = 0; step < 20; step++) {
+      final a = result.computeLuminance();
+      final b = background.computeLuminance();
+      final ratio = ((a > b ? a : b) + 0.05) / ((a > b ? b : a) + 0.05);
+      if (ratio >= 4.5) break;
+      result = Color.lerp(result, target, 0.12)!;
+    }
+    return result;
+  }
   // --- CORE PALETTE ---
 
   // Primary (Deep Navy - from logo)

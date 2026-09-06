@@ -26,7 +26,7 @@ Deno.serve(async (request) => {
     const refreshAt = nextJamaicaRefresh(7);
     const { data: quiz } = await client
       .from("daily_bible_quizzes")
-      .select("id, quiz_date, available_at, expires_at, status")
+      .select("id, quiz_date, available_at, expires_at, status, quiz_mode, study_chapter_key, source_daily_motivation_id")
       .eq("church_id", churchId)
       .eq("quiz_date", quizDate)
       .eq("status", "published")

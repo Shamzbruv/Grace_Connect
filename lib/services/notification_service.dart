@@ -55,7 +55,7 @@ class NotificationService {
 
   final FlutterLocalNotificationsPlugin _localNotifications =
       FlutterLocalNotificationsPlugin();
-  final FirebaseMessaging _messaging = FirebaseMessaging.instance;
+  FirebaseMessaging get _messaging => FirebaseMessaging.instance;
   // Keep this lazy. Firebase Messaging creates this singleton in a background
   // isolate where Firebase is initialized but the app's Supabase bootstrap has
   // not run. Data-only pushes only need local notifications, so eagerly reading
@@ -370,7 +370,7 @@ class NotificationService {
     if (kIsWeb) return;
 
     final profile = _profileForType(type);
-    final effectiveRoute = _routeForNotification(
+    final effectiveRoute = resolveRoute(
       route: route,
       type: type,
       entityTable: entityTable,
@@ -596,16 +596,49 @@ class NotificationService {
 
   Future<void> _openRouteFromMessage(RemoteMessage message) async {
     final payload = _payloadFromMessageData(message.data);
-    await _markNotificationPayloadHandled(payload);
-    await _cancelNotificationForPayload(payload);
     _navigateToRoute(payload['route']);
+    unawaited(_finishNotificationTap(payload));
   }
 
   Future<void> _handleNotificationTapPayload(String? rawPayload) async {
     final payload = _decodeNotificationPayload(rawPayload);
-    await _markNotificationPayloadHandled(payload);
-    await _cancelNotificationForPayload(payload);
     _navigateToRoute(payload['route']);
+    unawaited(_finishNotificationTap(payload));
+  }
+
+  Future<void> _finishNotificationTap(Map<String, String?> payload) async {
+    try {
+      await _markNotificationPayloadHandled(payload);
+      await _cancelNotificationForPayload(payload);
+    } catch (error) {
+      debugPrint('Notification read state will retry later: $error');
+    }
+  }
+
+  void openNotification(AppNotification notification) {
+    final payload = _payloadFromMessageData({
+      'route': notification.route,
+      'type': notification.type,
+      'entity_table': notification.entityTable,
+      'entity_id': notification.entityId,
+      'notification_id': notification.id,
+    });
+    _navigateToRoute(payload['route']);
+    unawaited(_finishNotificationTap(payload));
+  }
+
+  /// Reused by attendance so it cannot erase the app's notification tap handler.
+  Future<void> initializeLocalNotifications() async {
+    if (kIsWeb) return;
+    await _localNotifications.initialize(
+      const InitializationSettings(
+        android: AndroidInitializationSettings('ic_stat_grace_connect'),
+        iOS: DarwinInitializationSettings(),
+      ),
+      onDidReceiveNotificationResponse: (response) {
+        unawaited(_handleNotificationTapPayload(response.payload));
+      },
+    );
   }
 
   void _navigateToRoute(String? route) {
@@ -622,11 +655,17 @@ class NotificationService {
       }
     }
 
-    if (navigatorKey.currentState == null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => pushRoute());
-    } else {
-      pushRoute();
+    var attempts = 0;
+    void whenReady() {
+      if (navigatorKey.currentState != null) {
+        pushRoute();
+      } else if (attempts++ < 80) {
+        Future<void>.delayed(const Duration(milliseconds: 250), whenReady);
+      }
     }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) => whenReady());
+    WidgetsBinding.instance.ensureVisualUpdate();
   }
 
   @visibleForTesting
@@ -637,14 +676,26 @@ class NotificationService {
     final uri = Uri.tryParse(cleanRoute);
     if (uri == null) return cleanRoute.startsWith('/') ? cleanRoute : null;
     if (uri.hasScheme || uri.hasAuthority) {
-      final path = uri.path.isNotEmpty
-          ? uri.path
-          : uri.host.isNotEmpty
-              ? '/${uri.host}'
-              : '';
-      if (!path.startsWith('/')) return null;
-      final query = uri.query.isEmpty ? '' : '?${uri.query}';
-      return '$path$query';
+      if (uri.scheme == 'graceconnect' ||
+          uri.scheme == 'app.graceconnect.church') {
+        return Uri(
+                path: '/${uri.host}${uri.path}'.replaceAll(RegExp(r'/+'), '/'),
+                query: uri.hasQuery ? uri.query : null)
+            .toString();
+      }
+      if (!const {'https', 'http'}.contains(uri.scheme) ||
+          !const {
+            'graceconnect.app',
+            'graceconnect.love',
+            'www.graceconnect.love',
+            'graceconnect-9a97c.web.app'
+          }.contains(uri.host)) {
+        return null;
+      }
+      return Uri(
+              path: uri.path.isEmpty ? '/' : uri.path,
+              query: uri.hasQuery ? uri.query : null)
+          .toString();
     }
     if (!uri.path.startsWith('/')) return null;
     return uri.toString();
@@ -656,14 +707,22 @@ class NotificationService {
         _dataValue(data, 'entity_table') ?? _dataValue(data, 'entityTable');
     final entityId =
         _dataValue(data, 'entity_id') ?? _dataValue(data, 'entityId');
-    final route = _routeForNotification(
+    final route = resolveRoute(
       route: _dataValue(data, 'route'),
       type: type,
       entityTable: entityTable,
       entityId: entityId,
     );
     return {
-      'route': route,
+      'route': (route == null || route == '/notifications') &&
+              (_dataValue(data, 'notification_id') ??
+                      _dataValue(data, 'notificationId')) !=
+                  null
+          ? Uri(path: '/notification_detail', queryParameters: {
+              'id': (_dataValue(data, 'notification_id') ??
+                  _dataValue(data, 'notificationId'))!
+            }).toString()
+          : route,
       'type': type,
       'entity_table': entityTable,
       'entity_id': entityId,
@@ -679,13 +738,7 @@ class NotificationService {
     try {
       final decoded = jsonDecode(rawPayload);
       if (decoded is Map) {
-        return {
-          'route': decoded['route']?.toString(),
-          'type': decoded['type']?.toString(),
-          'entity_table': decoded['entity_table']?.toString(),
-          'entity_id': decoded['entity_id']?.toString(),
-          'notification_id': decoded['notification_id']?.toString(),
-        };
+        return _payloadFromMessageData(Map<String, dynamic>.from(decoded));
       }
     } catch (_) {
       // Older notifications used the route itself as the payload.
@@ -711,7 +764,7 @@ class NotificationService {
     });
   }
 
-  String? _routeForNotification({
+  static String? resolveRoute({
     required String? route,
     required String? type,
     required String? entityTable,
@@ -748,31 +801,35 @@ class NotificationService {
     }
 
     if ((cleanEntityTable == 'social_profiles' ||
-            cleanEntityTable == 'users' ||
             normalizedType == 'social_follow' ||
             normalizedType == 'social_follow_request' ||
             normalizedType == 'social_follow_accepted') &&
         cleanEntityId.isNotEmpty) {
       return Uri(
-        path: '/public_profile',
-        queryParameters: {'id': cleanEntityId},
-      ).toString();
+          path: '/public_profile',
+          queryParameters: {'id': cleanEntityId}).toString();
     }
 
-    if ((cleanEntityTable == 'grace_rooms' ||
-            cleanEntityTable == 'grace_room_messages' ||
-            normalizedType == 'grace_room_invitation' ||
-            normalizedType == 'grace_support_offer' ||
-            normalizedType == 'grace_support_response') &&
-        cleanEntityId.isNotEmpty) {
+    if (cleanEntityTable == 'grace_rooms' && cleanEntityId.isNotEmpty) {
       return Uri(
-        path: '/grace_rooms/room',
-        queryParameters: {'id': cleanEntityId},
-      ).toString();
+          path: '/grace_rooms/room',
+          queryParameters: {'id': cleanEntityId}).toString();
     }
 
-    if (cleanEntityTable == 'events' || normalizedType == 'event_invitation') {
-      return '/events';
+    // Message ids identify messages, not their parent room/conversation.
+    // Resolve the authorized parent row on the destination screen.
+    if (const {
+          'grace_room_messages',
+          'direct_messages',
+          'direct_conversations',
+          'events',
+          'announcements'
+        }.contains(cleanEntityTable) &&
+        cleanEntityId.isNotEmpty) {
+      return Uri(path: '/notification_target', queryParameters: {
+        'table': cleanEntityTable,
+        'id': cleanEntityId,
+      }).toString();
     }
 
     if (cleanEntityTable == 'social_saved_items') {
@@ -802,7 +859,7 @@ class NotificationService {
       ).toString();
     }
 
-    return route;
+    return normalizeRoute(route);
   }
 
   static String? _dataValue(Map<String, dynamic> data, String key) {

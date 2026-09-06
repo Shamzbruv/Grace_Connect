@@ -43,7 +43,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
           builder: (context) => AlertDialog(
             title: const Text('Reset Email Sent'),
             content: Text(
-                'We have sent a password reset link to $email.\n\nPlease check your inbox AND your Spam/Junk folder.'),
+                'If $email has a Grace Connect account, a password reset link will arrive shortly. Check your inbox and Spam/Junk folder.\n\nOpen the link to choose a new password on the Grace Connect website, then return to the app and sign in.'),
             actions: [
               TextButton(
                   onPressed: () {

@@ -291,12 +291,18 @@ void main() {
       expect(membershipReviewMigration, contains('jsonb_build_object'));
       expect(membershipReviewMigration, contains('left join auth.users'));
       expect(membershipReviewMigration, contains('request_message'));
-      expect(memberListSource,
-          contains('!isOwnProfile && !isPrivate && !isSameChurch'));
+      expect(
+          memberListSource,
+          matches(RegExp(
+              r'final canNudge = !isOwnProfile[\s\S]*?!isPrivate[\s\S]*?!isSameChurch')));
       expect(communityFeedSource, contains('canNudgePerson'));
       expect(communityFeedSource, contains('_isDifferentKnownChurch'));
-      expect(bibleNudgeServiceSource,
-          contains('Bible Nudge is only for people outside your church'));
+      expect(
+          bibleNudgeServiceSource, contains('senderChurch == recipientChurch'));
+      expect(
+          bibleNudgeServiceSource,
+          contains(
+              'Bible Nudge is only for members of two different churches'));
     });
 
     test('member approval honors explicit approveMembers privilege', () {
@@ -332,9 +338,9 @@ void main() {
       ).readAsStringSync();
 
       expect(gradle, contains('"love.graceconnect"'));
-      expect(gradle, contains('versionCode 34'));
-      expect(gradle, contains('versionName "1.0.30-beta"'));
-      expect(pubspec, contains('version: "1.0.30-beta+34"'));
+      final version = RegExp(r'version: "([^+]+)\+(\d+)"').firstMatch(pubspec)!;
+      expect(gradle, contains('versionCode ${version.group(2)}'));
+      expect(gradle, contains('versionName "${version.group(1)}"'));
       expect(activity, contains('package love.graceconnect'));
       expect(manifest, contains('love.graceconnect.MainActivity'));
       expect(manifest, contains('default_notification_icon'));
@@ -603,7 +609,10 @@ void main() {
       final releaseDocs =
           File('docs/play_internal_testing_release.md').readAsStringSync();
 
-      expect(directMessageSource, contains('sameChurch'));
+      expect(
+          directMessageSource, contains('get_or_create_direct_conversation'));
+      expect(directMessageSource,
+          isNot(contains(".from('direct_conversations').insert")));
       expect(inboxSource, contains('sameChurch || member.allowMessages'));
       expect(membersSource,
           contains('isSameChurch || memberProfile.allowMessages'));

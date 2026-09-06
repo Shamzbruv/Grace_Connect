@@ -5,6 +5,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../services/daily_bible_quiz_service.dart';
+import '../../models/bible_passage_reference.dart';
+import 'bible_reader_screen.dart';
 import '../../services/notification_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/quiz/monthly_quiz_leaderboard_panel.dart';
@@ -43,12 +45,24 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
   bool _submitting = false;
   bool _active = false;
   String? _activeQuizId;
+  String? _requestedQuizId;
+  String? _readStudyQuizId;
+
+  Future<void> _readStudyChapter(
+      String quizId, BiblePassageReference passage) async {
+    await Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) =>
+          BibleReaderScreen(book: passage.book, chapter: passage.chapter),
+    ));
+    if (mounted) setState(() => _readStudyQuizId = quizId);
+  }
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _selectedQuizMonth = widget.initialMonth;
+    _requestedQuizId = widget.initialQuizId?.trim();
     if (widget.initialQuizId?.trim().isNotEmpty == true) {
       _activeQuizId = widget.initialQuizId!.trim();
       unawaited(_clearQuizNotification(_activeQuizId!));
@@ -420,6 +434,28 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
         }
         final data = snapshot.data ?? const {};
         final quiz = data['quiz'];
+        if (_requestedQuizId?.isNotEmpty == true &&
+            (quiz is! Map || quiz['id']?.toString() != _requestedQuizId)) {
+          return Center(
+              child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              const Text(
+                  'The quiz in this notification has expired or is no longer available.'),
+              const SizedBox(height: 16),
+              FilledButton(
+                  onPressed: () => setState(() => _requestedQuizId = null),
+                  child: const Text('View today’s quiz')),
+            ]),
+          ));
+        }
+        final studyChapter = quiz is Map && quiz['quiz_mode'] == 'chapter_study'
+            ? BiblePassageReference.tryParseChapter(
+                quiz['study_chapter_key']?.toString() ?? '')
+            : null;
+        final studyQuizId = quiz is Map ? quiz['id']?.toString() ?? '' : '';
+        final needsReading =
+            studyChapter != null && _readStudyQuizId != studyQuizId;
         if (quiz is Map && quiz['id'] != null) {
           final quizId = quiz['id'].toString();
           _activeQuizId = quizId;
@@ -450,7 +486,16 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
               : 'The next Daily Bible Quiz refreshes at 7:00 AM.',
           countdown: _countdownText(),
           canStart: data['can_start'] == true,
-          onStart: _confirmAndStart,
+          onStart: needsReading
+              ? () => _readStudyChapter(studyQuizId, studyChapter)
+              : _confirmAndStart,
+          studyChapter: studyChapter == null
+              ? null
+              : '${studyChapter.book.name} ${studyChapter.chapter}',
+          needsReading: needsReading,
+          onReadChapter: studyChapter == null
+              ? null
+              : () => _readStudyChapter(studyQuizId, studyChapter),
           leaderboardData: _leaderboardData,
           leaderboardLoading: _leaderboardLoading,
           onMonthChanged: (month) => _loadLeaderboard(quizMonth: month),
@@ -488,6 +533,9 @@ class _QuizLanding extends StatelessWidget {
     required this.leaderboardData,
     required this.leaderboardLoading,
     required this.onMonthChanged,
+    this.studyChapter,
+    this.needsReading = false,
+    this.onReadChapter,
   });
 
   final String title;
@@ -498,12 +546,37 @@ class _QuizLanding extends StatelessWidget {
   final Map<String, dynamic> leaderboardData;
   final bool leaderboardLoading;
   final ValueChanged<String> onMonthChanged;
+  final String? studyChapter;
+  final bool needsReading;
+  final VoidCallback? onReadChapter;
 
   @override
   Widget build(BuildContext context) {
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
+        if (studyChapter != null)
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Read $studyChapter first',
+                      style: Theme.of(context).textTheme.titleLarge),
+                  const SizedBox(height: 8),
+                  Text(
+                      'All five questions are based on this chapter. Read it in the Bible, then return here to begin. The quiz timer starts only when you start the quiz.'),
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: onReadChapter,
+                    icon: const Icon(Icons.menu_book_outlined),
+                    label: Text('Read $studyChapter'),
+                  ),
+                ],
+              ),
+            ),
+          ),
         Container(
           padding: const EdgeInsets.all(24),
           decoration: BoxDecoration(
@@ -544,9 +617,16 @@ class _QuizLanding extends StatelessWidget {
               ),
               const SizedBox(height: 22),
               FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppColors.goldHighlight,
+                  foregroundColor: AppColors.primary,
+                ),
                 onPressed: canStart ? onStart : null,
-                icon: const Icon(Icons.play_arrow_rounded),
-                label: const Text('Start Today’s Quiz'),
+                icon: Icon(needsReading
+                    ? Icons.menu_book_outlined
+                    : Icons.play_arrow_rounded),
+                label: Text(
+                    needsReading ? 'Read Chapter First' : 'Start Today’s Quiz'),
               ),
             ],
           ),

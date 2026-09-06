@@ -26,9 +26,16 @@ class _GraceRoomChatScreenState extends State<GraceRoomChatScreen>
   static const _heartbeatInterval = Duration(seconds: 45);
   final GraceRoomsService _service = GraceRoomsService();
   final TextEditingController _messageController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
   late Future<GraceRoom?> _roomFuture;
+  late Stream<GraceRoom?> _roomStream;
+  StreamSubscription<List<GraceRoomMessage>>? _messagesSubscription;
   List<GraceRoomMessage> _fallbackMessages = const [];
   Timer? _presenceTimer;
+  Timer? _messageRefreshTimer;
+  bool _refreshingMessages = false;
+  int _messageRevision = 0;
+  bool _messageLoadFailed = false;
   bool _sending = false;
 
   @override
@@ -36,6 +43,22 @@ class _GraceRoomChatScreenState extends State<GraceRoomChatScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _roomFuture = _service.fetchRoom(widget.roomId);
+    _roomStream = _service.watchRoom(widget.roomId);
+    _messagesSubscription = _service.watchMessages(widget.roomId).listen(
+      (messages) {
+        if (!mounted) return;
+        setState(() {
+          _messageRevision++;
+          _fallbackMessages = messages;
+          _messageLoadFailed = false;
+        });
+        _scrollToLatest();
+      },
+      onError: (Object error) {
+        debugPrint('Grace Room live connection interrupted: $error');
+        unawaited(_refreshMessages());
+      },
+    );
     _joinAndPrime();
   }
 
@@ -43,26 +66,66 @@ class _GraceRoomChatScreenState extends State<GraceRoomChatScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _presenceTimer?.cancel();
+    _messageRefreshTimer?.cancel();
+    unawaited(_messagesSubscription?.cancel());
     unawaited(_service.leaveRoom(widget.roomId));
     _messageController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      unawaited(_touchPresence());
+      unawaited(_joinAndPrime());
     } else if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached) {
       _presenceTimer?.cancel();
+      _messageRefreshTimer?.cancel();
       unawaited(_service.leaveRoom(widget.roomId));
     }
   }
 
   Future<void> _joinAndPrime() async {
     await _touchPresence();
-    final messages = await _service.fetchMessages(widget.roomId);
-    if (mounted) setState(() => _fallbackMessages = messages);
+    await _refreshMessages();
+    if (!mounted) return;
+    _messageRefreshTimer?.cancel();
+    // Reconcile missed events after a network interruption and expire messages
+    // even when no new database event arrives. Realtime remains the fast path.
+    _messageRefreshTimer = Timer.periodic(
+      const Duration(seconds: 15),
+      (_) => unawaited(_refreshMessages()),
+    );
+  }
+
+  Future<void> _refreshMessages() async {
+    if (_refreshingMessages) return;
+    _refreshingMessages = true;
+    final revision = _messageRevision;
+    try {
+      final messages = await _service.fetchMessages(widget.roomId);
+      if (!mounted || revision != _messageRevision) return;
+      setState(() {
+        _fallbackMessages = messages;
+        _messageLoadFailed = false;
+      });
+      _scrollToLatest();
+    } catch (_) {
+      if (mounted) setState(() => _messageLoadFailed = true);
+    } finally {
+      _refreshingMessages = false;
+    }
+  }
+
+  void _scrollToLatest({bool force = false}) {
+    final nearBottom = !_scrollController.hasClients ||
+        _scrollController.position.extentAfter < 100;
+    if (!force && !nearBottom) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scrollController.hasClients) return;
+      _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+    });
   }
 
   Future<void> _touchPresence() async {
@@ -91,7 +154,10 @@ class _GraceRoomChatScreenState extends State<GraceRoomChatScreen>
     setState(() => _sending = true);
     try {
       await _service.sendMessage(roomId: widget.roomId, body: body);
+      if (!mounted) return;
       _messageController.clear();
+      await _refreshMessages();
+      _scrollToLatest(force: true);
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -114,20 +180,18 @@ class _GraceRoomChatScreenState extends State<GraceRoomChatScreen>
             children: [
               if (room != null)
                 StreamBuilder<GraceRoom?>(
-                  stream: _service.watchRoom(widget.roomId),
+                  stream: _roomStream,
                   initialData: room,
                   builder: (context, snapshot) =>
                       _RoomHeader(room: snapshot.data ?? room),
                 ),
               Expanded(
-                child: StreamBuilder<List<GraceRoomMessage>>(
-                  stream: _service.watchMessages(widget.roomId),
-                  initialData: _fallbackMessages,
-                  builder: (context, snapshot) {
-                    final messages = snapshot.data ?? _fallbackMessages;
+                child: Builder(
+                  builder: (context) {
+                    final messages = _fallbackMessages;
                     final currentUserId =
                         Supabase.instance.client.auth.currentUser?.id;
-                    final notice = snapshot.hasError && messages.isEmpty
+                    final notice = _messageLoadFailed && messages.isEmpty
                         ? 'Room messages are not available yet.'
                         : messages.isEmpty
                             ? 'No messages yet.'
@@ -137,6 +201,7 @@ class _GraceRoomChatScreenState extends State<GraceRoomChatScreen>
                         (includeScripture ? 1 : 0) +
                         (notice == null ? 0 : 1);
                     return ListView.builder(
+                      controller: _scrollController,
                       reverse: false,
                       padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
                       itemCount: itemCount,

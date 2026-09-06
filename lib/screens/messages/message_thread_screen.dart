@@ -1052,7 +1052,7 @@ class _MessageBubble extends StatelessWidget {
                     ),
                     if (isMe) ...[
                       const SizedBox(width: 4),
-                      _MessageStatusTicks(message: message),
+                      _MessageStatusTicks(message: message, color: textColor),
                     ],
                   ],
                 ),
@@ -1094,13 +1094,13 @@ class _ReplyContextPreview extends StatelessWidget {
         padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
           color: isMe
-              ? Colors.white.withValues(alpha: 0.16)
+              ? textColor.withValues(alpha: 0.10)
               : theme.colorScheme.surface.withValues(alpha: 0.62),
           borderRadius: BorderRadius.circular(12),
           border: Border(
             left: BorderSide(
               color: isMe
-                  ? Colors.white.withValues(alpha: 0.7)
+                  ? textColor.withValues(alpha: 0.7)
                   : theme.colorScheme.primary,
               width: 3,
             ),
@@ -1321,18 +1321,24 @@ class _VoiceMessagePlayerState extends State<_VoiceMessagePlayer> {
 }
 
 class _MessageStatusTicks extends StatelessWidget {
-  const _MessageStatusTicks({required this.message});
+  const _MessageStatusTicks({required this.message, required this.color});
 
   final DirectMessage message;
+  final Color color;
 
   @override
   Widget build(BuildContext context) {
     if (message.isSeen) {
-      return const Icon(Icons.done_all, size: 14, color: Colors.greenAccent);
+      return Icon(Icons.done_all,
+          size: 16, color: color, semanticLabel: 'Seen');
     }
     if (message.isDelivered) {
-      return const Icon(Icons.done_all, size: 14, color: Colors.white70);
+      return Icon(Icons.done_all,
+          size: 14,
+          color: color.withValues(alpha: 0.72),
+          semanticLabel: 'Delivered');
     }
-    return const Icon(Icons.done, size: 14, color: Colors.white70);
+    return Icon(Icons.done,
+        size: 14, color: color.withValues(alpha: 0.72), semanticLabel: 'Sent');
   }
 }

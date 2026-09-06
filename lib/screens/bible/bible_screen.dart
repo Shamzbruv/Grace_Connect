@@ -15,6 +15,7 @@ class _BibleScreenState extends State<BibleScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
   final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocus = FocusNode();
   List<BibleBook> _filteredBooks = BibleData.allBooks;
   String _currentTestament = 'Old'; // 'Old' or 'New'
 
@@ -48,6 +49,7 @@ class _BibleScreenState extends State<BibleScreen>
   void dispose() {
     _tabController.dispose();
     _searchController.dispose();
+    _searchFocus.dispose();
     super.dispose();
   }
 
@@ -84,6 +86,7 @@ class _BibleScreenState extends State<BibleScreen>
             padding: const EdgeInsets.all(16.0),
             child: TextField(
               controller: _searchController,
+              focusNode: _searchFocus,
               decoration: InputDecoration(
                 hintText: 'Search books...',
                 prefixIcon: const Icon(Icons.search),
@@ -132,22 +135,26 @@ class _BibleScreenState extends State<BibleScreen>
       bottomNavigationBar: NavigationBar(
         backgroundColor: theme.scaffoldBackgroundColor,
         elevation: 0,
-        selectedIndex: 0, // Mock for now
-        indicatorColor: AppColors.primary.withValues(alpha: 0.1),
+        selectedIndex: 0,
+        onDestinationSelected: (index) {
+          if (index == 1) _searchFocus.requestFocus();
+          if (index == 2) Navigator.of(context).pushNamed('/daily_bible_quiz');
+        },
+        indicatorColor: colorScheme.primaryContainer,
         destinations: const [
           NavigationDestination(
             icon: Icon(Icons.menu_book_outlined),
-            selectedIcon: Icon(Icons.menu_book, color: AppColors.primary),
+            selectedIcon: Icon(Icons.menu_book),
             label: 'Read',
           ),
           NavigationDestination(
             icon: Icon(Icons.search_outlined),
-            selectedIcon: Icon(Icons.search, color: AppColors.primary),
+            selectedIcon: Icon(Icons.search),
             label: 'Search',
           ),
           NavigationDestination(
             icon: Icon(Icons.quiz_outlined),
-            selectedIcon: Icon(Icons.quiz, color: AppColors.primary),
+            selectedIcon: Icon(Icons.quiz),
             label: 'Quiz',
           ),
         ],

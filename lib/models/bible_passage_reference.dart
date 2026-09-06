@@ -14,9 +14,16 @@ class BiblePassageReference {
   final int? endVerse;
 
   static BiblePassageReference? tryParse(String value) {
+    // Generated copy can contain nonbreaking spaces/hyphens and other
+    // typographic dashes. Normalize them before interpreting the reference.
+    final normalized = value
+        .replaceAll(RegExp(r'[\u2010-\u2015\u2212\uFE58\uFE63\uFF0D]'), '-')
+        .replaceAll(RegExp(r'[\u00A0\u2007\u202F]'), ' ')
+        .replaceAll(RegExp(r'[\u200B\uFEFF]'), '')
+        .trim();
     final match = RegExp(
       r'^\s*([1-3]?\s*[A-Za-z]+(?:\s+[A-Za-z]+)*)\s+(\d{1,3}):(\d{1,3})(?:\s*[-–—]\s*(\d{1,3}))?(?:\s*(?:\([^)]*\)|\[[^\]]*\]|[,;].*))?\s*$',
-    ).firstMatch(value);
+    ).firstMatch(normalized);
     if (match == null) return null;
 
     final requestedBook = _canonicalBookName(match.group(1)!);
@@ -45,6 +52,11 @@ class BiblePassageReference {
       startVerse: startVerse,
       endVerse: endVerse,
     );
+  }
+
+  /// Chapter metadata has no verse suffix; open it at verse one.
+  static BiblePassageReference? tryParseChapter(String value) {
+    return tryParse('${value.trim()}:1');
   }
 
   static String _canonicalBookName(String value) {

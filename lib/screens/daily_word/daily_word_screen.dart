@@ -46,7 +46,8 @@ class _DailyWordScreenState extends State<DailyWordScreen> {
             forceRegenerate: forceRegenerate,
           );
     final currentYear = DateTime.now().year;
-    if (selected != null &&
+    if (widget.motivationId?.isNotEmpty != true &&
+        selected != null &&
         selected.publishDate.toLocal().year != currentYear) {
       selected = await _service.fetchToday(generateIfMissing: true);
     }
