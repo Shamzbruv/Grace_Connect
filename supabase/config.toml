@@ -68,6 +68,10 @@ verify_jwt = false
 [functions.cleanup-daily-bible-quiz-attempts]
 verify_jwt = false
 
+# Authenticated with the private cron secret inside the function.
+[functions.cleanup-retained-media]
+verify_jwt = false
+
 [functions.send-bible-streak-reminders]
 verify_jwt = false
 

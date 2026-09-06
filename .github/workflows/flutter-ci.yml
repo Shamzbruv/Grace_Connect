@@ -11,6 +11,20 @@ on:
       - main
 
 jobs:
+  retention-worker-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.22.2"
+
+      - name: Test safe media retention
+        run: node --experimental-strip-types --test supabase/tests/retention_media_worker_test.ts
+
   analyze-and-test:
     runs-on: ubuntu-latest
     steps:
