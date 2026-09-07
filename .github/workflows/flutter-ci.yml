@@ -53,6 +53,11 @@ jobs:
       - name: Run tests
         run: flutter test
 
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.12"
+
       - name: Configure Android SDK paths
         shell: python
         run: |
@@ -65,4 +70,4 @@ jobs:
 
       - name: Test Android attendance scheduler
         working-directory: android
-        run: ./gradlew :grace_attendance_background:testDebugUnitTest --no-daemon
+        run: gradle :grace_attendance_background:testDebugUnitTest --no-daemon
