@@ -16,13 +16,14 @@ The calendar also retained only one record per day, so an absence for another se
 - The app distinguishes server-confirmed attendance from a check-in queued on the phone. A notification or local cleanup failure after server confirmation does not report the saved attendance as failed.
 - Opt-in service reminders prompt before the service (up to 15 minutes, within the church's opening window), at the start, and ten minutes after the start while the service is ongoing. Taps open Attendance for location-verified manual sign-in. High-importance Android notifications request heads-up delivery over other apps.
 - Reminders have stable member/service/date/phase IDs and concrete dates. This avoids the notification dependency's weekly matching behavior, which can ignore a future date and revive an already-confirmed day's reminder. At most 24 upcoming notifications are queued over a 15-day horizon. Android independently refreshes this plan daily, even with automatic check-in disabled or location permission revoked. Opening the app also refreshes it. Confirmed occurrences are excluded.
+- Scheduled-notification receivers are explicitly registered so saved reminders can display and recover after phone restarts or app updates. The confirmation popup no longer refers to a missing large-icon resource.
 - Setup distinguishes Always access from while-in-use, checks precise location, and shows registration separately from the last actual background event/check result.
 
 ## iPhone preparation and limits
 
-The native region callback now has its required Flutter plugin registrant. The permission-handler location build flag is enabled and deployment targets match iOS 15. Region callbacks use a bounded fresh location check and offer manual sign-in. A single region event does not stand in for ten minutes of dwell. Foreground-started on-site observation uses Apple's background location settings and stops when the service/dwell ends.
+The native region callback now has its required Flutter plugin registrant and the app registers its notification-center delegate. The permission-handler location build flag is enabled and deployment targets match iOS 15. Region callbacks use a bounded fresh location check and offer manual sign-in. A single region event does not stand in for ten minutes of dwell. Foreground-started on-site observation uses Apple's background location settings and stops when the service/dwell ends.
 
-A headless iOS region engine is destroyed when its callback returns; keeping a Dart timer alive there does not establish reliable background dwell. Fully autonomous terminated-app iPhone dwell is not certified by this repair. Reminders are queued locally over the stated horizon and refreshed by app use; iPhone testing and a production iOS build are still required before shipping. No iPhone artifact is included in this Android release.
+A headless iOS region engine is destroyed when its callback returns; keeping a Dart timer alive there does not establish reliable background dwell. Fully autonomous terminated-app iPhone dwell is not certified by this repair. Reminders are queued locally over the stated horizon and refreshed by app use; iPhone testing and a production iOS build are still required before shipping. CocoaPods successfully installed the 32 declared dependencies (60 pods); the lockfile now includes the native geofence dependency. The Profile build uses its own Pods configuration. No iPhone artifact is included in this Android release.
 
 ## Backend deployment and security
 
@@ -31,6 +32,8 @@ Applied migration: 20260907180124_attendance_arrival_acknowledgement_and_early_c
 All 27 database behavioral/security assertions passed after deployment in a transaction that rolled back its synthetic fixtures. Coverage includes early/fractional arrival, grace and late boundaries, duplicates, correcting an auto-absence with a legitimate delivered check-in, cross-church denial, repeated versus distinct observations, exiting/re-entering, completing a valid claim after close, and before-midnight check-in for the next service day.
 
 The three public attendance RPCs deny anonymous execution, check authenticated active church membership, and use an empty search_path. The claims table intentionally remains inaccessible directly to members; validated RPCs manage it. Supabase's advisor reports no ERROR findings. Its authenticated-security-definer warnings for these RPCs reflect intentional guarded API access ([advisor guidance](https://supabase.com/docs/guides/database/database-linter?lint=0029_authenticated_security_definer_function_executable)); its claims-table no-policy notice reflects intentional direct-access denial ([guidance](https://supabase.com/docs/guides/database/database-linter?lint=0008_rls_enabled_no_policy)). Existing unrelated advisor warnings remain outside this attendance change.
+
+The GitHub Supabase preview could not bootstrap from the historical migration chain because an older migration references public.users without its baseline. This preview failure is separate from the live migration, which was applied and passed the database tests above. The historical baseline was not rewritten as part of this attendance repair.
 
 ## Device acceptance checks
 
@@ -42,4 +45,10 @@ References: [Android geofencing](https://developer.android.com/develop/sensors-a
 
 ## Release verification
 
-Final analyzer, Flutter/native test, bundle validation, signature and checksum results are recorded with the AAB in the release directory after the build completes. This report does not claim universal physical-device verification or a bug-free certification.
+- Signed Android bundle: `grace-connect-1.0.32-beta+36.aab`, 63,694,250 bytes; application ID `love.graceconnect`, version code 36, Android minimum SDK 26 and target SDK 36.
+- SHA-256: `6c94127c227ed44bf1fd2bd9741021b3e592c34e9fb6100119699282a02f716e`.
+- Bundletool validation, archive integrity, release signature and expected upload-certificate fingerprint passed. The compiled headless attendance entry point and reminder methods are present. The final merged manifest includes the recovery receiver and both scheduled-notification receivers, with restart/update actions and non-exported receivers. All ARM64 native libraries meet 16 KB load-segment alignment requirements.
+- Flutter analyzer and the full 163-test suite passed in CI, along with the Android scheduler unit tests and all eight media-retention worker tests. Final CI evidence is saved in the release folder. An intermittent font-loading failure in the contrast tests was corrected with a licensed local test-only font fixture and awaited font loading; the app font configuration is unchanged.
+- All 27 post-deployment database assertions passed with synthetic fixtures rolled back. iOS property lists/project syntax, AppDelegate Swift syntax, and CocoaPods dependency installation passed.
+
+The app bundle contains the runtime sources at `ed7bdb66b894813c85f288eb2f53800da840dcdd`; subsequent changes are test fixtures and this report. Verification artifacts and Play release notes accompany the AAB under `releases/1.0.32-beta+36/` beside the app repository. This report does not claim universal physical-device verification or a bug-free certification.
