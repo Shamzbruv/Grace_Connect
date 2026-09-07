@@ -3130,7 +3130,17 @@ class AttendanceService {
     _monitoringRequested = false;
     _clearMonitoringState(resetRestartAttempts: true);
     if (_usesNativeGeofence) {
-      final removal = _removeAndroidNativeGeofence();
+      final removal = () async {
+        if (_usesNativeAndroidGeofence) {
+          try {
+            await _androidAttendanceChannel
+                .invokeMethod<void>('cancelAttendanceChecks');
+          } catch (error) {
+            debugPrint('Background cancellation will be retried: $error');
+          }
+        }
+        await _removeAndroidNativeGeofence();
+      }();
       _nativeGeofenceRemovalFuture = removal;
       unawaited(removal.whenComplete(() {
         if (identical(_nativeGeofenceRemovalFuture, removal)) {
@@ -3138,6 +3148,9 @@ class AttendanceService {
         }
       }));
     }
+    // On logout this cancels the previous member's local prompts immediately.
+    // An opted-in manual reminder remains independent of location detection.
+    unawaited(refreshCheckInReminders());
     _updateDebugStatus('Monitoring stopped');
   }
 

@@ -52,3 +52,17 @@ jobs:
 
       - name: Run tests
         run: flutter test
+
+      - name: Configure Android SDK paths
+        shell: python
+        run: |
+          import os
+          from pathlib import Path
+          Path("android/local.properties").write_text(
+              "sdk.dir=" + os.environ["ANDROID_HOME"] + "\n"
+              + "flutter.sdk=" + os.environ["FLUTTER_ROOT"] + "\n"
+          )
+
+      - name: Test Android attendance scheduler
+        working-directory: android
+        run: ./gradlew :grace_attendance_background:testDebugUnitTest --no-daemon
