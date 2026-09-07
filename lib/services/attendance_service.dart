@@ -11,12 +11,16 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:timezone/timezone.dart' as tz;
 import '../models/church_location.dart';
 import '../models/service_schedule.dart';
 import '../models/attendance_record.dart';
 import 'attendance_dwell_session.dart';
+import 'attendance_reminder_plan.dart';
 import 'notification_service.dart';
 import 'supabase_resilience.dart';
+
+enum AttendanceSaveResult { confirmed, queued }
 
 /// Thrown only for the specific, already-diagnosed "no GPS fix" case, so the
 /// UI can safely show its message directly to the user. Every other failure
@@ -36,6 +40,43 @@ const String _attendanceSupabaseUrl =
 const String _attendanceSupabaseAnonKey =
     'sb_publishable_-lsEclVqaNPAlO4h7z3vtw_Q8xZY3cN';
 
+Future<void> _restoreAttendanceSession() async {
+  try {
+    Supabase.instance.client;
+  } catch (_) {
+    await Supabase.initialize(
+      url: _attendanceSupabaseUrl,
+      anonKey: _attendanceSupabaseAnonKey,
+      authOptions: const FlutterAuthClientOptions(
+        authFlowType: AuthFlowType.pkce,
+        detectSessionInUri: false,
+      ),
+    );
+  }
+  final auth = Supabase.instance.client.auth;
+  if (auth.currentSession?.isExpired == true) await auth.refreshSession();
+}
+
+/// A bounded, OS-scheduled check which does not depend on an open screen or
+/// on the geofence plugin's callback work chain.
+@pragma('vm:entry-point')
+Future<void> attendanceBackgroundCheck() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  var success = false;
+  var retry = true;
+  try {
+    await _restoreAttendanceSession();
+    await AttendanceService().checkBackgroundAttendance();
+    success = true;
+    retry = false;
+  } catch (error) {
+    debugPrint('Background attendance check will retry: $error');
+  } finally {
+    await const MethodChannel('love.graceconnect/attendance_background')
+        .invokeMethod<void>('complete', {'success': success, 'retry': retry});
+  }
+}
+
 /// Entry point invoked by Android's native, battery-efficient Geofence API.
 ///
 /// The plugin starts a short-lived background Flutter isolate for a transition,
@@ -48,20 +89,7 @@ Future<void> attendanceGeofenceTriggered(
 ) async {
   WidgetsFlutterBinding.ensureInitialized();
   try {
-    try {
-      Supabase.instance.client;
-    } catch (_) {
-      await Supabase.initialize(
-        url: _attendanceSupabaseUrl,
-        anonKey: _attendanceSupabaseAnonKey,
-        authOptions: const FlutterAuthClientOptions(
-          authFlowType: AuthFlowType.pkce,
-          detectSessionInUri: false,
-        ),
-      );
-    }
-    final auth = Supabase.instance.client.auth;
-    if (auth.currentSession?.isExpired == true) await auth.refreshSession();
+    await _restoreAttendanceSession();
     await AttendanceService().handleNativeGeofenceEvent(params);
   } catch (error, stackTrace) {
     debugPrint('Native attendance geofence callback failed: $error');
@@ -88,6 +116,7 @@ class AttendanceSetupStatus {
   final bool? preciseLocationEnabled;
   final double? radiusMeters;
   final String? lastNativeEvent;
+  final String? lastBackgroundCheck;
 
   const AttendanceSetupStatus({
     required this.autoCheckInEnabled,
@@ -101,6 +130,7 @@ class AttendanceSetupStatus {
     this.preciseLocationEnabled,
     this.radiusMeters,
     this.lastNativeEvent,
+    this.lastBackgroundCheck,
   });
 
   bool get hasLocationPermission =>
@@ -164,6 +194,8 @@ class AttendanceCheckInPrompt {
     this.attendanceChurchId,
     this.serviceStartTime,
     this.serviceDateKey,
+    this.scheduledStart,
+    this.pendingSync = false,
   });
 
   final bool hasActiveService;
@@ -185,6 +217,8 @@ class AttendanceCheckInPrompt {
   final String? attendanceChurchId;
   final String? serviceStartTime;
   final String? serviceDateKey;
+  final DateTime? scheduledStart;
+  final bool pendingSync;
 
   int get currentDwellMinutes => currentDwellSeconds ~/ 60;
 
@@ -249,6 +283,7 @@ class AttendanceService {
   static const Duration _maximumClearOutsideEvidenceGap = Duration(seconds: 90);
   static const Duration _completionDeliveryGrace = Duration(minutes: 15);
   final Set<String> _syncedPresenceClaims = <String>{};
+  final Map<String, DateTime> _lastPresenceObservation = {};
 
   // Singleton pattern for continuous monitoring
   static final AttendanceService _instance = AttendanceService._internal();
@@ -259,6 +294,164 @@ class AttendanceService {
 
   Future<void> _initializeNotifications() async {
     await NotificationService().initializeLocalNotifications();
+  }
+
+  Future<void> refreshCheckInReminders() async {
+    if (kIsWeb) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
+    final previous = prefs.getStringList('attendance_reminder_ids') ?? [];
+    final user = _supabase.auth.currentUser;
+    final enabled = prefs.getBool('attendance_check_in_reminders') ??
+        (prefs.getBool('auto_check_in') ?? false);
+    try {
+      await _initializeNotifications();
+      if (_usesNativeAndroidGeofence) {
+        await _androidAttendanceChannel.invokeMethod<void>(
+            'configureAttendanceReminders',
+            {'enabled': enabled && user != null});
+      }
+      if (!enabled || user == null) {
+        for (final id in previous) {
+          final number = int.tryParse(id);
+          if (number != null) await _notificationsPlugin.cancel(number);
+        }
+        await prefs.remove('attendance_reminder_ids');
+        return;
+      }
+      final churchId = await _getCurrentUserChurchId(user.id);
+      if (churchId == null) {
+        for (final id in previous) {
+          final number = int.tryParse(id);
+          if (number != null) await _notificationsPlugin.cancel(number);
+        }
+        await prefs.remove('attendance_reminder_ids');
+        return;
+      }
+      final aliases = await _churchAliases(churchId);
+      final rows = await _supabase
+          .from('service_schedules')
+          .select()
+          .inFilter('churchId', aliases)
+          .eq('attendanceEnabled', true);
+      final confirmed = await _supabase
+          .from('attendance')
+          .select('service_id,service_date')
+          .eq('user_id', user.id)
+          .eq('present', true)
+          .gte('service_date', _jamaicaDateKey(DateTime.now()));
+      final plans = AttendanceReminderPlan.upcoming(
+        now: DateTime.now(),
+        userId: user.id,
+        schedules: rows.map(ServiceSchedule.fromMap),
+        confirmedOccurrences: confirmed
+            .map((row) => '${row['service_id']}|${row['service_date']}')
+            .toSet(),
+      );
+      final ids = plans.map((plan) => plan.id.toString()).toSet();
+      for (final old in previous.where((id) => !ids.contains(id))) {
+        final number = int.tryParse(old);
+        if (number != null) await _notificationsPlugin.cancel(number);
+      }
+      for (final plan in plans) {
+        await _notificationsPlugin.zonedSchedule(
+          plan.id,
+          plan.title,
+          plan.body,
+          tz.TZDateTime.from(plan.at, tz.UTC),
+          const NotificationDetails(
+            android: AndroidNotificationDetails(
+              'attendance_check_in_reminders_v1',
+              'Service check-in reminders',
+              channelDescription: 'Reminders before and during church services',
+              importance: Importance.max,
+              priority: Priority.high,
+              icon: 'ic_stat_grace_connect',
+              category: AndroidNotificationCategory.reminder,
+            ),
+            iOS: DarwinNotificationDetails(
+                presentAlert: true, presentSound: true),
+          ),
+          androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+          payload: jsonEncode({'route': '/attendance', 'type': 'attendance'}),
+        );
+      }
+      await prefs.setStringList('attendance_reminder_ids', ids.toList());
+    } catch (error) {
+      // Keep already scheduled OS reminders during temporary network failure.
+      debugPrint('Attendance reminders will refresh later: $error');
+    }
+  }
+
+  Future<void> checkBackgroundAttendance() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
+    // Keep the manual fallback scheduled even when automatic location checks
+    // are disabled or location permission has been revoked.
+    await refreshCheckInReminders();
+    if (prefs.getBool('auto_check_in') != true) return;
+    final user = _supabase.auth.currentUser;
+    if (user == null) return;
+    await flushPendingAttendance();
+    final churchId = await _getCurrentUserChurchId(user.id);
+    if (churchId == null) return;
+    final now = DateTime.now();
+    final service = await getActiveServiceAt(churchId, now) ??
+        await _getCompletableDwellService(user.id, churchId, now);
+    if (service == null) return;
+    final serviceId = service['id'] as String;
+    final dateKey = service['serviceDate'] as String;
+    final key = '$userIdPrefix${user.id}|$serviceId|$dateKey';
+    if (await _hasAttendanceForToday(
+        user.id, service['churchId']?.toString() ?? churchId, serviceId,
+        forTimestamp: service['serviceDateAnchor'] as DateTime?)) {
+      await _cancelBackgroundCheck(key);
+      await refreshCheckInReminders();
+      return;
+    }
+    if (!await Geolocator.isLocationServiceEnabled() ||
+        await Geolocator.checkPermission() != LocationPermission.always) {
+      return;
+    }
+    // Schedule the next bounded observation first, so a GPS timeout or process
+    // shutdown cannot permanently strand this occurrence's countdown.
+    final deadline = service['checkInCloses'] as DateTime?;
+    final next = now.add(const Duration(minutes: 2));
+    if (deadline != null && next.isBefore(deadline)) {
+      await _scheduleBackgroundCheck(key, next);
+    }
+    final position = await _getReliablePosition();
+    await _checkLocationLogic(position);
+    await prefs.setString('attendance_last_background_check',
+        DateTime.now().toUtc().toIso8601String());
+  }
+
+  static const String userIdPrefix = 'attendance:';
+
+  Future<void> _scheduleBackgroundCheck(String key, DateTime at) async {
+    if (!_usesNativeAndroidGeofence) return;
+    await _androidAttendanceChannel.invokeMethod<void>(
+        'scheduleAttendanceCheck',
+        {'key': key, 'epochMillis': at.toUtc().millisecondsSinceEpoch});
+  }
+
+  Future<void> _cancelBackgroundCheck(String key) async {
+    if (!_usesNativeAndroidGeofence) return;
+    await _androidAttendanceChannel
+        .invokeMethod<void>('cancelAttendanceCheck', {'key': key});
+  }
+
+  Future<void> _scheduleDwellCompletion(String userId, String serviceId,
+      String? serviceDateKey, DateTime entryTime, int dwellMinutes) async {
+    final key =
+        '$userIdPrefix$userId|$serviceId|${serviceDateKey ?? _jamaicaDateKey(entryTime)}';
+    final due = entryTime.add(Duration(minutes: dwellMinutes, seconds: 5));
+    if (!due.isAfter(DateTime.now())) return;
+    try {
+      await _scheduleBackgroundCheck(key, due);
+    } catch (error) {
+      debugPrint('Dwell completion scheduling will retry: $error');
+    }
   }
 
   Future<void> initialize() {
@@ -272,6 +465,7 @@ class AttendanceService {
     final autoCheckInEnabled = prefs.getBool('auto_check_in') ?? false;
     _startPendingAttendanceSync();
     unawaited(flushPendingAttendance());
+    await refreshCheckInReminders();
     if (!autoCheckInEnabled) {
       _monitoringRequested = false;
       stopMonitoring();
@@ -315,8 +509,8 @@ class AttendanceService {
     // Several screens initialize this singleton. Keep the existing listener so
     // navigating or tapping Recheck cannot restart the dwell countdown.
     if (_isMonitoring &&
-        (_positionStreamSubscription != null || _usesNativeAndroidGeofence)) {
-      if (_usesNativeAndroidGeofence) {
+        (_positionStreamSubscription != null || _usesNativeGeofence)) {
+      if (_usesNativeGeofence) {
         final registered = await _registerAndroidNativeGeofence();
         _setMonitoring(registered);
         unawaited(_pollCurrentLocationForAttendance());
@@ -334,16 +528,17 @@ class AttendanceService {
     }
   }
 
+  bool get _usesNativeIosGeofence =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
+
+  bool get _usesNativeGeofence =>
+      _usesNativeAndroidGeofence || _usesNativeIosGeofence;
+
   bool get _usesNativeAndroidGeofence =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
-  // iOS auto-attendance runs on a continuous Geolocator position stream
-  // (see _startMonitoring), not the native geofence API Android uses -- but
-  // that stream is paused by iOS the moment the app truly backgrounds
-  // unless the app holds "Always" location access, same as Android's
-  // background geofence. Without this, iOS silently "starts" monitoring on
-  // While-Using-App access and then goes quiet the instant the phone locks,
-  // which looks identical to auto-attendance being broken.
+  // Both platforms require Always access for background region delivery.
+  // iOS also uses a foreground-started background location stream during dwell.
   bool get _needsAlwaysLocationPermission => !kIsWeb;
 
   /// Requests only the permissions needed for user-enabled auto-attendance.
@@ -388,14 +583,15 @@ class AttendanceService {
     _monitoringRestartTimer = null;
     _monitoringRequested = true;
 
-    if (_usesNativeAndroidGeofence) {
+    if (_usesNativeGeofence) {
       final registered = await _registerAndroidNativeGeofence();
       _setMonitoring(registered);
       if (!registered) return;
       _updateDebugStatus(
-        'Android geofence active. Auto-attendance will check the scheduled service after the required dwell.',
+        'Church region monitoring is registered. Automatic check-in still needs a verified stay during the service.',
       );
       unawaited(_pollCurrentLocationForAttendance());
+      if (_usesNativeIosGeofence) return;
       // A native geofence is still the battery-efficient background source of
       // truth. While this process is awake, however, keep checking the current
       // position as well. Previously Android performed only the first poll:
@@ -492,6 +688,36 @@ class AttendanceService {
     }
   }
 
+  Future<void> _startIosDwellMonitoring() async {
+    if (!_usesNativeIosGeofence || _positionStreamSubscription != null) return;
+    _setMonitoring(true);
+    _positionStreamSubscription = Geolocator.getPositionStream(
+      locationSettings: AppleSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 10,
+        allowBackgroundLocationUpdates: true,
+        pauseLocationUpdatesAutomatically: false,
+        showBackgroundLocationIndicator: true,
+      ),
+    ).listen((position) {
+      unawaited(_checkLocationLogic(position));
+    }, onError: (Object error) {
+      debugPrint('iPhone location observation paused: $error');
+      _stopIosDwellMonitoring();
+    });
+    _activeServicePollTimer?.cancel();
+    _activeServicePollTimer = Timer.periodic(const Duration(seconds: 30),
+        (_) => unawaited(_pollCurrentLocationForAttendance()));
+  }
+
+  void _stopIosDwellMonitoring() {
+    if (!_usesNativeIosGeofence) return;
+    _positionStreamSubscription?.cancel();
+    _positionStreamSubscription = null;
+    _activeServicePollTimer?.cancel();
+    _activeServicePollTimer = null;
+  }
+
   Future<void> _checkLocationLogic(Position position) async {
     if (_isProcessingLocation) return;
     _isProcessingLocation = true;
@@ -553,6 +779,7 @@ class AttendanceService {
             );
 
       if (dwellExpired) {
+        _stopIosDwellMonitoring();
         _currentServiceId = null;
         _updateDebugStatus(
           'Outside Geofence (${distanceInMeters.toStringAsFixed(1)}m)',
@@ -594,15 +821,13 @@ class AttendanceService {
       }
     }
 
-    // Every live attempt failed. A last-known fix is better than nothing,
-    // and is widened from 5 to 15 minutes -- someone who has been sitting
-    // still inside the same building for a while is not meaningfully more
-    // likely to have moved than someone whose last fix is 6 minutes old.
+    // A stale fix cannot prove that the member is still at church. Keep the
+    // fallback brief; a reminder offers manual verification if GPS is unavailable.
     final lastKnown = await Geolocator.getLastKnownPosition();
     final timestamp = lastKnown?.timestamp;
     final isRecent = timestamp != null &&
         DateTime.now().difference(timestamp).abs() <=
-            const Duration(minutes: 15);
+            const Duration(minutes: 2);
     if (lastKnown != null && isRecent) return lastKnown;
 
     throw LocationUnavailableException(
@@ -716,7 +941,7 @@ class AttendanceService {
   }
 
   Future<bool> _registerAndroidNativeGeofence() async {
-    if (!_usesNativeAndroidGeofence) return false;
+    if (!_usesNativeGeofence) return false;
     await _nativeGeofenceRemovalFuture;
 
     final user = _supabase.auth.currentUser;
@@ -728,7 +953,7 @@ class AttendanceService {
     final permission = await Geolocator.checkPermission();
     if (permission != LocationPermission.always) {
       _updateDebugStatus(
-        'Allow location all the time to register Android auto-attendance.',
+        'Allow location all the time to register auto-attendance.',
       );
       return false;
     }
@@ -747,12 +972,15 @@ class AttendanceService {
       return false;
     }
 
-    final dwellMinutes = await _configuredNativeDwellMinutes(churchId);
+    final dwellMinutes = _usesNativeIosGeofence
+        ? const [1]
+        : await _configuredNativeDwellMinutes(churchId);
     // Small church boundaries are kept exact for attendance. A wider fence
     // only wakes the GPS verification path; it never proves on-site dwell.
-    final wakeMinutes = churchLocation.radiusMeters < 100
-        ? <int>{1, dwellMinutes.last + 1, dwellMinutes.last * 2 + 1}
-        : <int>{};
+    final wakeMinutes =
+        _usesNativeAndroidGeofence && churchLocation.radiusMeters < 100
+            ? <int>{1, dwellMinutes.last + 1, dwellMinutes.last * 2 + 1}
+            : <int>{};
     final geofenceIds = dwellMinutes
         .map((minutes) => _nativeGeofenceId(churchId, minutes))
         .toList()
@@ -797,13 +1025,17 @@ class AttendanceService {
               latitude: churchLocation.latitude,
               longitude: churchLocation.longitude,
             ),
-            radiusMeters: churchLocation.radiusMeters,
-            triggers: const {
-              GeofenceEvent.enter,
-              GeofenceEvent.exit,
-              GeofenceEvent.dwell,
-            },
-            iosSettings: const IosGeofenceSettings(initialTrigger: false),
+            radiusMeters: _usesNativeIosGeofence
+                ? churchLocation.radiusMeters.clamp(100, 1000).toDouble()
+                : churchLocation.radiusMeters,
+            triggers: _usesNativeIosGeofence
+                ? const {GeofenceEvent.enter, GeofenceEvent.exit}
+                : const {
+                    GeofenceEvent.enter,
+                    GeofenceEvent.exit,
+                    GeofenceEvent.dwell
+                  },
+            iosSettings: const IosGeofenceSettings(initialTrigger: true),
             androidSettings: AndroidGeofenceSettings(
               initialTriggers: const {GeofenceEvent.enter},
               loiteringDelay: Duration(minutes: minutes),
@@ -910,7 +1142,7 @@ class AttendanceService {
   }
 
   Future<void> _removeAndroidNativeGeofence() async {
-    if (!_usesNativeAndroidGeofence) return;
+    if (!_usesNativeGeofence) return;
     final prefs = await SharedPreferences.getInstance();
     final geofenceIds = _storedNativeGeofenceIds(prefs);
     if (geofenceIds.isEmpty) return;
@@ -932,7 +1164,7 @@ class AttendanceService {
   Future<void> handleNativeGeofenceEvent(
     GeofenceCallbackParams params,
   ) async {
-    if (!_usesNativeAndroidGeofence || params.geofences.isEmpty) return;
+    if (!_usesNativeGeofence || params.geofences.isEmpty) return;
     final prefs = await SharedPreferences.getInstance();
     await prefs.reload();
     if (prefs.getBool('auto_check_in') != true) return;
@@ -956,6 +1188,11 @@ class AttendanceService {
         .any((geofence) => geofence.id.startsWith(expectedPrefix))) {
       debugPrint(
           'Attendance geofence ignored after church membership changed.');
+      return;
+    }
+
+    if (_usesNativeIosGeofence) {
+      await _handleIosRegionEvent(params, user.id, churchId);
       return;
     }
 
@@ -1016,6 +1253,14 @@ class AttendanceService {
         observedAt: observedAt,
         serviceDateKey: serviceDateKey,
       );
+      final session = await _readDwellSession(user.id, serviceId,
+          observedAt: observedAt, serviceDateKey: serviceDateKey);
+      await _scheduleDwellCompletion(
+          user.id,
+          serviceId,
+          serviceDateKey,
+          session?.startedAt ?? observedAt,
+          attendanceService['minimumDwellMinutes'] as int? ?? 10);
       _updateDebugStatus('Android detected arrival at church.');
       return;
     }
@@ -1093,6 +1338,81 @@ class AttendanceService {
     );
   }
 
+  /// Core Location gives a region callback only a brief execution window.
+  /// Record an arrival, then offer sign-in; never leave a Dart timer running
+  /// in the short-lived engine or treat one region event as completed dwell.
+  Future<void> _handleIosRegionEvent(
+      GeofenceCallbackParams params, String userId, String churchId) async {
+    final observedAt = DateTime.now();
+    final service = await getActiveServiceAt(churchId, observedAt);
+    if (service == null) return;
+    final serviceId = service['id'] as String;
+    final dateKey = service['serviceDate'] as String;
+    final attendanceChurchId = service['churchId']?.toString() ?? churchId;
+    if (await _hasAttendanceForToday(userId, attendanceChurchId, serviceId,
+        forTimestamp: service['serviceDateAnchor'] as DateTime?)) {
+      return;
+    }
+    final church = await _getChurchLocation(churchId);
+    if (church == null) return;
+    Position? position;
+    try {
+      position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.high, timeLimit: Duration(seconds: 8)),
+      );
+    } catch (_) {
+      // Scheduled reminders remain available even without a fresh GPS fix.
+    }
+    if (position != null) {
+      final distance = Geolocator.distanceBetween(position.latitude,
+          position.longitude, church.latitude, church.longitude);
+      if (params.event == GeofenceEvent.exit &&
+          distance > church.radiusMeters + position.accuracy.clamp(25, 150)) {
+        await _clearDwellEntry(userId, serviceId,
+            observedAt: observedAt, serviceDateKey: dateKey);
+        await _cancelPresenceClaim(
+            userId: userId,
+            churchId: attendanceChurchId,
+            serviceId: serviceId,
+            observedAt: observedAt,
+            serviceDateKey: dateKey);
+        return;
+      }
+      if (params.event == GeofenceEvent.enter &&
+          distance <= church.radiusMeters) {
+        final arrival = await _readOrStartDwellEntry(userId, serviceId,
+            observedAt: observedAt, serviceDateKey: dateKey);
+        await _supabase.rpc('record_my_attendance_presence', params: {
+          'p_church_id': attendanceChurchId,
+          'p_service_id': serviceId,
+          'p_observed_at': arrival.toUtc().toIso8601String(),
+        });
+      }
+    }
+    if (params.event != GeofenceEvent.enter) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
+    if (!(prefs.getBool('attendance_check_in_reminders') ??
+        (prefs.getBool('auto_check_in') ?? false))) {
+      return;
+    }
+    final reminderKey = 'attendance_arrival_reminder_$userId';
+    final occurrence = '$serviceId|$dateKey';
+    if (prefs.getString(reminderKey) == occurrence) return;
+    await _initializeNotifications();
+    await _notificationsPlugin.show(
+      AttendanceReminderPlan.notificationId(userId, serviceId, 3),
+      '${service['name'] ?? 'Church service'} check-in',
+      'At church? Tap to confirm attendance now. You can sign in before the service starts or while it is underway.',
+      const NotificationDetails(
+          iOS: DarwinNotificationDetails(
+              presentAlert: true, presentSound: true)),
+      payload: jsonEncode({'route': '/attendance', 'type': 'attendance'}),
+    );
+    await prefs.setString(reminderKey, occurrence);
+  }
+
   Future<void> saveChurchLocation({
     required String churchId,
     required double latitude,
@@ -1113,7 +1433,7 @@ class AttendanceService {
     });
 
     _updateDebugStatus('Church geofence saved for auto-attendance.');
-    if (_usesNativeAndroidGeofence && _monitoringRequested) {
+    if (_usesNativeGeofence && _monitoringRequested) {
       unawaited(_registerAndroidNativeGeofence());
     }
   }
@@ -1152,8 +1472,11 @@ class AttendanceService {
         .from('service_schedules')
         .select()
         .inFilter('churchId', churchAliases)
-        .inFilter('dayOfWeek', [jamaicaNow.weekday, previousWeekday]).eq(
-            'attendanceEnabled', true);
+        .inFilter('dayOfWeek', [
+      jamaicaNow.weekday,
+      previousWeekday,
+      jamaicaNow.weekday % 7 + 1
+    ]).eq('attendanceEnabled', true);
 
     for (var doc in servicesSnapshot) {
       final schedule = ServiceSchedule.fromMap(doc);
@@ -1169,6 +1492,7 @@ class AttendanceService {
           'minimumDwellMinutes': safeDwellMinutes,
           'serviceDate': window.serviceDateKey,
           'serviceDateAnchor': window.scheduledStart,
+          'checkInCloses': window.checkInCloses,
         };
       }
     }
@@ -1193,8 +1517,11 @@ class AttendanceService {
         .from('service_schedules')
         .select()
         .inFilter('churchId', churchAliases)
-        .inFilter('dayOfWeek', [jamaicaNow.weekday, previousWeekday]).eq(
-            'attendanceEnabled', true);
+        .inFilter('dayOfWeek', [
+      jamaicaNow.weekday,
+      previousWeekday,
+      jamaicaNow.weekday % 7 + 1
+    ]).eq('attendanceEnabled', true);
 
     for (final row in schedulesSnapshot) {
       final schedule = ServiceSchedule.fromMap(row);
@@ -1230,6 +1557,7 @@ class AttendanceService {
         'arrivalTime': session.startedAt,
         'serviceDate': window.serviceDateKey,
         'serviceDateAnchor': window.scheduledStart,
+        'checkInCloses': completionDeadline,
         'completionOnly': true,
       };
     }
@@ -1244,6 +1572,7 @@ class AttendanceService {
         await _getCompletableDwellService(userId, churchId, observedAt);
 
     if (activeService == null) {
+      _stopIosDwellMonitoring();
       _updateDebugStatus('Inside, but no active service.');
       return;
     }
@@ -1273,6 +1602,9 @@ class AttendanceService {
       observedAt: observedAt,
       serviceDateKey: serviceDateKey,
     );
+    await _scheduleDwellCompletion(userId, activeServiceId, serviceDateKey,
+        entryTime, requiredDwellMinutes);
+    await _startIosDwellMonitoring();
     _currentServiceId = activeServiceId;
     final dwellDuration = observedAt.difference(entryTime);
     final requiredDwellSeconds = requiredDwellMinutes * 60;
@@ -1317,12 +1649,12 @@ class AttendanceService {
             DateTime.daysPerWeek;
     // Callers query today's and yesterday's schedules. Anything older is a
     // different weekly occurrence and must never reuse its dwell state.
-    if (weekdayDelta > 1) return null;
+    if (weekdayDelta > 1 && weekdayDelta != 6) return null;
     final candidateDate = DateTime(
       jamaicaNow.year,
       jamaicaNow.month,
       jamaicaNow.day,
-    ).subtract(Duration(days: weekdayDelta));
+    ).subtract(Duration(days: weekdayDelta == 6 ? -1 : weekdayDelta));
     final jamaicaDayStartUtc = DateTime.utc(
       candidateDate.year,
       candidateDate.month,
@@ -1412,7 +1744,7 @@ class AttendanceService {
     return '$minutes:${remainder.toString().padLeft(2, '0')}';
   }
 
-  Future<void> _markPresent(
+  Future<AttendanceSaveResult> _markPresent(
     String userId,
     String churchId,
     String serviceId,
@@ -1434,8 +1766,12 @@ class AttendanceService {
           ? effectiveCheckedInAt
           : DateTime.tryParse('${serviceDateKey}T12:00:00-05:00'),
     )) {
+      _stopIosDwellMonitoring();
       _updateDebugStatus('Already marked present for today.');
-      return;
+      return await _hasQueuedAttendanceForToday(userId, churchId, serviceId,
+              forTimestamp: effectiveCheckedInAt)
+          ? AttendanceSaveResult.queued
+          : AttendanceSaveResult.confirmed;
     }
 
     // Calculate Late Status
@@ -1481,18 +1817,25 @@ class AttendanceService {
       serviceName: serviceName,
     );
 
-    await _insertAttendanceRecord(record, serviceDateKey: serviceDateKey);
+    final outcome =
+        await _insertAttendanceRecord(record, serviceDateKey: serviceDateKey);
+    if (outcome == AttendanceSaveResult.queued) return outcome;
+    _stopIosDwellMonitoring();
     debugPrint('Marked present successfully: $status');
     _updateDebugStatus('Success! Marked present ($status)');
-    await _clearDwellEntry(
-      userId,
-      serviceId,
-      observedAt: effectiveCheckedInAt,
-      serviceDateKey: serviceDateKey,
-    );
-
-    // Trigger local notification
-    _showPostServiceNotification(status);
+    // The server already acknowledged this check-in. Notification or local
+    // cleanup failures must never turn a saved record into a failed sign-in.
+    try {
+      await _clearDwellEntry(userId, serviceId,
+          observedAt: effectiveCheckedInAt, serviceDateKey: serviceDateKey);
+      await _cancelBackgroundCheck(
+          '$userIdPrefix$userId|$serviceId|${serviceDateKey ?? _jamaicaDateKey(effectiveCheckedInAt)}');
+      await _showPostServiceNotification(status);
+    } catch (error) {
+      debugPrint('Attendance confirmed; local follow-up will retry: $error');
+    }
+    unawaited(refreshCheckInReminders());
+    return AttendanceSaveResult.confirmed;
   }
 
   Future<AttendanceCheckInPrompt> getCurrentCheckInPrompt(
@@ -1508,6 +1851,9 @@ class AttendanceService {
       );
     }
 
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
+    final autoCheckInEnabled = prefs.getBool('auto_check_in') ?? false;
     final observedAt = DateTime.now();
     final activeService = await getActiveServiceAt(churchId, observedAt);
     final completionService = activeService == null
@@ -1540,17 +1886,24 @@ class AttendanceService {
       serviceId,
       forTimestamp: serviceDateAnchor,
     )) {
+      final pendingSync = await _hasQueuedAttendanceForToday(
+          user.id, attendanceChurchId, serviceId,
+          forTimestamp: serviceDateAnchor);
       return AttendanceCheckInPrompt(
         hasActiveService: true,
         canMarkPresent: false,
         isInsideGeofence: true,
         alreadyMarked: true,
-        message: 'You are already marked for $serviceName.',
+        pendingSync: pendingSync,
+        message: pendingSync
+            ? 'Saved on this phone. Attendance will sync when online.'
+            : 'You are already marked for $serviceName.',
         serviceId: serviceId,
         serviceName: serviceName,
         attendanceChurchId: attendanceChurchId,
         serviceStartTime: attendanceService['startTime']?.toString(),
         serviceDateKey: serviceDateKey,
+        scheduledStart: serviceDateAnchor,
         requiredDwellMinutes: requiredDwellMinutes,
       );
     }
@@ -1568,6 +1921,7 @@ class AttendanceService {
         attendanceChurchId: attendanceChurchId,
         serviceStartTime: attendanceService['startTime']?.toString(),
         serviceDateKey: serviceDateKey,
+        scheduledStart: serviceDateAnchor,
         requiredDwellMinutes: requiredDwellMinutes,
       );
     }
@@ -1585,6 +1939,7 @@ class AttendanceService {
         attendanceChurchId: attendanceChurchId,
         serviceStartTime: attendanceService['startTime']?.toString(),
         serviceDateKey: serviceDateKey,
+        scheduledStart: serviceDateAnchor,
         requiredDwellMinutes: requiredDwellMinutes,
       );
     }
@@ -1629,13 +1984,17 @@ class AttendanceService {
       observedAt: observedAt,
       serviceDateKey: serviceDateKey,
     );
-    await _ensurePresenceClaim(
-      userId: user.id,
-      churchId: attendanceChurchId,
-      serviceId: serviceId,
-      observedAt: observedAt,
-      serviceDateKey: serviceDateKey,
-    );
+    if (autoCheckInEnabled) {
+      await _ensurePresenceClaim(
+        userId: user.id,
+        churchId: attendanceChurchId,
+        serviceId: serviceId,
+        observedAt: observedAt,
+        serviceDateKey: serviceDateKey,
+      );
+      await _scheduleDwellCompletion(
+          user.id, serviceId, serviceDateKey, entryTime, requiredDwellMinutes);
+    }
     final currentDwellSeconds = observedAt.difference(entryTime).inSeconds;
     final requiredDwellSeconds = requiredDwellMinutes * 60;
     final remainingDwellSeconds =
@@ -1647,10 +2006,8 @@ class AttendanceService {
     // why a member could be verified on-site for the entire countdown and
     // still be finalized absent. If auto-attendance is enabled, reaching zero
     // must perform the idempotent write immediately.
-    final prefs = await SharedPreferences.getInstance();
-    final autoCheckInEnabled = prefs.getBool('auto_check_in') ?? false;
     if (canMarkPresent && autoCheckInEnabled) {
-      await _markPresent(
+      final outcome = await _markPresent(
         user.id,
         attendanceChurchId,
         serviceId,
@@ -1664,7 +2021,10 @@ class AttendanceService {
         canMarkPresent: false,
         isInsideGeofence: true,
         alreadyMarked: true,
-        message: 'You are marked present for $serviceName.',
+        pendingSync: outcome == AttendanceSaveResult.queued,
+        message: outcome == AttendanceSaveResult.queued
+            ? 'Saved on this phone. Attendance will sync when online.'
+            : 'You are marked present for $serviceName.',
         serviceId: serviceId,
         serviceName: serviceName,
         distanceMeters: distance,
@@ -1675,6 +2035,7 @@ class AttendanceService {
         attendanceChurchId: attendanceChurchId,
         serviceStartTime: attendanceService['startTime']?.toString(),
         serviceDateKey: serviceDateKey,
+        scheduledStart: serviceDateAnchor,
       );
     }
 
@@ -1698,17 +2059,23 @@ class AttendanceService {
       attendanceChurchId: attendanceChurchId,
       serviceStartTime: attendanceService['startTime']?.toString(),
       serviceDateKey: serviceDateKey,
+      scheduledStart: serviceDateAnchor,
     );
   }
 
-  Future<void> markCurrentServicePresent(String churchId) async {
+  Future<AttendanceSaveResult> markCurrentServicePresent(
+      String churchId) async {
     final user = _supabase.auth.currentUser;
     if (user == null) {
       throw Exception('Sign in again before marking attendance.');
     }
 
     final prompt = await getCurrentCheckInPrompt(churchId);
-    if (prompt.alreadyMarked) return;
+    if (prompt.alreadyMarked) {
+      return prompt.pendingSync
+          ? AttendanceSaveResult.queued
+          : AttendanceSaveResult.confirmed;
+    }
     if (!prompt.hasActiveService ||
         prompt.serviceId == null ||
         prompt.serviceName == null) {
@@ -1721,7 +2088,7 @@ class AttendanceService {
     // Grade lateness against arrivalTime (when they were first verified
     // on-site), not against DateTime.now() -- the same fix already applied
     // to the auto-dwell and manual on-site paths.
-    await _markPresent(
+    return _markPresent(
       user.id,
       prompt.attendanceChurchId ?? churchId,
       prompt.serviceId!,
@@ -1753,7 +2120,8 @@ class AttendanceService {
         canMarkPresent: false,
         isInsideGeofence: false,
         alreadyMarked: false,
-        message: 'Manual sign-in only opens during an active service.',
+        message:
+            'Manual sign-in opens before each service, at the church’s scheduled check-in time.',
       );
     }
 
@@ -1769,17 +2137,24 @@ class AttendanceService {
       serviceId,
       forTimestamp: serviceDateAnchor,
     )) {
+      final pendingSync = await _hasQueuedAttendanceForToday(
+          user.id, attendanceChurchId, serviceId,
+          forTimestamp: serviceDateAnchor);
       return AttendanceCheckInPrompt(
         hasActiveService: true,
         canMarkPresent: false,
         isInsideGeofence: true,
         alreadyMarked: true,
-        message: 'You are already marked for $serviceName.',
+        pendingSync: pendingSync,
+        message: pendingSync
+            ? 'Saved on this phone. Attendance will sync when online.'
+            : 'You are already marked for $serviceName.',
         serviceId: serviceId,
         serviceName: serviceName,
         attendanceChurchId: attendanceChurchId,
         serviceStartTime: activeService['startTime']?.toString(),
         serviceDateKey: serviceDateKey,
+        scheduledStart: serviceDateAnchor,
       );
     }
 
@@ -1796,6 +2171,7 @@ class AttendanceService {
         attendanceChurchId: attendanceChurchId,
         serviceStartTime: activeService['startTime']?.toString(),
         serviceDateKey: serviceDateKey,
+        scheduledStart: serviceDateAnchor,
       );
     }
 
@@ -1812,6 +2188,7 @@ class AttendanceService {
         attendanceChurchId: attendanceChurchId,
         serviceStartTime: activeService['startTime']?.toString(),
         serviceDateKey: serviceDateKey,
+        scheduledStart: serviceDateAnchor,
       );
     }
 
@@ -1858,17 +2235,22 @@ class AttendanceService {
       attendanceChurchId: attendanceChurchId,
       serviceStartTime: activeService['startTime']?.toString(),
       serviceDateKey: serviceDateKey,
+      scheduledStart: serviceDateAnchor,
     );
   }
 
-  Future<void> markManualOnSitePresent(String churchId) async {
+  Future<AttendanceSaveResult> markManualOnSitePresent(String churchId) async {
     final user = _supabase.auth.currentUser;
     if (user == null) {
       throw Exception('Sign in again before marking attendance.');
     }
 
     final prompt = await getManualOnSiteCheckInPrompt(churchId);
-    if (prompt.alreadyMarked) return;
+    if (prompt.alreadyMarked) {
+      return prompt.pendingSync
+          ? AttendanceSaveResult.queued
+          : AttendanceSaveResult.confirmed;
+    }
     if (!prompt.hasActiveService ||
         prompt.serviceId == null ||
         prompt.serviceName == null) {
@@ -1891,7 +2273,7 @@ class AttendanceService {
       observedAt: DateTime.now(),
       serviceDateKey: prompt.serviceDateKey,
     );
-    await _markPresent(
+    return _markPresent(
       user.id,
       prompt.attendanceChurchId ?? churchId,
       prompt.serviceId!,
@@ -1903,7 +2285,7 @@ class AttendanceService {
     );
   }
 
-  Future<void> markRemotePresent({
+  Future<AttendanceSaveResult> markRemotePresent({
     required String userId,
     required String churchId,
     required String reason,
@@ -1949,24 +2331,28 @@ class AttendanceService {
     );
 
     // 4. Save
-    await _insertAttendanceRecord(
+    final outcome = await _insertAttendanceRecord(
       record,
       serviceDateKey: activeService['serviceDate']?.toString(),
     );
-    debugPrint('Marked remote present successfully');
+    if (outcome == AttendanceSaveResult.confirmed) {
+      unawaited(refreshCheckInReminders());
+    }
+    return outcome;
   }
 
-  Future<void> _insertAttendanceRecord(
+  Future<AttendanceSaveResult> _insertAttendanceRecord(
     AttendanceRecord record, {
     String? serviceDateKey,
   }) async {
     try {
       await _writeAttendanceRecord(record.toMap());
       unawaited(flushPendingAttendance());
+      return AttendanceSaveResult.confirmed;
     } catch (error) {
       if (_isDuplicateAttendanceError(error)) {
         _updateDebugStatus('Already marked present for today.');
-        return;
+        return AttendanceSaveResult.confirmed;
       }
       if (!_isRetryableAttendanceWriteError(error)) {
         _updateDebugStatus(
@@ -1981,6 +2367,7 @@ class AttendanceService {
       _updateDebugStatus(
           'Attendance saved on this device and will sync when online.');
       debugPrint('Attendance queued for sync: $error');
+      return AttendanceSaveResult.queued;
     }
   }
 
@@ -1988,7 +2375,8 @@ class AttendanceService {
     // The RPC validates membership and the exact service occurrence and takes
     // the same advisory lock as closeout. A direct-table fallback would bypass
     // that state machine and recreate the present/absent race.
-    await _supabase.rpc('record_my_attendance', params: {
+    final acknowledgement =
+        await _supabase.rpc('record_my_attendance', params: {
       'p_church_id': record['church_id'],
       'p_service_id': record['service_id'],
       'p_timestamp': record['timestamp'],
@@ -2000,6 +2388,11 @@ class AttendanceService {
       'p_engagement_answer': record['engagement_answer'],
       'p_service_name': record['service_name'],
     });
+    if (acknowledgement is! Map ||
+        (acknowledgement['attendance_id'] ?? acknowledgement['id']) == null ||
+        acknowledgement['present'] == false) {
+      throw StateError('The server did not confirm this attendance record.');
+    }
   }
 
   Future<void> _queueAttendanceRecord(
@@ -2007,6 +2400,7 @@ class AttendanceService {
     String? serviceDateKey,
   }) async {
     final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
     final queue = prefs.getStringList(_pendingAttendanceQueueKey) ?? <String>[];
     final recordMap = record.toMap();
     if (serviceDateKey != null && serviceDateKey.isNotEmpty) {
@@ -2027,6 +2421,7 @@ class AttendanceService {
 
   Future<void> flushPendingAttendance() async {
     final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
     final queue = prefs.getStringList(_pendingAttendanceQueueKey) ?? <String>[];
     if (queue.isEmpty) return;
     final currentUserId = _supabase.auth.currentUser?.id;
@@ -2060,7 +2455,15 @@ class AttendanceService {
       }
     }
 
-    await prefs.setStringList(_pendingAttendanceQueueKey, remaining);
+    await prefs.reload();
+    final latest =
+        prefs.getStringList(_pendingAttendanceQueueKey) ?? <String>[];
+    final submitted = queue.toSet();
+    final merged = <String>{
+      ...latest.where((entry) => !submitted.contains(entry)),
+      ...remaining
+    }.toList();
+    await prefs.setStringList(_pendingAttendanceQueueKey, merged);
     if (remaining.isEmpty) {
       _updateDebugStatus('Pending attendance sync complete.');
     }
@@ -2238,6 +2641,7 @@ class AttendanceService {
     DateTime? forTimestamp,
   }) async {
     final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
     final queue = prefs.getStringList(_pendingAttendanceQueueKey) ?? const [];
     final todayKey = _jamaicaDateKey(forTimestamp ?? DateTime.now());
     for (final encoded in queue) {
@@ -2291,6 +2695,7 @@ class AttendanceService {
     String? serviceDateKey,
   }) async {
     final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
     final key = _dwellKey(
       userId,
       serviceId,
@@ -2322,6 +2727,7 @@ class AttendanceService {
     String? serviceDateKey,
   }) async {
     final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
     return AttendanceDwellSession.tryParse(
       prefs.getString(
         _dwellKey(
@@ -2345,33 +2751,44 @@ class AttendanceService {
     final claimKey = '$userId|$churchId|$serviceId|'
         '${serviceDateKey ?? _jamaicaDateKey(observedAt)}';
     if (_syncedPresenceClaims.contains(claimKey)) return;
-
+    final previousObservation = _lastPresenceObservation[claimKey];
+    if (previousObservation != null &&
+        observedAt.difference(previousObservation) <
+            const Duration(seconds: 60)) {
+      return;
+    }
     try {
-      final result =
-          await _supabase.rpc('record_my_attendance_presence', params: {
-        'p_church_id': churchId,
-        'p_service_id': serviceId,
-        'p_observed_at': observedAt.toUtc().toIso8601String(),
-      });
+      final session = await _readDwellSession(userId, serviceId,
+          observedAt: observedAt, serviceDateKey: serviceDateKey);
+      final first = session?.startedAt ?? observedAt;
+      Future<dynamic> observe(DateTime at) =>
+          _supabase.rpc('observe_my_attendance_presence', params: {
+            'p_church_id': churchId,
+            'p_service_id': serviceId,
+            'p_observed_at': at.toUtc().toIso8601String(),
+          });
+      // Retry an unsynced original arrival first. Recording only "now" after
+      // connectivity returns silently starts a second ten-minute server dwell.
+      var result =
+          await observe(previousObservation == null ? first : observedAt);
+      if (previousObservation == null &&
+          observedAt.difference(first) >= const Duration(seconds: 60) &&
+          result is Map &&
+          result['status'] == 'pending') {
+        result = await observe(observedAt);
+      }
       final acceptedStatus =
           result is Map ? result['status']?.toString() : null;
       if (acceptedStatus == 'pending' || acceptedStatus == 'confirmed') {
-        _syncedPresenceClaims.add(claimKey);
-        if (result is Map) {
-          final resolvedChurchId = result['church_id']?.toString();
-          final resolvedServiceDate = result['service_date']?.toString();
-          if (resolvedChurchId != null && resolvedServiceDate != null) {
-            _syncedPresenceClaims.add(
-              '$userId|$resolvedChurchId|$serviceId|$resolvedServiceDate',
-            );
-          }
+        _lastPresenceObservation[claimKey] = observedAt;
+        // A pending arrival is not a completed check-in. Send later verified
+        // inside observations so the server can commit the completed dwell.
+        if (acceptedStatus == 'confirmed') {
+          _syncedPresenceClaims.add(claimKey);
         }
       }
     } catch (error) {
-      // This claim is a server-side race guard, not the attendance record
-      // itself. Preserve the local countdown and retry on the next inside
-      // observation; a rollout gap or temporary outage must not reset dwell.
-      debugPrint('Attendance presence claim will retry: $error');
+      debugPrint('Attendance presence observation will retry: $error');
     }
   }
 
@@ -2391,6 +2808,7 @@ class AttendanceService {
     final prefs = await SharedPreferences.getInstance();
     final now = observedAt ?? DateTime.now();
     final effectiveServiceDateKey = serviceDateKey ?? _currentServiceDateKey;
+    await prefs.reload();
     final key = _dwellKey(
       userId,
       serviceId,
@@ -2441,6 +2859,8 @@ class AttendanceService {
     required DateTime observedAt,
     String? serviceDateKey,
   }) async {
+    _lastPresenceObservation.removeWhere((claim, _) =>
+        claim.startsWith('$userId|') && claim.contains('|$serviceId|'));
     _syncedPresenceClaims.removeWhere(
       (claim) => claim.startsWith('$userId|') && claim.contains('|$serviceId|'),
     );
@@ -2570,10 +2990,23 @@ class AttendanceService {
     }
 
     bool? batteryOptimizationIgnored;
+    String? lastBackgroundCheck;
     if (_usesNativeAndroidGeofence) {
       try {
         batteryOptimizationIgnored =
             await NotificationService().isIgnoringBatteryOptimizations();
+        final health = await _androidAttendanceChannel
+            .invokeMapMethod<String, dynamic>('getBackgroundAttendanceStatus');
+        final epoch = health?['lastCheckAt'];
+        if (epoch is num) {
+          final at =
+              DateTime.fromMillisecondsSinceEpoch(epoch.toInt()).toLocal();
+          lastBackgroundCheck =
+              '${health?['lastCheckStatus'] ?? 'unknown'} at $at';
+        } else if (health?['enabled'] == true) {
+          lastBackgroundCheck =
+              'Scheduled; no completed background check recorded yet.';
+        }
       } catch (e) {
         debugPrint('Could not read battery optimization status: $e');
       }
@@ -2591,6 +3024,7 @@ class AttendanceService {
       preciseLocationEnabled: preciseLocationEnabled,
       radiusMeters: churchLocation?.radiusMeters,
       lastNativeEvent: prefs.getString('attendance_last_native_event'),
+      lastBackgroundCheck: lastBackgroundCheck,
     );
   }
 
@@ -2687,6 +3121,7 @@ class AttendanceService {
     if (resetRestartAttempts) {
       _monitoringRestartAttempts = 0;
       _syncedPresenceClaims.clear();
+      _lastPresenceObservation.clear();
     }
     _setMonitoring(false);
   }
@@ -2694,7 +3129,7 @@ class AttendanceService {
   void stopMonitoring() {
     _monitoringRequested = false;
     _clearMonitoringState(resetRestartAttempts: true);
-    if (_usesNativeAndroidGeofence) {
+    if (_usesNativeGeofence) {
       final removal = _removeAndroidNativeGeofence();
       _nativeGeofenceRemovalFuture = removal;
       unawaited(removal.whenComplete(() {

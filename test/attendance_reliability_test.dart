@@ -387,12 +387,9 @@ void main() {
       'supabase/migrations/'
       '20260822025758_attendance_presence_state_race_guard.sql',
     ).readAsStringSync();
-    final worker = File(
-      'android/app/src/main/kotlin/love/graceconnect/'
-      'AttendanceGeofenceRefreshWorker.kt',
-    ).readAsStringSync();
-    final activity = File(
-      'android/app/src/main/kotlin/love/graceconnect/MainActivity.kt',
+    final plugin = File(
+      'packages/grace_attendance_background/android/src/main/kotlin/'
+      'love/graceconnect/attendance/GraceAttendanceBackgroundPlugin.kt',
     ).readAsStringSync();
     final gradle = File('android/app/build.gradle').readAsStringSync();
 
@@ -436,19 +433,12 @@ void main() {
     expect(service, contains('prompt.serviceStartTime'));
     expect(service, contains('prompt.serviceDateKey'));
 
-    // ENTER/DWELL are transition-based. Re-adding persisted geofences at the
-    // opening of every check-in window gives an already-inside member an
-    // initial ENTER even while Flutter is closed.
-    expect(activity, contains('scheduleGeofenceRefreshes'));
+    // The channel must be registered in both the UI and background engines.
+    // Scheduler timing behavior is covered by the native unit tests.
+    expect(plugin, contains('FlutterPlugin'));
+    expect(plugin, contains('scheduleGeofenceRefreshes'));
     expect(service, contains('_scheduleAndroidGeofenceRefreshes(churchId)'));
-    expect(worker, contains('NativeGeofenceApiImpl(applicationContext)'));
-    expect(worker, contains('api.createGeofence(geofence)'));
-    expect(worker, contains('suspendCancellableCoroutine<Unit>'));
-    expect(
-        worker,
-        contains(
-            'PeriodicWorkRequestBuilder<AttendanceGeofenceRefreshWorker>(7, TimeUnit.DAYS)'));
-    expect(worker, contains('ExistingPeriodicWorkPolicy.UPDATE'));
+    expect(service, contains('attendanceBackgroundCheck'));
     expect(gradle, contains('androidx.work:work-runtime-ktx'));
 
     // SQL owns the occurrence identity and the monotonic state transition.

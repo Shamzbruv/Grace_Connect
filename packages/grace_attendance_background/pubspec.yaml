@@ -1,0 +1,17 @@
+name: grace_attendance_background
+description: Durable Android attendance checks and geofence recovery for Grace Connect.
+version: 1.0.0
+publish_to: none
+environment:
+  sdk: '>=3.6.0 <4.0.0'
+  flutter: '>=3.29.0'
+dependencies:
+  flutter:
+    sdk: flutter
+  native_geofence: 1.2.1
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: love.graceconnect.attendance
+        pluginClass: GraceAttendanceBackgroundPlugin
