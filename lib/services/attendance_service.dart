@@ -2560,7 +2560,6 @@ class AttendanceService {
       importance: Importance.high,
       priority: Priority.high,
       icon: 'ic_stat_grace_connect',
-      largeIcon: DrawableResourceAndroidBitmap('notification_large_icon'),
     );
     const iosDetails = DarwinNotificationDetails();
     const details =

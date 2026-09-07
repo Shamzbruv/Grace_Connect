@@ -254,6 +254,9 @@ void main() {
 
     expect(manifest, contains('ACCESS_BACKGROUND_LOCATION'));
     expect(manifest, contains('NativeGeofenceBroadcastReceiver'));
+    expect(manifest, contains('ScheduledNotificationReceiver'));
+    expect(manifest, contains('ScheduledNotificationBootReceiver'));
+    expect(manifest, contains('android.intent.action.MY_PACKAGE_REPLACED'));
     expect(
       manifest,
       isNot(contains('android.permission.FOREGROUND_SERVICE_LOCATION')),
