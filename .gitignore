@@ -75,3 +75,6 @@ flutter_*.log
 analyzer*.txt
 *_analyze_output.txt
 build_log.txt
+
+# Local Flutter plugin Gradle state
+**/.gradle/

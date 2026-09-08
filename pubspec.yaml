@@ -1,6 +1,6 @@
 name: grace_connect
 description: "Grace Connect - Church Management System"
-version: "1.0.31-beta+35"
+version: "1.0.32-beta+36"
 publish_to: "none"
 
 environment:
@@ -9,6 +9,9 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  grace_attendance_background:
+    path: packages/grace_attendance_background
+  timezone: 0.10.1
   cupertino_icons: ^1.0.8
   google_fonts: ^6.3.2
   font_awesome_flutter: ^10.8.0

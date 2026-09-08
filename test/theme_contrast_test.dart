@@ -1,4 +1,8 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:grace_connect/theme/app_colors.dart';
@@ -11,7 +15,48 @@ double contrast(Color a, Color b) {
 }
 
 void main() {
-  setUp(() => GoogleFonts.config.allowRuntimeFetching = false);
+  TestWidgetsFlutterBinding.ensureInitialized();
+  final messenger =
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+  final previousRuntimeFetching = GoogleFonts.config.allowRuntimeFetching;
+
+  setUpAll(() async {
+    GoogleFonts.config.allowRuntimeFetching = false;
+    final bytes =
+        await File('test/fixtures/fonts/Roboto-Regular.ttf').readAsBytes();
+    final fontData = ByteData.sublistView(bytes);
+    final fontAssets = {
+      for (final weight in [
+        'Regular',
+        'Medium',
+        'SemiBold',
+        'Bold',
+        'ExtraBold'
+      ])
+        'test/fonts/Outfit-$weight.ttf': [
+          {'asset': 'test/fonts/Outfit-$weight.ttf'}
+        ],
+    };
+    // These tests assert colors, not glyph shapes. Supply a valid local font
+    // through the asset channel so no asynchronous network/cache miss can leak
+    // into another test after the first theme has been constructed.
+    messenger.setMockMessageHandler('flutter/assets', (message) async {
+      final key = utf8.decode(message!.buffer
+          .asUint8List(message.offsetInBytes, message.lengthInBytes));
+      if (key == 'AssetManifest.bin') {
+        return const StandardMessageCodec().encodeMessage(fontAssets);
+      }
+      return fontAssets.containsKey(key) ? fontData : null;
+    });
+    AppTheme.lightTheme;
+    AppTheme.darkTheme;
+    await GoogleFonts.pendingFonts();
+  });
+
+  tearDownAll(() {
+    messenger.setMockMessageHandler('flutter/assets', null);
+    GoogleFonts.config.allowRuntimeFetching = previousRuntimeFetching;
+  });
   test('primary, secondary and surface text stay readable in both themes', () {
     for (final theme in [AppTheme.lightTheme, AppTheme.darkTheme]) {
       final c = theme.colorScheme;

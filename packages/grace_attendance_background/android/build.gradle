@@ -1,0 +1,27 @@
+group 'love.graceconnect.attendance'
+version '1.0-SNAPSHOT'
+
+apply plugin: 'com.android.library'
+apply plugin: 'kotlin-android'
+
+android {
+    namespace 'love.graceconnect.attendance'
+    compileSdk 36
+    defaultConfig { minSdk 26 }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions { jvmTarget = '17' }
+    sourceSets {
+        main.java.srcDirs += 'src/main/kotlin'
+        test.java.srcDirs += 'src/test/kotlin'
+    }
+}
+
+dependencies {
+    implementation project(':native_geofence')
+    implementation 'androidx.work:work-runtime-ktx:2.10.2'
+    implementation 'com.google.guava:guava:33.4.8-android'
+    testImplementation 'junit:junit:4.13.2'
+}

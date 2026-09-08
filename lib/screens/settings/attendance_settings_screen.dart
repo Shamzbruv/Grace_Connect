@@ -22,6 +22,7 @@ class AttendanceSettingsScreen extends StatefulWidget {
 class _AttendanceSettingsScreenState extends State<AttendanceSettingsScreen>
     with WidgetsBindingObserver {
   bool _autoCheckIn = false;
+  bool _checkInReminders = false;
   bool _isLoading = true;
   bool? _batteryOptimizationIgnored;
   Future<AttendanceSetupStatus>? _diagnostics;
@@ -42,6 +43,8 @@ class _AttendanceSettingsScreenState extends State<AttendanceSettingsScreen>
     if (!mounted) return;
     setState(() {
       _autoCheckIn = prefs.getBool('auto_check_in') ?? false;
+      _checkInReminders =
+          prefs.getBool('attendance_check_in_reminders') ?? _autoCheckIn;
       _isLoading = false;
       _diagnostics = AttendanceService().getSetupStatus(
           context.read<UserRoleProvider>().userProfile?.placeId ?? '');
@@ -76,7 +79,7 @@ class _AttendanceSettingsScreenState extends State<AttendanceSettingsScreen>
   }
 
   Future<void> _toggleAutoCheckIn(bool value) async {
-    if (value && !kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+    if (value && !kIsWeb) {
       final accepted = await _showBackgroundLocationDisclosure();
       if (!accepted) return;
       final granted =
@@ -89,7 +92,9 @@ class _AttendanceSettingsScreenState extends State<AttendanceSettingsScreen>
         if (!mounted) return;
         AppFeedback.show(
           context,
-          'Auto-attendance stays off until Location is set to “Allow all the time” in Android settings.',
+          defaultTargetPlatform == TargetPlatform.iOS
+              ? 'Auto-attendance stays off until Location is set to “Always” in iPhone settings.'
+              : 'Auto-attendance stays off until Location is set to “Allow all the time” in Android settings.',
           type: AppFeedbackType.warning,
         );
         return;
@@ -99,12 +104,32 @@ class _AttendanceSettingsScreenState extends State<AttendanceSettingsScreen>
     setState(() => _autoCheckIn = value);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('auto_check_in', value);
+    if (value && !prefs.containsKey('attendance_check_in_reminders')) {
+      await prefs.setBool('attendance_check_in_reminders', true);
+    }
     if (value) {
       await AttendanceService().initialize();
       if (_isAndroid) await _loadBatteryOptimizationStatus();
     } else {
-      AttendanceService().stopMonitoring();
+      await AttendanceService().initialize();
     }
+    if (mounted) await _loadSettings();
+  }
+
+  Future<void> _toggleCheckInReminders(bool value) async {
+    if (value && !kIsWeb) {
+      final granted = await NotificationService().ensurePushPermission();
+      if (!mounted) return;
+      if (!granted) {
+        AppFeedback.show(context,
+            'Enable Grace Connect notifications in phone settings to receive service reminders.',
+            type: AppFeedbackType.warning);
+      }
+    }
+    setState(() => _checkInReminders = value);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('attendance_check_in_reminders', value);
+    await AttendanceService().initialize();
     if (mounted) await _loadSettings();
   }
 
@@ -116,7 +141,7 @@ class _AttendanceSettingsScreenState extends State<AttendanceSettingsScreen>
         title: const Text('Background location for auto-attendance'),
         content: const Text(
           'When you turn on Auto-Attendance, Grace Connect uses your precise location in the background—even when the app is closed—to detect when you enter and remain inside your church’s saved geofence during a scheduled service. '
-          'It does not store or share a trail of where you travel. Only the attendance check-in result is saved. Turning Auto-Attendance off removes the Android geofence.',
+          'It does not store or share a trail of where you travel. Only the attendance check-in result is saved. Turning Auto-Attendance off stops background detection.',
         ),
         actions: [
           TextButton(
@@ -205,7 +230,7 @@ class _AttendanceSettingsScreenState extends State<AttendanceSettingsScreen>
               }
 
               try {
-                await AttendanceService().markRemotePresent(
+                final result = await AttendanceService().markRemotePresent(
                   userId: user.id,
                   churchId: churchId,
                   reason: 'Manual code check-in',
@@ -215,8 +240,12 @@ class _AttendanceSettingsScreenState extends State<AttendanceSettingsScreen>
                 Navigator.pop(context);
                 AppFeedback.show(
                   context,
-                  'Successfully checked in. Welcome to service.',
-                  type: AppFeedbackType.success,
+                  result == AttendanceSaveResult.confirmed
+                      ? 'Attendance confirmed. Welcome to service.'
+                      : 'Saved on this phone. Attendance will sync when online.',
+                  type: result == AttendanceSaveResult.confirmed
+                      ? AppFeedbackType.success
+                      : AppFeedbackType.warning,
                 );
               } catch (e) {
                 if (!context.mounted) return;
@@ -304,7 +333,7 @@ class _AttendanceSettingsScreenState extends State<AttendanceSettingsScreen>
                             children: [
                               Text(
                                   ready
-                                      ? 'Ready for the next scheduled service'
+                                      ? 'Background detection registered'
                                       : 'Auto-attendance needs attention',
                                   style: theme.textTheme.titleMedium),
                               for (final blocker in status.blockers)
@@ -326,6 +355,11 @@ class _AttendanceSettingsScreenState extends State<AttendanceSettingsScreen>
                                     padding: const EdgeInsets.only(top: 8),
                                     child: Text(
                                         'Last background detection: ${status.lastNativeEvent}')),
+                              if (status.lastBackgroundCheck != null)
+                                Padding(
+                                    padding: const EdgeInsets.only(top: 8),
+                                    child: Text(
+                                        'Last scheduled check: ${status.lastBackgroundCheck}')),
                               const SizedBox(height: 8),
                               Text(AttendanceService().lastDebugStatus),
                               Wrap(spacing: 8, children: [
@@ -394,6 +428,38 @@ class _AttendanceSettingsScreenState extends State<AttendanceSettingsScreen>
                       ),
                     ],
                   ],
+                  const SizedBox(height: 20),
+                  SwitchListTile.adaptive(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Check-in reminders'),
+                    subtitle: const Text(
+                      'Get reminders before and during services so you can sign in manually if needed. Allow notifications in your phone settings to see them while using other apps.',
+                    ),
+                    value: _checkInReminders,
+                    onChanged: _toggleCheckInReminders,
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Manual sign-in at church',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'You can sign in as soon as the service check-in window opens, usually 30 minutes before the start. Manual sign-in verifies your location immediately, without the automatic countdown. Arriving before the start is recorded as early.',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                      height: 1.35,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  OutlinedButton.icon(
+                    onPressed: () =>
+                        Navigator.pushNamed(context, '/attendance'),
+                    icon: const Icon(Icons.how_to_reg_outlined),
+                    label: const Text('Open Manual Sign-In'),
+                  ),
                   const Divider(height: 48),
                   Text(
                     'Service Code Check-In',

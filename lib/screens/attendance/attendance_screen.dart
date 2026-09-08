@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:geolocator/geolocator.dart';
 import '../../models/user_profile.dart';
 import '../../providers/user_role_provider.dart';
 import '../../services/attendance_service.dart';
@@ -24,7 +25,8 @@ class AttendanceScreen extends StatefulWidget {
   State<AttendanceScreen> createState() => _AttendanceScreenState();
 }
 
-class _AttendanceScreenState extends State<AttendanceScreen> {
+class _AttendanceScreenState extends State<AttendanceScreen>
+    with WidgetsBindingObserver {
   final AttendanceService _attendanceService = AttendanceService();
   String _filter = 'All';
   bool _autoCheckIn = true;
@@ -42,6 +44,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadAutoCheckInPreference();
     _promptRefreshTimer = Timer.periodic(const Duration(seconds: 15), (_) {
       final churchId = _loadedChurchId;
@@ -52,8 +55,18 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _promptRefreshTimer?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    final churchId = _loadedChurchId;
+    if (churchId == null) return;
+    if (!_isSetupLoading) unawaited(_refreshSetupStatus(churchId));
+    if (!_isPromptLoading) unawaited(_refreshCheckInPrompt(churchId));
   }
 
   Future<void> _loadAutoCheckInPreference() async {
@@ -285,11 +298,15 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   Future<void> _markPresentForActiveService(String churchId) async {
     setState(() => _isMarkingPresent = true);
     try {
-      await _attendanceService.markManualOnSitePresent(churchId);
+      final result = await _attendanceService.markManualOnSitePresent(churchId);
       await _refreshCheckInPrompt(churchId);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Manual sign-in marked present.')),
+        SnackBar(
+          content: Text(result == AttendanceSaveResult.confirmed
+              ? 'Attendance confirmed. Your verified arrival time has been recorded.'
+              : 'Saved on this phone. Attendance will sync when online.'),
+        ),
       );
     } catch (e) {
       if (!mounted) return;
@@ -569,10 +586,10 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                 const SizedBox(height: 8),
                 Text(
                   _autoCheckIn
-                      ? (isMonitoring
-                          ? 'Monitoring your location for church arrival.'
-                          : blockers.isNotEmpty
-                              ? blockers.first
+                      ? (blockers.isNotEmpty
+                          ? blockers.first
+                          : isMonitoring
+                              ? 'Background detection is registered. Your attendance is confirmed when the service card says Present recorded.'
                               : _attendanceService.lastDebugStatus)
                       : 'Auto-attendance is turned off.',
                   style: Theme.of(context).textTheme.bodySmall,
@@ -585,13 +602,24 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                   const SizedBox(height: 14),
                   _buildSetupRow(
                     context,
-                    label: 'Location permission',
-                    isReady: status.hasLocationPermission,
+                    label: status.requiresBackgroundLocation
+                        ? 'Location allowed all the time'
+                        : 'Location permission',
+                    isReady: status.hasAutoAttendanceLocationPermission,
+                    onFix: Geolocator.openAppSettings,
                   ),
+                  if (status.preciseLocationEnabled != null)
+                    _buildSetupRow(
+                      context,
+                      label: 'Precise location',
+                      isReady: status.preciseLocationEnabled == true,
+                      onFix: Geolocator.openAppSettings,
+                    ),
                   _buildSetupRow(
                     context,
                     label: 'Device location services',
                     isReady: status.locationServicesEnabled,
+                    onFix: Geolocator.openLocationSettings,
                   ),
                   _buildSetupRow(
                     context,
@@ -603,6 +631,16 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                     label: 'Service schedule',
                     isReady: status.hasServiceSchedule,
                   ),
+                  if (_autoCheckIn)
+                    _buildSetupRow(
+                      context,
+                      label: 'Background detection registered',
+                      isReady: isMonitoring,
+                      onFix: () async {
+                        await _attendanceService.initialize();
+                        if (mounted) await _refreshSetupStatus(user.churchId);
+                      },
+                    ),
                   if (status.requiresBackgroundLocation &&
                       status.batteryOptimizationIgnored != null)
                     _buildSetupRow(
@@ -726,9 +764,14 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     final prompt = _checkInPrompt;
     final serviceName = prompt?.serviceName ?? 'Current Service';
     final hasActive = prompt?.hasActiveService == true;
-    final isVerified = prompt?.alreadyMarked == true;
+    final pendingSync = prompt?.pendingSync == true;
+    final isMarked = prompt?.alreadyMarked == true;
+    final isVerified = isMarked && !pendingSync;
     final isInside = prompt?.isInsideGeofence == true;
-    final canMark = hasActive && !isVerified && !_isMarkingPresent;
+    final canMark = hasActive && !isMarked && !_isMarkingPresent;
+    final scheduledStart = prompt?.scheduledStart;
+    final isEarly =
+        scheduledStart != null && DateTime.now().isBefore(scheduledStart);
 
     return AppCard(
       color: hasActive
@@ -753,7 +796,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  hasActive ? serviceName : 'No Service In Session',
+                  hasActive ? serviceName : 'Check-in Is Not Open',
                   style: GoogleFonts.poppins(
                     fontWeight: FontWeight.w700,
                     fontSize: 17,
@@ -769,6 +812,13 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
             ],
           ),
           const SizedBox(height: 8),
+          if (hasActive && scheduledStart != null) ...[
+            Text(
+              'Service starts at ${DateFormat('h:mm a').format(scheduledStart.toLocal())}.',
+              style: theme.textTheme.labelMedium,
+            ),
+            const SizedBox(height: 6),
+          ],
           Text(
             hasActive
                 ? (prompt?.message ??
@@ -783,7 +833,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
             const SizedBox(height: 12),
             _buildCheckInStep(
               context,
-              label: 'Service in session',
+              label: isEarly ? 'Early check-in is open' : 'Service in session',
               isComplete: true,
             ),
             _buildCheckInStep(
@@ -793,13 +843,17 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              isVerified
-                  ? 'Present recorded for today.'
-                  : isInside
-                      ? (_autoCheckIn && prompt.canMarkPresent != true
-                          ? 'Automatic check-in countdown is running. You can leave this screen; Manual Sign-In remains available.'
-                          : 'Location is verified. Tap Manual Sign-In if automatic check-in has not completed yet.')
-                      : 'Tap Manual Sign-In to request location access and confirm you are at church.',
+              pendingSync
+                  ? 'Attendance is saved on this phone and waiting to sync. Keep your connection available so it can be confirmed.'
+                  : isVerified
+                      ? 'Present recorded for today.'
+                      : isInside
+                          ? (isEarly
+                              ? 'You are here before the service starts. Tap Early Sign-In to confirm your arrival now; no countdown is required.'
+                              : _autoCheckIn && prompt.canMarkPresent != true
+                                  ? 'Arrival detected; attendance is still pending. Tap Manual Sign-In now to confirm your attendance without waiting for the countdown.'
+                                  : 'Location is verified. Tap Manual Sign-In to confirm your attendance now.')
+                          : 'Tap Manual Sign-In to request location access and confirm you are at church.',
               style: theme.textTheme.labelMedium,
             ),
           ],
@@ -818,8 +872,13 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Icon(Icons.how_to_reg_outlined),
-                  label:
-                      Text(isVerified ? 'Already Present' : 'Manual Sign-In'),
+                  label: Text(pendingSync
+                      ? 'Waiting to Sync'
+                      : isVerified
+                          ? 'Already Present'
+                          : isEarly
+                              ? 'Early Sign-In'
+                              : 'Manual Sign-In'),
                 ),
               ),
               const SizedBox(width: 8),
@@ -987,13 +1046,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     final firstDay = DateTime(now.year, now.month, 1);
     final daysInMonth = DateTime(now.year, now.month + 1, 0).day;
     final leadingSlots = firstDay.weekday % 7;
-    final byDay = <int, AttendanceRecord>{};
-    for (final record in records) {
-      if (record.timestamp.year == now.year &&
-          record.timestamp.month == now.month) {
-        byDay[record.timestamp.day] = record;
-      }
-    }
+    final byDay = groupAttendanceByDay(records);
 
     return AppCard(
       child: Column(
@@ -1045,38 +1098,74 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
             itemBuilder: (context, index) {
               if (index < leadingSlots) return const SizedBox.shrink();
               final day = index - leadingSlots + 1;
-              final record = byDay[day];
-              final color = record == null
+              final date = DateTime(now.year, now.month, day);
+              final dayRecords = byDay[date] ?? const <AttendanceRecord>[];
+              final statusColors =
+                  dayRecords.map(_colorForRecord).toSet().toList();
+              final hasRecords = dayRecords.isNotEmpty;
+              final color = !hasRecords
                   ? theme.colorScheme.surfaceContainerHighest
-                  : _colorForRecord(record);
+                  : statusColors.length == 1
+                      ? statusColors.single
+                      : theme.colorScheme.primary;
               final isToday = day == now.day;
 
               return Tooltip(
-                message: record == null
+                message: !hasRecords
                     ? 'No record'
-                    : '${record.serviceName ?? 'Service'} - ${_labelForRecord(record)}',
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color:
-                        color.withValues(alpha: record == null ? 0.35 : 0.18),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: isToday
-                          ? theme.colorScheme.primary
-                          : color.withValues(
-                              alpha: record == null ? 0.18 : 0.7),
-                    ),
-                  ),
-                  child: Center(
-                    child: Text(
-                      '$day',
-                      style: theme.textTheme.labelMedium?.copyWith(
-                        color: record == null
-                            ? theme.colorScheme.onSurfaceVariant
-                            : color,
-                        fontWeight:
-                            record == null ? FontWeight.w500 : FontWeight.w900,
+                    : dayRecords
+                        .map((record) =>
+                            '${record.serviceName ?? 'Service'} - ${_labelForRecord(record)}')
+                        .join('\n'),
+                child: InkWell(
+                  onTap: !hasRecords
+                      ? null
+                      : () => _showDayAttendance(context, date, dayRecords),
+                  borderRadius: BorderRadius.circular(12),
+                  child: Ink(
+                    decoration: BoxDecoration(
+                      color: color.withValues(alpha: !hasRecords ? 0.35 : 0.18),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: isToday
+                            ? theme.colorScheme.primary
+                            : color.withValues(alpha: !hasRecords ? 0.18 : 0.7),
                       ),
+                    ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          '$day',
+                          style: theme.textTheme.labelMedium?.copyWith(
+                            color: !hasRecords
+                                ? theme.colorScheme.onSurfaceVariant
+                                : color,
+                            fontWeight:
+                                !hasRecords ? FontWeight.w500 : FontWeight.w900,
+                          ),
+                        ),
+                        if (statusColors.length > 1) ...[
+                          const SizedBox(height: 4),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: statusColors
+                                .map((statusColor) => Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 2),
+                                      child: Container(
+                                        width: 5,
+                                        height: 5,
+                                        decoration: BoxDecoration(
+                                          color: statusColor,
+                                          shape: BoxShape.circle,
+                                        ),
+                                      ),
+                                    ))
+                                .toList(),
+                          ),
+                        ],
+                      ],
                     ),
                   ),
                 ),
@@ -1088,13 +1177,47 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
             spacing: 10,
             runSpacing: 6,
             children: [
-              _buildLegend(context, Colors.green, 'On time'),
+              _buildLegend(context, Colors.green, 'Early / on time'),
               _buildLegend(context, Colors.orange, 'Late'),
               _buildLegend(context, Colors.purple, 'Remote'),
               _buildLegend(context, Colors.redAccent, 'Absent'),
             ],
           ),
+          const SizedBox(height: 8),
+          Text(
+            'Tap a day to see the attendance recorded for each service.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
         ],
+      ),
+    );
+  }
+
+  void _showDayAttendance(
+      BuildContext context, DateTime date, List<AttendanceRecord> records) {
+    final ordered = List<AttendanceRecord>.of(records)
+      ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheetContext) => SafeArea(
+        child: SizedBox(
+          height: MediaQuery.sizeOf(sheetContext).height * 0.6,
+          child: ListView(
+            padding: const EdgeInsets.all(20),
+            children: [
+              Text(
+                DateFormat('EEEE, MMMM d').format(date),
+                style: Theme.of(sheetContext).textTheme.titleLarge,
+              ),
+              const SizedBox(height: 16),
+              for (final record in ordered)
+                _buildRecordCard(sheetContext, record),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1188,7 +1311,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     final isLate = record.status == 'late';
     final isRemote = record.method == 'remote';
     final isAbsent = !record.present || record.status == 'absent';
-    final dateStr = DateFormat('MMM d, yyyy').format(record.timestamp);
+    final dateStr = DateFormat('MMM d, yyyy').format(record.attendanceDate);
     final timeStr = DateFormat('h:mm a').format(record.timestamp);
 
     Color statusColor;
@@ -1229,11 +1352,13 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     } else {
       statusColor = Colors.green;
       statusIcon = Icons.check;
-      statusChip = const Chip(
-        label: Text('On Time', style: TextStyle(fontSize: 10)),
+      statusChip = Chip(
+        label: Text(
+            record.isEarly ? '${record.minutesEarly} min early' : 'On Time',
+            style: const TextStyle(fontSize: 10)),
         backgroundColor: Colors.transparent,
-        shape: StadiumBorder(side: BorderSide(color: Colors.green)),
-        labelStyle: TextStyle(color: Colors.green),
+        shape: const StadiumBorder(side: BorderSide(color: Colors.green)),
+        labelStyle: const TextStyle(color: Colors.green),
         padding: EdgeInsets.zero,
         visualDensity: VisualDensity.compact,
       );
@@ -1287,14 +1412,17 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     if (_filter == 'This Week') {
       final startOfWeek = DateTime(now.year, now.month, now.day)
           .subtract(Duration(days: now.weekday - 1));
-      return records.where((r) => !r.timestamp.isBefore(startOfWeek)).toList();
+      return records
+          .where((r) => !r.attendanceDate.isBefore(startOfWeek))
+          .toList();
     } else if (_filter == 'This Month') {
       return records
           .where((r) =>
-              r.timestamp.month == now.month && r.timestamp.year == now.year)
+              r.attendanceDate.month == now.month &&
+              r.attendanceDate.year == now.year)
           .toList();
     } else if (_filter == 'This Year') {
-      return records.where((r) => r.timestamp.year == now.year).toList();
+      return records.where((r) => r.attendanceDate.year == now.year).toList();
     }
     return records;
   }
@@ -1330,6 +1458,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     if (record.status == 'late') {
       return '${record.minutesLate ?? 0} min late';
     }
+    if (record.isEarly) return '${record.minutesEarly} min early';
     return 'On time';
   }
 }

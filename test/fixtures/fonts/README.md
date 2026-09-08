@@ -1,0 +1,1 @@
+Roboto-Regular.ttf and its Apache 2.0 license are copied from the Flutter 3.32.8 SDK material_fonts artifacts. The theme contrast tests use this local font as a stand-in for Outfit to exercise colors without network requests. This fixture is not declared as an application asset and is not shipped in the app.

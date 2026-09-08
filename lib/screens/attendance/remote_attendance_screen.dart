@@ -60,7 +60,7 @@ class _RemoteAttendanceScreenState extends State<RemoteAttendanceScreen> {
         throw Exception('User profile not loaded');
       }
 
-      await AttendanceService().markRemotePresent(
+      final result = await AttendanceService().markRemotePresent(
         userId: user.uid,
         churchId: churchId,
         reason: _selectedReason == 'Other'
@@ -71,7 +71,10 @@ class _RemoteAttendanceScreenState extends State<RemoteAttendanceScreen> {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Checked in remotely successfully!')),
+          SnackBar(
+              content: Text(result == AttendanceSaveResult.confirmed
+                  ? 'Remote attendance confirmed.'
+                  : 'Saved on this phone. Attendance will sync when online.')),
         );
         Navigator.pop(context);
       }
