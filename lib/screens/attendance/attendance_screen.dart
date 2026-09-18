@@ -12,6 +12,7 @@ import '../../providers/user_role_provider.dart';
 import '../../services/attendance_service.dart';
 import '../../services/notification_service.dart';
 import '../../models/attendance_record.dart';
+import '../../utils/church_time.dart';
 import '../../widgets/ui/app_card.dart';
 
 import '../../widgets/ui/app_loader.dart';
@@ -814,7 +815,7 @@ class _AttendanceScreenState extends State<AttendanceScreen>
           const SizedBox(height: 8),
           if (hasActive && scheduledStart != null) ...[
             Text(
-              'Service starts at ${DateFormat('h:mm a').format(scheduledStart.toLocal())}.',
+              'Service starts at ${DateFormat('h:mm a').format(ChurchTime(_attendanceService.churchTimeZone).local(scheduledStart))}.',
               style: theme.textTheme.labelMedium,
             ),
             const SizedBox(height: 6),
@@ -1312,7 +1313,7 @@ class _AttendanceScreenState extends State<AttendanceScreen>
     final isRemote = record.method == 'remote';
     final isAbsent = !record.present || record.status == 'absent';
     final dateStr = DateFormat('MMM d, yyyy').format(record.attendanceDate);
-    final timeStr = DateFormat('h:mm a').format(record.timestamp);
+    final timeStr = DateFormat('h:mm a').format(record.displayTimestamp);
 
     Color statusColor;
     IconData statusIcon;
@@ -1389,9 +1390,19 @@ class _AttendanceScreenState extends State<AttendanceScreen>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             if (record.serviceName?.trim().isNotEmpty == true) Text(dateStr),
+            if (record.displayScheduledStart != null)
+              Text(
+                  'Service starts ${DateFormat('h:mm a').format(record.displayScheduledStart!)}'),
             Text(isAbsent
-                ? 'Marked absent at $timeStr'
-                : 'Checked in at $timeStr'),
+                ? 'Attendance not recorded'
+                : 'Arrival recorded at $timeStr'),
+            if (!isAbsent && record.displayConfirmedAt != null)
+              Text(
+                  'Confirmed at ${DateFormat('h:mm a').format(record.displayConfirmedAt!)}',
+                  style: Theme.of(context).textTheme.bodySmall),
+            if (record.serviceTimeZone != null)
+              Text('${record.serviceTimeZone} · church time',
+                  style: Theme.of(context).textTheme.bodySmall),
             if (isRemote && record.reasonForAbsence != null)
               Text(
                 'Reason: ${record.reasonForAbsence}',

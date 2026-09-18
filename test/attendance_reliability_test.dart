@@ -430,8 +430,13 @@ void main() {
     // Current + previous weekday resolution and a logical service date keep
     // post-midnight attendance attached to the service that began yesterday.
     expect(service, contains('previousWeekday'));
-    expect(service, contains('if (!scheduledEnd.isAfter(scheduledStart))'));
-    expect(service, contains('scheduledEnd.add(const Duration(days: 1))'));
+    // Overnight rollover moved from adding 24 hours to an end-date rollover
+    // resolved through the church's own zone, so a service crossing midnight
+    // is still attached to the day it began without inheriting a fixed offset.
+    expect(service,
+        contains('endParts[0] * 3600 + endParts[1] * 60 + endParts[2] <='));
+    expect(service, contains('endDate = DateTime.utc('));
+    expect(service, contains('_churchTime.at(endDate, endParts[0]'));
     expect(service, contains('final logicalServiceDate = serviceDateKey'));
     expect(service, contains('prompt.serviceStartTime'));
     expect(service, contains('prompt.serviceDateKey'));

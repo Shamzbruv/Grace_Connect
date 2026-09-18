@@ -1,3 +1,5 @@
+import '../utils/church_time.dart';
+
 class AttendanceRecord {
   final String id;
   final String userId;
@@ -13,6 +15,23 @@ class AttendanceRecord {
   final String? serviceName; // Added for display
   final DateTime? serviceDate;
   final int minutesEarly;
+  final String? serviceTimeZone;
+  final DateTime? scheduledStart;
+  final DateTime? confirmedAt;
+
+  DateTime get displayTimestamp => serviceTimeZone == null
+      ? timestamp.toLocal()
+      : ChurchTime(serviceTimeZone!).local(timestamp);
+  DateTime? get displayScheduledStart => scheduledStart == null
+      ? null
+      : serviceTimeZone == null
+          ? scheduledStart!.toLocal()
+          : ChurchTime(serviceTimeZone!).local(scheduledStart!);
+  DateTime? get displayConfirmedAt => confirmedAt == null
+      ? null
+      : serviceTimeZone == null
+          ? confirmedAt!.toLocal()
+          : ChurchTime(serviceTimeZone!).local(confirmedAt!);
 
   AttendanceRecord({
     required this.id,
@@ -29,6 +48,9 @@ class AttendanceRecord {
     this.serviceName,
     this.serviceDate,
     this.minutesEarly = 0,
+    this.serviceTimeZone,
+    this.scheduledStart,
+    this.confirmedAt,
   });
 
   factory AttendanceRecord.fromMap(Map<String, dynamic> data) {
@@ -49,6 +71,10 @@ class AttendanceRecord {
       serviceName: data['service_name'],
       serviceDate: DateTime.tryParse(data['service_date']?.toString() ?? ''),
       minutesEarly: (data['minutes_early'] as num?)?.toInt() ?? 0,
+      serviceTimeZone: data['service_timezone']?.toString(),
+      scheduledStart:
+          DateTime.tryParse(data['scheduled_start_at']?.toString() ?? ''),
+      confirmedAt: DateTime.tryParse(data['confirmed_at']?.toString() ?? ''),
     );
   }
 

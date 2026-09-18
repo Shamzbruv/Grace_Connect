@@ -14,6 +14,7 @@ void main() {
     final plan = AttendanceReminderPlan.upcoming(
         now: DateTime.parse('2026-09-06T07:00:00-05:00'),
         userId: 'member',
+        timeZone: 'America/Jamaica',
         schedules: [school]);
     expect(plan.take(3).map((p) => p.at), [
       DateTime.parse('2026-09-06T08:15:00-05:00'),
@@ -25,6 +26,7 @@ void main() {
     final plan = AttendanceReminderPlan.upcoming(
         now: DateTime.parse('2026-09-06T08:20:00-05:00'),
         userId: 'member',
+        timeZone: 'America/Jamaica',
         schedules: [school],
         confirmedOccurrences: {'school|2026-09-06'});
     expect(plan, hasLength(6));
@@ -34,6 +36,7 @@ void main() {
     final plan = AttendanceReminderPlan.upcoming(
         now: DateTime.parse('2026-09-06T08:35:00-05:00'),
         userId: 'member',
+        timeZone: 'America/Jamaica',
         schedules: [school]);
     expect(plan.first.at, DateTime.parse('2026-09-06T08:40:00-05:00'));
     expect(plan.first.title, contains('underway'));
@@ -50,6 +53,7 @@ void main() {
     final plan = AttendanceReminderPlan.upcoming(
         now: DateTime.parse('2026-09-06T07:00:00-05:00'),
         userId: 'member',
+        timeZone: 'America/Jamaica',
         schedules: [service]);
     expect(plan, hasLength(6));
     expect(plan.first.at, DateTime.parse('2026-09-06T08:30:00-05:00'));
@@ -65,6 +69,7 @@ void main() {
     final plan = AttendanceReminderPlan.upcoming(
         now: DateTime.parse('2026-09-06T07:00:00-05:00'),
         userId: 'member',
+        timeZone: 'America/Jamaica',
         schedules: [service]);
     expect(plan, hasLength(6));
   });
@@ -79,6 +84,7 @@ void main() {
     final plan = AttendanceReminderPlan.upcoming(
         now: DateTime.parse('2026-09-05T23:40:00-05:00'),
         userId: 'member',
+        timeZone: 'America/Jamaica',
         schedules: [service]);
     expect(plan.first.at, DateTime.parse('2026-09-05T23:50:00-05:00'));
   });
@@ -87,6 +93,7 @@ void main() {
     final plan = AttendanceReminderPlan.upcoming(
         now: DateTime.parse('2026-09-06T07:00:00-05:00'),
         userId: 'member',
+        timeZone: 'America/Jamaica',
         schedules: [school]);
     expect(plan, hasLength(9));
     expect(plan.map((p) => p.id).toSet(), hasLength(9));

@@ -1,4 +1,5 @@
 import '../models/service_schedule.dart';
+import '../utils/church_time.dart';
 
 class AttendanceReminderPlan {
   const AttendanceReminderPlan({
@@ -26,11 +27,13 @@ class AttendanceReminderPlan {
     required DateTime now,
     required String userId,
     required Iterable<ServiceSchedule> schedules,
+    String timeZone = 'UTC',
     Set<String> confirmedOccurrences = const {},
   }) {
     final utc = now.toUtc();
-    final jamaica = utc.subtract(const Duration(hours: 5));
-    final day = DateTime.utc(jamaica.year, jamaica.month, jamaica.day, 5);
+    final clock = ChurchTime(timeZone);
+    final local = clock.local(utc);
+    final day = DateTime.utc(local.year, local.month, local.day);
     final plans = <int, AttendanceReminderPlan>{};
     for (var offset = 0; offset <= 15; offset++) {
       final date = day.add(Duration(days: offset));
@@ -48,11 +51,14 @@ class AttendanceReminderPlan {
         final endParts = RegExp(r'^([01]?\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$')
             .firstMatch(schedule.endTime.trim());
         if (parts == null || endParts == null) continue;
-        final start = date.add(Duration(
-            hours: int.parse(parts[1]!), minutes: int.parse(parts[2]!)));
-        var end = date.add(Duration(
-            hours: int.parse(endParts[1]!), minutes: int.parse(endParts[2]!)));
-        if (!end.isAfter(start)) end = end.add(const Duration(days: 1));
+        final start =
+            clock.at(date, int.parse(parts[1]!), int.parse(parts[2]!));
+        var end =
+            clock.at(date, int.parse(endParts[1]!), int.parse(endParts[2]!));
+        if (!end.isAfter(start)) {
+          end = clock.at(date.add(const Duration(days: 1)),
+              int.parse(endParts[1]!), int.parse(endParts[2]!));
+        }
         final lead = schedule.checkInOpensMinutesBefore.clamp(0, 15).toInt();
         final phases = <int, DateTime>{
           if (lead > 0) 0: start.subtract(Duration(minutes: lead)),

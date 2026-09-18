@@ -13,6 +13,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/timezone.dart' as tz;
 import '../models/church_location.dart';
+import '../utils/church_time.dart';
 import '../models/service_schedule.dart';
 import '../models/attendance_record.dart';
 import 'attendance_dwell_session.dart';
@@ -262,7 +263,6 @@ class AttendanceService {
   Timer? _monitoringRestartTimer;
   Future<void>? _initializationFuture;
   Future<void>? _nativeGeofenceRemovalFuture;
-  String? _currentServiceId;
   String? _currentServiceDateKey;
   bool _isMonitoring = false;
   bool _monitoringRequested = false;
@@ -282,6 +282,10 @@ class AttendanceService {
   static const Duration _requiredClearOutsideDuration = Duration(minutes: 2);
   static const Duration _maximumClearOutsideEvidenceGap = Duration(seconds: 90);
   static const Duration _completionDeliveryGrace = Duration(minutes: 15);
+  String _churchTimeZone = 'UTC';
+  String get churchTimeZone => _churchTimeZone;
+  ChurchTime get _churchTime => ChurchTime(_churchTimeZone);
+
   final Set<String> _syncedPresenceClaims = <String>{};
   final Map<String, DateTime> _lastPresenceObservation = {};
 
@@ -339,11 +343,12 @@ class AttendanceService {
           .select('service_id,service_date')
           .eq('user_id', user.id)
           .eq('present', true)
-          .gte('service_date', _jamaicaDateKey(DateTime.now()));
+          .gte('service_date', _churchDateKey(DateTime.now()));
       final plans = AttendanceReminderPlan.upcoming(
         now: DateTime.now(),
         userId: user.id,
         schedules: rows.map(ServiceSchedule.fromMap),
+        timeZone: _churchTimeZone,
         confirmedOccurrences: confirmed
             .map((row) => '${row['service_id']}|${row['service_date']}')
             .toSet(),
@@ -444,7 +449,7 @@ class AttendanceService {
   Future<void> _scheduleDwellCompletion(String userId, String serviceId,
       String? serviceDateKey, DateTime entryTime, int dwellMinutes) async {
     final key =
-        '$userIdPrefix$userId|$serviceId|${serviceDateKey ?? _jamaicaDateKey(entryTime)}';
+        '$userIdPrefix$userId|$serviceId|${serviceDateKey ?? _churchDateKey(entryTime)}';
     final due = entryTime.add(Duration(minutes: dwellMinutes, seconds: 5));
     if (!due.isAfter(DateTime.now())) return;
     try {
@@ -767,20 +772,19 @@ class AttendanceService {
       final accuracyBuffer = position.accuracy.clamp(25, 150).toDouble();
       final clearlyOutside =
           distanceInMeters > churchLocation.radiusMeters + accuracyBuffer;
-      final activeService = await getActiveService(placeId);
-      final serviceId = activeService?['id']?.toString() ?? _currentServiceId;
-      final dwellExpired = serviceId == null
-          ? true
-          : await _recordOutsideObservation(
-              user.id,
-              placeId,
-              serviceId,
-              clearlyOutside: clearlyOutside,
-            );
+      final services = await getActiveServicesAt(placeId, DateTime.now());
+      var dwellExpired = true;
+      for (final service in services) {
+        if (service['confirmed'] == true) continue;
+        final expired = await _recordOutsideObservation(
+            user.id, service['churchId'] as String, service['id'] as String,
+            clearlyOutside: clearlyOutside,
+            serviceDateKey: service['serviceDate'] as String);
+        dwellExpired = dwellExpired && expired;
+      }
 
       if (dwellExpired) {
         _stopIosDwellMonitoring();
-        _currentServiceId = null;
         _updateDebugStatus(
           'Outside Geofence (${distanceInMeters.toStringAsFixed(1)}m)',
         );
@@ -1093,13 +1097,13 @@ class AttendanceService {
           .inFilter('churchId', aliases)
           .eq('attendanceEnabled', true);
       final now = DateTime.now().toUtc();
-      final jamaicaToday = _jamaicaWallClock(now);
+      final churchToday = _churchWallClock(now);
       final refreshAt = <int>{};
       for (var daysAhead = 0; daysAhead <= 7; daysAhead++) {
-        final candidate = DateTime(
-          jamaicaToday.year,
-          jamaicaToday.month,
-          jamaicaToday.day,
+        final candidate = DateTime.utc(
+          churchToday.year,
+          churchToday.month,
+          churchToday.day,
         ).add(Duration(days: daysAhead));
         for (final row in rows) {
           final weekday = int.tryParse(row['dayOfWeek']?.toString() ?? '');
@@ -1110,14 +1114,8 @@ class AttendanceService {
                 row['checkInOpensMinutesBefore']?.toString() ?? '',
               ) ??
               30;
-          final scheduledStart = DateTime.utc(
-            candidate.year,
-            candidate.month,
-            candidate.day,
-            5 + startParts[0],
-            startParts[1],
-            startParts[2],
-          );
+          final scheduledStart = _churchTime.at(
+              candidate, startParts[0], startParts[1], startParts[2]);
           final opensAt = scheduledStart.subtract(
             Duration(minutes: opensBefore.clamp(0, 240)),
           );
@@ -1204,23 +1202,31 @@ class AttendanceService {
     }
 
     final observedAt = DateTime.now();
-    final activeService = await getActiveServiceAt(churchId, observedAt);
-    final completionService =
-        activeService == null && params.event == GeofenceEvent.dwell
-            ? await _getCompletableDwellService(user.id, churchId, observedAt)
-            : null;
-    final attendanceService = activeService ?? completionService;
-    final serviceId = attendanceService?['id']?.toString();
+    final services = await getActiveServicesAt(churchId, observedAt);
+    for (final service in services) {
+      if (service['confirmed'] == true) continue;
+      await _handleAndroidServiceEvent(
+          params, user.id, churchId, observedAt, service);
+    }
+  }
+
+  Future<void> _handleAndroidServiceEvent(
+      GeofenceCallbackParams params,
+      String userId,
+      String churchId,
+      DateTime observedAt,
+      Map<String, dynamic> attendanceService) async {
+    final serviceId = attendanceService['id']?.toString();
     final attendanceChurchId =
-        attendanceService?['churchId']?.toString() ?? churchId;
-    final serviceDateKey = attendanceService?['serviceDate']?.toString();
+        attendanceService['churchId']?.toString() ?? churchId;
+    final serviceDateKey = attendanceService['serviceDate']?.toString();
 
     if (params.event == GeofenceEvent.exit) {
       if (serviceId != null && serviceId.isNotEmpty) {
         // One Android EXIT can be a noisy boundary reading. Record it as the
         // start of outside evidence instead of erasing a verified countdown.
         await _recordOutsideObservation(
-          user.id,
+          userId,
           attendanceChurchId,
           serviceId,
           clearlyOutside: true,
@@ -1232,7 +1238,7 @@ class AttendanceService {
       return;
     }
 
-    if (attendanceService == null || serviceId == null || serviceId.isEmpty) {
+    if (serviceId == null || serviceId.isEmpty) {
       _updateDebugStatus(
         'Church geofence detected, but no attendance-enabled service is open.',
       );
@@ -1241,22 +1247,22 @@ class AttendanceService {
 
     if (params.event == GeofenceEvent.enter) {
       await _readOrStartDwellEntry(
-        user.id,
+        userId,
         serviceId,
         observedAt: observedAt,
         serviceDateKey: serviceDateKey,
       );
       await _ensurePresenceClaim(
-        userId: user.id,
+        userId: userId,
         churchId: attendanceChurchId,
         serviceId: serviceId,
         observedAt: observedAt,
         serviceDateKey: serviceDateKey,
       );
-      final session = await _readDwellSession(user.id, serviceId,
+      final session = await _readDwellSession(userId, serviceId,
           observedAt: observedAt, serviceDateKey: serviceDateKey);
       await _scheduleDwellCompletion(
-          user.id,
+          userId,
           serviceId,
           serviceDateKey,
           session?.startedAt ?? observedAt,
@@ -1301,7 +1307,7 @@ class AttendanceService {
     // Recover the durable entry when possible; otherwise use the earliest
     // defensible arrival implied by Android's dwell duration.
     final restoredSession = await _readDwellSession(
-      user.id,
+      userId,
       serviceId,
       observedAt: observedAt,
       serviceDateKey: serviceDateKey,
@@ -1310,13 +1316,13 @@ class AttendanceService {
         restoredSession?.startedAt ??
         observedAt.subtract(Duration(minutes: requiredDwellMinutes));
     await _readOrStartDwellEntry(
-      user.id,
+      userId,
       serviceId,
       observedAt: entryTime,
       serviceDateKey: serviceDateKey,
     );
     await _ensurePresenceClaim(
-      userId: user.id,
+      userId: userId,
       churchId: attendanceChurchId,
       serviceId: serviceId,
       // When Android delivers DWELL after the app process was killed, the OS
@@ -1328,7 +1334,7 @@ class AttendanceService {
     );
     await _initializeNotifications();
     await _markPresent(
-      user.id,
+      userId,
       attendanceChurchId,
       serviceId,
       attendanceService['startTime']?.toString(),
@@ -1420,13 +1426,14 @@ class AttendanceService {
     required double radiusMeters,
     String? address,
   }) async {
+    await _churchAliases(churchId);
     await _supabase.from('church_locations').upsert({
       'placeId': churchId,
       'churchId': churchId,
       'latitude': latitude,
       'longitude': longitude,
       'radiusMeters': radiusMeters,
-      'timezone': 'America/Jamaica',
+      'timezone': _churchTimeZone,
       if (address != null && address.trim().isNotEmpty)
         'address': address.trim(),
       'updatedAt': DateTime.now().toIso8601String(),
@@ -1447,10 +1454,14 @@ class AttendanceService {
     final aliases = <String>{churchId};
     final rows = await _supabase
         .from('churches')
-        .select('id, placeId')
+        .select('id, placeId, timezone')
         .or('id.eq.$churchId,placeId.eq.$churchId')
         .limit(1);
     if (rows.isNotEmpty) {
+      _churchTimeZone = rows.first['timezone']?.toString() ?? 'UTC';
+      // Fail visibly for invalid configured zones instead of silently grading
+      // attendance using a different country's clock.
+      _churchTime;
       final id = rows.first['id']?.toString().trim();
       final placeId = rows.first['placeId']?.toString().trim();
       if (id != null && id.isNotEmpty) aliases.add(id);
@@ -1459,44 +1470,48 @@ class AttendanceService {
     return aliases.toList(growable: false);
   }
 
+  Future<List<Map<String, dynamic>>> getActiveServicesAt(
+    String churchId,
+    DateTime observedAt,
+  ) async {
+    final result =
+        await _supabase.rpc('get_my_active_attendance_services', params: {
+      'p_church_id': churchId,
+      'p_observed_at': observedAt.toUtc().toIso8601String(),
+    });
+    final envelope = Map<String, dynamic>.from(result as Map);
+    _churchTimeZone = envelope['timezone']?.toString() ?? 'UTC';
+    return (envelope['services'] as List? ?? []).map((value) {
+      final row = Map<String, dynamic>.from(value as Map);
+      for (final key in [
+        'serviceDateAnchor',
+        'checkInOpens',
+        'checkInCloses',
+        'arrivalTime'
+      ]) {
+        if (row[key] != null) row[key] = DateTime.parse(row[key] as String);
+      }
+      return row;
+    }).toList();
+  }
+
   Future<Map<String, dynamic>?> getActiveServiceAt(
     String churchId,
     DateTime observedAt,
   ) async {
-    final jamaicaNow = _jamaicaWallClock(observedAt);
-    final previousWeekday = jamaicaNow.weekday == DateTime.monday
-        ? DateTime.sunday
-        : jamaicaNow.weekday - 1;
-    final churchAliases = await _churchAliases(churchId);
-    final servicesSnapshot = await _supabase
-        .from('service_schedules')
-        .select()
-        .inFilter('churchId', churchAliases)
-        .inFilter('dayOfWeek', [
-      jamaicaNow.weekday,
-      previousWeekday,
-      jamaicaNow.weekday % 7 + 1
-    ]).eq('attendanceEnabled', true);
-
-    for (var doc in servicesSnapshot) {
-      final schedule = ServiceSchedule.fromMap(doc);
-      final window = _serviceWindowForObservation(observedAt, schedule);
-      if (window != null && window.contains(observedAt)) {
-        final safeDwellMinutes =
-            schedule.minimumDwellMinutes.clamp(1, 60).toInt();
-        return {
-          'id': schedule.serviceId,
-          'churchId': schedule.churchId,
-          'startTime': schedule.startTime,
-          'name': schedule.name.isNotEmpty ? schedule.name : 'Church Service',
-          'minimumDwellMinutes': safeDwellMinutes,
-          'serviceDate': window.serviceDateKey,
-          'serviceDateAnchor': window.scheduledStart,
-          'checkInCloses': window.checkInCloses,
-        };
+    final services = await getActiveServicesAt(churchId, observedAt);
+    final userId = _supabase.auth.currentUser?.id;
+    for (final service in services) {
+      if (service['confirmed'] == true) continue;
+      if (userId != null &&
+          await _hasQueuedAttendanceForToday(
+              userId, service['churchId'] as String, service['id'] as String,
+              forTimestamp: service['serviceDateAnchor'] as DateTime)) {
+        continue;
       }
+      return service;
     }
-    return null;
+    return services.isEmpty ? null : services.first;
   }
 
   /// Finds a service whose normal check-in window has just closed but whose
@@ -1508,19 +1523,19 @@ class AttendanceService {
     String churchId,
     DateTime observedAt,
   ) async {
-    final jamaicaNow = _jamaicaWallClock(observedAt);
-    final previousWeekday = jamaicaNow.weekday == DateTime.monday
-        ? DateTime.sunday
-        : jamaicaNow.weekday - 1;
     final churchAliases = await _churchAliases(churchId);
+    final churchNow = _churchWallClock(observedAt);
+    final previousWeekday = churchNow.weekday == DateTime.monday
+        ? DateTime.sunday
+        : churchNow.weekday - 1;
     final schedulesSnapshot = await _supabase
         .from('service_schedules')
         .select()
         .inFilter('churchId', churchAliases)
         .inFilter('dayOfWeek', [
-      jamaicaNow.weekday,
+      churchNow.weekday,
       previousWeekday,
-      jamaicaNow.weekday % 7 + 1
+      churchNow.weekday % 7 + 1
     ]).eq('attendanceEnabled', true);
 
     for (final row in schedulesSnapshot) {
@@ -1565,18 +1580,31 @@ class AttendanceService {
   }
 
   Future<void> _handleInsideGeofence(String userId, String churchId) async {
-    // 3. Check Schedule
     final observedAt = DateTime.now();
-    final liveService = await getActiveServiceAt(churchId, observedAt);
-    final activeService = liveService ??
-        await _getCompletableDwellService(userId, churchId, observedAt);
-
-    if (activeService == null) {
+    final services = await getActiveServicesAt(churchId, observedAt);
+    final pending =
+        services.where((service) => service['confirmed'] != true).toList();
+    if (pending.isEmpty) {
       _stopIosDwellMonitoring();
-      _updateDebugStatus('Inside, but no active service.');
+      _updateDebugStatus(services.isEmpty
+          ? 'Inside, but no active service.'
+          : 'Attendance is confirmed for all current services.');
       return;
     }
+    // Each overlapping service owns its own durable presence and dwell. One
+    // completed service must never prevent observation of the next service.
+    for (final service in pending) {
+      if (await _hasQueuedAttendanceForToday(
+          userId, service['churchId'] as String, service['id'] as String,
+          forTimestamp: service['serviceDateAnchor'] as DateTime)) {
+        continue;
+      }
+      await _observeInsideService(userId, churchId, observedAt, service);
+    }
+  }
 
+  Future<void> _observeInsideService(String userId, String churchId,
+      DateTime observedAt, Map<String, dynamic> activeService) async {
     final activeServiceId = activeService['id']!;
     final attendanceChurchId =
         activeService['churchId']?.toString() ?? churchId;
@@ -1592,7 +1620,7 @@ class AttendanceService {
     final entryTime = await _readOrStartDwellEntry(
       userId,
       activeServiceId,
-      observedAt: observedAt,
+      observedAt: activeService['arrivalTime'] as DateTime? ?? observedAt,
       serviceDateKey: serviceDateKey,
     );
     await _ensurePresenceClaim(
@@ -1605,7 +1633,6 @@ class AttendanceService {
     await _scheduleDwellCompletion(userId, activeServiceId, serviceDateKey,
         entryTime, requiredDwellMinutes);
     await _startIosDwellMonitoring();
-    _currentServiceId = activeServiceId;
     final dwellDuration = observedAt.difference(entryTime);
     final requiredDwellSeconds = requiredDwellMinutes * 60;
     _updateDebugStatus(
@@ -1636,7 +1663,7 @@ class AttendanceService {
     DateTime observedAt,
     ServiceSchedule schedule,
   ) {
-    final jamaicaNow = _jamaicaWallClock(observedAt);
+    final churchNow = _churchWallClock(observedAt);
     final startParts = _parseTimeParts(schedule.startTime);
     final endParts = _parseTimeParts(schedule.endTime);
     if (startParts == null || endParts == null) {
@@ -1645,39 +1672,26 @@ class AttendanceService {
     }
 
     final weekdayDelta =
-        (jamaicaNow.weekday - schedule.dayOfWeek + DateTime.daysPerWeek) %
+        (churchNow.weekday - schedule.dayOfWeek + DateTime.daysPerWeek) %
             DateTime.daysPerWeek;
     // Callers query today's and yesterday's schedules. Anything older is a
     // different weekly occurrence and must never reuse its dwell state.
     if (weekdayDelta > 1 && weekdayDelta != 6) return null;
-    final candidateDate = DateTime(
-      jamaicaNow.year,
-      jamaicaNow.month,
-      jamaicaNow.day,
+    final candidateDate = DateTime.utc(
+      churchNow.year,
+      churchNow.month,
+      churchNow.day,
     ).subtract(Duration(days: weekdayDelta == 6 ? -1 : weekdayDelta));
-    final jamaicaDayStartUtc = DateTime.utc(
-      candidateDate.year,
-      candidateDate.month,
-      candidateDate.day,
-      5,
-    );
-    final scheduledStart = jamaicaDayStartUtc.add(
-      Duration(
-        hours: startParts[0],
-        minutes: startParts[1],
-        seconds: startParts[2],
-      ),
-    );
-    var scheduledEnd = jamaicaDayStartUtc.add(
-      Duration(
-        hours: endParts[0],
-        minutes: endParts[1],
-        seconds: endParts[2],
-      ),
-    );
-    if (!scheduledEnd.isAfter(scheduledStart)) {
-      scheduledEnd = scheduledEnd.add(const Duration(days: 1));
+    final scheduledStart = _churchTime.at(
+        candidateDate, startParts[0], startParts[1], startParts[2]);
+    var endDate = candidateDate;
+    if (endParts[0] * 3600 + endParts[1] * 60 + endParts[2] <=
+        startParts[0] * 3600 + startParts[1] * 60 + startParts[2]) {
+      endDate = DateTime.utc(
+          candidateDate.year, candidateDate.month, candidateDate.day + 1);
     }
+    final scheduledEnd =
+        _churchTime.at(endDate, endParts[0], endParts[1], endParts[2]);
 
     final checkInOpens = scheduledStart.subtract(
       Duration(
@@ -1691,7 +1705,7 @@ class AttendanceService {
     );
 
     return _AttendanceServiceWindow(
-      serviceDateKey: _jamaicaDateKey(scheduledStart),
+      serviceDateKey: _churchDateKey(scheduledStart),
       scheduledStart: scheduledStart,
       scheduledEnd: scheduledEnd,
       checkInOpens: checkInOpens,
@@ -1699,31 +1713,12 @@ class AttendanceService {
     );
   }
 
-  DateTime _jamaicaWallClock(DateTime instant) {
-    final jamaica = instant.toUtc().subtract(const Duration(hours: 5));
-    return DateTime(
-      jamaica.year,
-      jamaica.month,
-      jamaica.day,
-      jamaica.hour,
-      jamaica.minute,
-      jamaica.second,
-      jamaica.millisecond,
-      jamaica.microsecond,
-    );
-  }
+  DateTime _churchWallClock(DateTime instant) => _churchTime.local(instant);
 
-  DateTime _jamaicaDayStartUtc(DateTime instant) {
-    final jamaica = _jamaicaWallClock(instant);
-    return DateTime.utc(jamaica.year, jamaica.month, jamaica.day, 5);
-  }
+  DateTime _churchDayStartUtc(DateTime instant) =>
+      _churchTime.startOfDay(instant);
 
-  String _jamaicaDateKey(DateTime instant) {
-    final jamaica = _jamaicaWallClock(instant);
-    return '${jamaica.year.toString().padLeft(4, '0')}-'
-        '${jamaica.month.toString().padLeft(2, '0')}-'
-        '${jamaica.day.toString().padLeft(2, '0')}';
-  }
+  String _churchDateKey(DateTime instant) => _churchTime.dateKey(instant);
 
   List<int>? _parseTimeParts(String value) {
     final match = RegExp(
@@ -1754,6 +1749,7 @@ class AttendanceService {
     DateTime? checkedInAt,
     String? serviceDateKey,
   }) async {
+    await _churchAliases(churchId);
     final effectiveCheckedInAt = checkedInAt ?? DateTime.now();
     // A failed duplicate-check must not prevent the offline queue from saving
     // attendance when the dwell countdown completes.
@@ -1764,7 +1760,7 @@ class AttendanceService {
       continueWhenOffline: true,
       forTimestamp: serviceDateKey == null
           ? effectiveCheckedInAt
-          : DateTime.tryParse('${serviceDateKey}T12:00:00-05:00'),
+          : _churchTime.at(DateTime.parse(serviceDateKey), 12),
     )) {
       _stopIosDwellMonitoring();
       _updateDebugStatus('Already marked present for today.');
@@ -1779,7 +1775,7 @@ class AttendanceService {
     int? minutesLate;
 
     if (serviceStartTime != null) {
-      final now = _jamaicaWallClock(effectiveCheckedInAt);
+      final now = _churchWallClock(effectiveCheckedInAt);
       final startParts = _parseTimeParts(serviceStartTime);
       if (startParts != null) {
         final logicalServiceDate = serviceDateKey == null
@@ -1829,7 +1825,7 @@ class AttendanceService {
       await _clearDwellEntry(userId, serviceId,
           observedAt: effectiveCheckedInAt, serviceDateKey: serviceDateKey);
       await _cancelBackgroundCheck(
-          '$userIdPrefix$userId|$serviceId|${serviceDateKey ?? _jamaicaDateKey(effectiveCheckedInAt)}');
+          '$userIdPrefix$userId|$serviceId|${serviceDateKey ?? _churchDateKey(effectiveCheckedInAt)}');
       await _showPostServiceNotification(status);
     } catch (error) {
       debugPrint('Attendance confirmed; local follow-up will retry: $error');
@@ -2483,7 +2479,7 @@ class AttendanceService {
     }
 
     final serviceDateKey =
-        record['service_date']?.toString() ?? _jamaicaDateKey(timestamp);
+        record['service_date']?.toString() ?? _churchDateKey(timestamp);
     final rows = await _supabase
         .from('attendance')
         .select('id, present')
@@ -2499,8 +2495,8 @@ class AttendanceService {
     final timestamp = DateTime.tryParse(record['timestamp']?.toString() ?? '');
     final dateKey = record['service_date']?.toString() ??
         (timestamp == null
-            ? _jamaicaDateKey(DateTime.now())
-            : _jamaicaDateKey(timestamp));
+            ? _churchDateKey(DateTime.now())
+            : _churchDateKey(timestamp));
     return [
       record['church_id'] ?? '',
       record['user_id'] ?? '',
@@ -2611,8 +2607,8 @@ class AttendanceService {
       return true;
     }
 
-    final todayStart = _jamaicaDayStartUtc(attendanceAt);
-    final serviceDateKey = _jamaicaDateKey(todayStart);
+    final todayStart = _churchDayStartUtc(attendanceAt);
+    final serviceDateKey = _churchDateKey(todayStart);
 
     try {
       final existingQuery = await _supabase
@@ -2642,7 +2638,7 @@ class AttendanceService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.reload();
     final queue = prefs.getStringList(_pendingAttendanceQueueKey) ?? const [];
-    final todayKey = _jamaicaDateKey(forTimestamp ?? DateTime.now());
+    final todayKey = _churchDateKey(forTimestamp ?? DateTime.now());
     for (final encoded in queue) {
       try {
         final decoded = jsonDecode(encoded);
@@ -2655,7 +2651,7 @@ class AttendanceService {
             decoded['present'] == true &&
             timestamp != null &&
             (decoded['service_date']?.toString() ??
-                    _jamaicaDateKey(timestamp)) ==
+                    _churchDateKey(timestamp)) ==
                 todayKey) {
           return true;
         }
@@ -2714,8 +2710,7 @@ class AttendanceService {
         .observedInsideAt(observedAt);
 
     await prefs.setString(key, session.encode());
-    _currentServiceId = serviceId;
-    _currentServiceDateKey = serviceDateKey ?? _jamaicaDateKey(observedAt);
+    _currentServiceDateKey = serviceDateKey ?? _churchDateKey(observedAt);
     return session.startedAt;
   }
 
@@ -2748,7 +2743,7 @@ class AttendanceService {
     String? serviceDateKey,
   }) async {
     final claimKey = '$userId|$churchId|$serviceId|'
-        '${serviceDateKey ?? _jamaicaDateKey(observedAt)}';
+        '${serviceDateKey ?? _churchDateKey(observedAt)}';
     if (_syncedPresenceClaims.contains(claimKey)) return;
     final previousObservation = _lastPresenceObservation[claimKey];
     if (previousObservation != null &&
@@ -2903,7 +2898,7 @@ class AttendanceService {
     if (serviceDateKey != null && serviceDateKey.isNotEmpty) {
       return 'attendance_dwell_${userId}_${serviceId}_$serviceDateKey';
     }
-    final now = _jamaicaWallClock(observedAt ?? DateTime.now());
+    final now = _churchWallClock(observedAt ?? DateTime.now());
     final dateKey = '${now.year}-${now.month}-${now.day}';
     return 'attendance_dwell_${userId}_${serviceId}_$dateKey';
   }
@@ -3115,7 +3110,6 @@ class AttendanceService {
     _monitoringRestartTimer = null;
     _isPollingLocation = false;
     _isProcessingLocation = false;
-    _currentServiceId = null;
     _currentServiceDateKey = null;
     if (resetRestartAttempts) {
       _monitoringRestartAttempts = 0;

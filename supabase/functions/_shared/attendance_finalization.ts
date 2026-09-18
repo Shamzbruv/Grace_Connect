@@ -1,8 +1,11 @@
+import { churchWallTimeToUtc } from "./church_clock.ts";
+
 export type AttendanceFinalizationSchedule = {
   startTime?: string;
   endTime?: string;
   checkInClosesMinutesAfter?: number;
   minimumDwellMinutes?: number;
+  timezone?: string;
 };
 
 export const ATTENDANCE_DELIVERY_BUFFER_MINUTES = 15;
@@ -44,16 +47,17 @@ export function serviceClosedAtUtc(
   const endSeconds = parseAttendanceTimeToSeconds(schedule.endTime);
   if (startSeconds == null || endSeconds == null) return null;
   const overnightSeconds = endSeconds <= startSeconds ? 24 * 60 * 60 : 0;
-  const closeSeconds = endSeconds + overnightSeconds + boundedInteger(
+  const closeSeconds = boundedInteger(
         schedule.checkInClosesMinutesAfter,
         30,
         0,
         240,
       ) * 60;
-  const closedAt = new Date(`${isoDate}T05:00:00.000Z`);
-  if (Number.isNaN(closedAt.getTime())) return null;
-  closedAt.setUTCSeconds(closedAt.getUTCSeconds() + closeSeconds);
-  return closedAt;
+  try {
+    const end = churchWallTimeToUtc(isoDate, endSeconds + overnightSeconds,
+      schedule.timezone ?? "America/Jamaica");
+    return new Date(end.getTime() + closeSeconds * 1000);
+  } catch { return null; }
 }
 
 // The closeout job must leave enough time for someone who entered one moment

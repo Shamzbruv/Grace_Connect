@@ -48,8 +48,8 @@ begin
   insert into auth.users (id, email, aud, role)
   values (fixture_user, fixture_user::text || '@attendance-audit.invalid',
     'authenticated', 'authenticated');
-  insert into public.churches (id, name, church_status)
-  values (fixture_church, 'Rollback attendance audit', 'approved');
+  insert into public.churches (id, name, church_status, timezone)
+  values (fixture_church, 'Rollback attendance audit', 'approved', 'America/Jamaica');
   insert into public.church_memberships (
     user_id, church_id, membership_status, reviewed_at
   ) values (fixture_user, fixture_church, 'active', now() - interval '7 days');

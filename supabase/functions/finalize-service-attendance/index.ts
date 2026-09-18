@@ -1,3 +1,4 @@
+import { churchDateInfo } from "../_shared/church_clock.ts";
 import {
   handleOptions,
   jsonResponse,
@@ -33,6 +34,7 @@ type MemberRow = {
 type ChurchAliasRow = {
   id?: string;
   placeId?: string;
+  timezone?: string;
 };
 
 const leaderRoles = new Set([
@@ -70,42 +72,6 @@ function normalizeRole(value: string): string {
     .replace(/^_|_$/g, "");
 }
 
-function jamaicaDateInfo(daysBack = 0) {
-  const base = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000);
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Jamaica",
-    weekday: "short",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(base);
-  const value = (type: string) =>
-    parts.find((part) => part.type === type)?.value ?? "";
-  const weekdayMap: Record<string, number> = {
-    Mon: 1,
-    Tue: 2,
-    Wed: 3,
-    Thu: 4,
-    Fri: 5,
-    Sat: 6,
-    Sun: 7,
-  };
-  const isoDate = `${value("year")}-${value("month")}-${value("day")}`;
-  const startUtc = new Date(`${isoDate}T05:00:00.000Z`);
-  const endUtc = new Date(startUtc);
-  endUtc.setUTCDate(endUtc.getUTCDate() + 1);
-  return {
-    isoDate,
-    dayOfWeek: weekdayMap[value("weekday")] ?? 7,
-    startUtc,
-    endUtc,
-    daysBack,
-  };
-}
-
 function memberUserId(member: MemberRow): string {
   return String(member.attendanceUserId ?? "").trim();
 }
@@ -129,12 +95,12 @@ const uuidPattern =
 function aliasesForChurch(
   churchId: string,
   churches: ChurchAliasRow[],
-): { aliases: string[]; identity: string } {
+): { aliases: string[]; identity: string; timezone: string } {
   const match = churches.find((church) =>
     String(church.id ?? "").trim() === churchId ||
     String(church.placeId ?? "").trim() === churchId
   );
-  if (!match) return { aliases: [churchId], identity: churchId };
+  if (!match) return { aliases: [churchId], identity: churchId, timezone: "UTC" };
   const aliases = Array.from(
     new Set([
       churchId,
@@ -144,6 +110,7 @@ function aliasesForChurch(
   );
   return {
     aliases,
+    timezone: String(match.timezone || "UTC"),
     identity: String(match.id ?? "").trim() || churchId,
   };
 }
@@ -200,7 +167,7 @@ Deno.serve(async (request) => {
 
   const { data: churchAliasData } = await client
     .from("churches")
-    .select("id, placeId");
+    .select("id, placeId, timezone");
   const churchAliasRows = (churchAliasData ?? []) as ChurchAliasRow[];
 
   let churchIds: string[] = [];
@@ -229,10 +196,6 @@ Deno.serve(async (request) => {
 
   // Catch up after outages or a missing cron run instead of permanently
   // skipping members who did not sign in on older service days.
-  const targetDates = Array.from(
-    { length: 15 },
-    (_, daysBack) => jamaicaDateInfo(daysBack),
-  );
   let servicesChecked = 0;
   let servicesFinalized = 0;
   let absencesCreated = 0;
@@ -244,6 +207,8 @@ Deno.serve(async (request) => {
     const church = aliasesForChurch(churchId, churchAliasRows);
     if (processedChurches.has(church.identity)) continue;
     processedChurches.add(church.identity);
+    const targetDates = Array.from({ length: 15 },
+      (_, daysBack) => churchDateInfo(church.timezone, daysBack));
 
     const { data: membershipRows } = await client
       .from("church_memberships")
@@ -307,7 +272,7 @@ Deno.serve(async (request) => {
           churchId;
         if (
           !serviceId ||
-          !attendanceServiceIsPastDue(info.isoDate, schedule)
+          !attendanceServiceIsPastDue(info.isoDate, {...schedule, timezone: church.timezone})
         ) continue;
 
         const { data: finalized, error: finalizedError } = await client
