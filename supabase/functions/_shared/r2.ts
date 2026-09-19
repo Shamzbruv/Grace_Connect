@@ -76,7 +76,7 @@ function encodeKey(key: string): string {
 
 export type PresignOptions = {
   config: R2Config;
-  method: "GET" | "PUT" | "HEAD";
+  method: "GET" | "PUT" | "HEAD" | "DELETE";
   key: string;
   expiresInSeconds: number;
   /// Signed for uploads so a presigned PUT cannot be reused to store a
