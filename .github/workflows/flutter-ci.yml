@@ -71,3 +71,21 @@ jobs:
       - name: Test Android attendance scheduler
         working-directory: android
         run: gradle :grace_attendance_background:testDebugUnitTest --no-daemon
+
+  edge-function-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      # These tests existed but nothing ran them, so they could drift out of
+      # sync with the functions silently. That includes the R2 presigning
+      # logic, where a wrong signature means every upload and every playback
+      # URL is rejected.
+      - name: Run Edge Function tests
+        run: deno test supabase/functions/_shared/
