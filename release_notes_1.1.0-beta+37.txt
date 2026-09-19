@@ -1,0 +1,11 @@
+Grace Connect 1.1.0-beta+37
+
+NEW: Reel Grace
+- Short vertical videos inside the Feed tab. Tap Feed again (or long-press it) to switch between the Community Feed and Reel Grace; the Community Feed keeps its place while you are in reels.
+- Record or choose a clip up to 60 seconds, add a caption and category, and choose who can see it: your church, your followers, or everyone. The default is your church (or your followers if you have not joined one) -- reaching everyone is always a deliberate choice.
+- Like, comment and reply, save, share, open a creator's profile, or use Not interested, Report and Block.
+- Videos are stored privately. Playback links are issued per viewer, expire after 30 minutes, and are re-checked against who is allowed to watch, so a followers-only or church-only reel cannot be passed around as a link.
+
+FIXED
+- Report and Block did nothing at all for anyone who had not joined a church. Both were rejected silently. They now work everywhere, including on reels from people outside your church.
+
