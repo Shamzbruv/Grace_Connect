@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -6,11 +7,11 @@ import '../../access/app_access_context.dart';
 import '../../access/app_feature.dart';
 import '../../models/user_profile.dart';
 import '../../providers/user_role_provider.dart';
-import '../../services/feed_scroll_service.dart';
 import '../../widgets/app_bottom_menu.dart';
 import '../../widgets/main_tab_scope.dart';
 import '../bible/bible_home_screen.dart';
-import '../community/community_feed_screen.dart';
+import '../../models/reel.dart';
+import '../community/feed_hub_screen.dart';
 import '../dashboard/dashboard_screen.dart';
 import '../dashboard/variants/unconnected_dashboard.dart';
 import '../events/events_screen.dart';
@@ -46,6 +47,7 @@ class _MainTabsScreenState extends State<MainTabsScreen> {
 
   late final PageController _pageController;
   late int _currentIndex;
+  final FeedHubController _feedHub = FeedHubController();
 
   @override
   void initState() {
@@ -56,6 +58,7 @@ class _MainTabsScreenState extends State<MainTabsScreen> {
 
   @override
   void dispose() {
+    _feedHub.dispose();
     _pageController.dispose();
     super.dispose();
   }
@@ -69,10 +72,23 @@ class _MainTabsScreenState extends State<MainTabsScreen> {
     }
 
     if (index == _currentIndex) {
-      if (index == 0) FeedScrollService.requestScrollToTop();
+      // Re-tapping Feed toggles Community Feed <-> Reel Grace. Scroll-to-top
+      // still applies while the Community Feed is the one showing.
+      if (index == 0) {
+        if (_feedHub.value == PrimaryFeedMode.community) {
+          _feedHub.toggle();
+        } else {
+          _feedHub.showCommunity();
+        }
+        HapticFeedback.selectionClick();
+        return;
+      }
       return;
     }
 
+    // Leaving the Feed tab returns it to the Community Feed, so coming back
+    // from another tab never lands unexpectedly inside Reel Grace.
+    if (_currentIndex == 0 && index != 0) _feedHub.showCommunity();
     setState(() => _currentIndex = index);
     _pageController.animateToPage(
       index,
@@ -128,8 +144,8 @@ class _MainTabsScreenState extends State<MainTabsScreen> {
               setState(() => _currentIndex = index);
             },
             children: [
-              CommunityFeedScreen(
-                showBottomMenu: false,
+              FeedHubScreen(
+                controller: _feedHub,
                 showFindChurchAction: widget.showFindChurchAction,
               ),
               const EventsScreen(showBottomMenu: false),
@@ -149,6 +165,12 @@ class _MainTabsScreenState extends State<MainTabsScreen> {
         bottomNavigationBar: AppBottomMenu(
           selectedIndex: _currentIndex,
           onDestinationSelected: _setTab,
+          onDestinationLongPressed: (index) {
+            if (index != 0) return;
+            if (_currentIndex != 0) _setTab(0);
+            _feedHub.toggle();
+            HapticFeedback.selectionClick();
+          },
           access: access,
         ),
       ),

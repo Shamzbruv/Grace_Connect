@@ -14,6 +14,7 @@ class AppBottomMenu extends StatelessWidget {
     super.key,
     this.selectedIndex,
     this.onDestinationSelected,
+    this.onDestinationLongPressed,
     this.subscriptionLimited = false,
     this.limitedAllowedIndexes = const {0},
     this.limitedAllowedRoutes = const {'/community', '/subscription'},
@@ -23,6 +24,11 @@ class AppBottomMenu extends StatelessWidget {
 
   final int? selectedIndex;
   final ValueChanged<int>? onDestinationSelected;
+
+  /// Long-pressing a destination. Used by the Feed tab to toggle between the
+  /// Community Feed and Reel Grace without a trip through the tab bar's
+  /// normal selection path.
+  final ValueChanged<int>? onDestinationLongPressed;
   final bool subscriptionLimited;
   final Set<int> limitedAllowedIndexes;
   final Set<String> limitedAllowedRoutes;
@@ -241,19 +247,37 @@ class AppBottomMenu extends StatelessWidget {
       destinations: [
         for (var index = 0; index < _primaryItems.length; index++)
           NavigationDestination(
-            icon: _menuIcon(
-              context,
-              _primaryItems[index].icon,
-              disabled: _isPrimaryDisabled(index, effectiveAccess),
+            icon: _longPressable(
+              index,
+              _menuIcon(
+                context,
+                _primaryItems[index].icon,
+                disabled: _isPrimaryDisabled(index, effectiveAccess),
+              ),
             ),
-            selectedIcon: _menuIcon(
-              context,
-              _primaryItems[index].selectedIcon,
-              disabled: _isPrimaryDisabled(index, effectiveAccess),
+            selectedIcon: _longPressable(
+              index,
+              _menuIcon(
+                context,
+                _primaryItems[index].selectedIcon,
+                disabled: _isPrimaryDisabled(index, effectiveAccess),
+              ),
             ),
             label: _primaryItems[index].label,
           ),
       ],
+    );
+  }
+
+  /// NavigationBar exposes no long-press callback, so the icon carries it.
+  /// HitTestBehavior.translucent keeps the normal tap working underneath.
+  Widget _longPressable(int index, Widget child) {
+    final handler = onDestinationLongPressed;
+    if (handler == null) return child;
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onLongPress: () => handler(index),
+      child: child,
     );
   }
 
