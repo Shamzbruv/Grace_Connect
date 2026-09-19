@@ -115,3 +115,10 @@ verify_jwt = true
 
 [functions.sign-reel-playback]
 verify_jwt = true
+
+[functions.delete-reel]
+verify_jwt = true
+
+# Authenticated with the private cron secret inside the function.
+[functions.cleanup-reel-uploads]
+verify_jwt = false

@@ -64,7 +64,23 @@ Deno.serve(async (request) => {
   if (!session || String(session.user_id) !== user.id) {
     return jsonResponse({ error: "That upload was not found." }, 404);
   }
+  // Idempotent: a client that retries after a dropped response must not be
+  // told its own successful publish was a conflict. Re-publishing the same
+  // reel returns the same result instead of an error.
   if (session.status === "completed") {
+    const { data: existing } = await client
+      .from("reels")
+      .select("id,status")
+      .eq("id", validated.value.reelId)
+      .eq("author_id", user.id)
+      .maybeSingle();
+    if (existing && String(existing.status) === "ready") {
+      return jsonResponse({
+        reel_id: validated.value.reelId,
+        status: "ready",
+        already_published: true,
+      });
+    }
     return jsonResponse({ error: "That reel was already published." }, 409);
   }
   if (new Date(String(session.expires_at)).getTime() < Date.now()) {
