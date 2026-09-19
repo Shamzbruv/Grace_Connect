@@ -1,6 +1,13 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class ModerationService {
+  /// Scope for content that belongs to no single church -- Reel Grace in
+  /// particular. Church-scoped reporting silently rejected these: the RLS
+  /// policies require church_id = get_church_id(), which is never true for a
+  /// viewer with no church, so Report and Block did nothing at all on a
+  /// public feed. Global rows carry this sentinel instead.
+  static const String globalScopeId = 'grace_connect_global';
+
   final SupabaseClient _supabase = Supabase.instance.client;
 
   static const List<String> reportReasons = [
@@ -26,10 +33,13 @@ class ModerationService {
     Map<String, dynamic> metadata = const {},
   }) async {
     final uid = _supabase.auth.currentUser?.id ?? '';
-    if (uid.isEmpty || churchId.isEmpty || reason.trim().isEmpty) return;
+    if (uid.isEmpty || reason.trim().isEmpty) return;
+    // Fall back to the global scope rather than returning silently: a viewer
+    // with no church must still be able to report what they were shown.
+    final scope = churchId.trim().isEmpty ? globalScopeId : churchId.trim();
 
     await _supabase.from('content_reports').insert({
-      'church_id': churchId,
+      'church_id': scope,
       'reporter_id': uid,
       'reported_user_id': reportedUserId,
       'content_type': contentType,
@@ -47,11 +57,12 @@ class ModerationService {
     String? reason,
   }) async {
     final uid = _supabase.auth.currentUser?.id ?? '';
-    if (uid.isEmpty || churchId.isEmpty || blockedUserId.isEmpty) return;
+    if (uid.isEmpty || blockedUserId.isEmpty) return;
+    final scope = churchId.trim().isEmpty ? globalScopeId : churchId.trim();
 
     await _supabase.from('user_blocks').upsert(
       {
-        'church_id': churchId,
+        'church_id': scope,
         'blocker_id': uid,
         'blocked_user_id': blockedUserId,
         'reason': reason?.trim().isEmpty == true ? null : reason?.trim(),

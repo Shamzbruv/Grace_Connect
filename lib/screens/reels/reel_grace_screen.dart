@@ -7,8 +7,13 @@ import 'package:visibility_detector/visibility_detector.dart';
 import '../../models/reel.dart';
 import '../../services/media_playback_coordinator.dart';
 import '../../services/reel_analytics_service.dart';
+import '../../services/moderation_service.dart';
 import '../../services/reel_service.dart';
+import '../../widgets/reels/reel_action_rail.dart';
+import '../../widgets/reels/reel_comments_sheet.dart';
 import '../../widgets/reels/reel_grace_player.dart';
+import 'reel_create_screen.dart';
+import 'package:share_plus/share_plus.dart';
 
 /// Full-screen vertical reel feed.
 ///
@@ -195,6 +200,184 @@ class _ReelGraceScreenState extends State<ReelGraceScreen>
     fireOnce('75', 0.75);
   }
 
+  /// Optimistic: the heart moves now and rolls back only if the write is
+  /// refused. Waiting on the network to animate a like is the difference
+  /// between the feed feeling native and feeling remote.
+  Future<void> _toggleLike(Reel reel) async {
+    final index = _reels.indexWhere((r) => r.id == reel.id);
+    if (index < 0) return;
+    final liked = !reel.viewerLiked;
+    setState(() => _reels[index] = reel.copyWith(
+          viewerLiked: liked,
+          likeCount: (reel.likeCount + (liked ? 1 : -1)).clamp(0, 1 << 30),
+        ));
+    ReelAnalytics.like(reel, liked: liked);
+    final ok = await _service.toggleLike(reel.id, liked: liked);
+    if (!ok && mounted) {
+      setState(() => _reels[index] = reel);
+    }
+  }
+
+  Future<void> _toggleSave(Reel reel) async {
+    final index = _reels.indexWhere((r) => r.id == reel.id);
+    if (index < 0) return;
+    final saved = !reel.viewerSaved;
+    setState(() => _reels[index] = reel.copyWith(
+          viewerSaved: saved,
+          saveCount: (reel.saveCount + (saved ? 1 : -1)).clamp(0, 1 << 30),
+        ));
+    ReelAnalytics.save(reel, saved: saved);
+    final ok = await _service.toggleSave(reel.id, saved: saved);
+    if (!ok && mounted) setState(() => _reels[index] = reel);
+  }
+
+  Future<void> _share(Reel reel) async {
+    ReelAnalytics.share(reel);
+    final caption = reel.caption.trim();
+    await SharePlus.instance.share(ShareParams(
+      text: caption.isEmpty
+          ? 'Watch this on Grace Connect.'
+          : '$caption\n\nShared from Grace Connect.',
+      subject: 'A reel from ${reel.authorName}',
+    ));
+  }
+
+  void _removeFromFeed(String reelId) {
+    final index = _reels.indexWhere((r) => r.id == reelId);
+    if (index < 0) return;
+    setState(() {
+      _reels.removeAt(index);
+      _service.forget(reelId);
+      if (_index >= _reels.length) _index = (_reels.length - 1).clamp(0, 1 << 30);
+    });
+  }
+
+  Future<void> _notInterested(Reel reel) async {
+    // Removed from view straight away; the server call only needs to make it
+    // stick for future pages.
+    _removeFromFeed(reel.id);
+    await _service.markNotInterested(reel.id);
+  }
+
+  Future<void> _report(Reel reel) async {
+    final reason = await showModalBottomSheet<String>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text('Report this reel',
+                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+            ),
+            for (final reason in const [
+              'Inappropriate content',
+              'Harassment or bullying',
+              'False teaching',
+              'Spam or misleading',
+              'Something else',
+            ])
+              ListTile(
+                title: Text(reason),
+                onTap: () => Navigator.of(context).pop(reason),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (reason == null || !mounted) return;
+    await ModerationService().reportContent(
+      // A reel belongs to no single church, so this reports into the global
+      // scope rather than silently doing nothing for a church-less viewer.
+      churchId: reel.authorChurchId ?? '',
+      contentType: 'reel',
+      contentId: reel.id,
+      reportedUserId: reel.authorId,
+      reason: reason,
+    );
+    if (!mounted) return;
+    _removeFromFeed(reel.id);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Thank you. Our team will review this.')),
+    );
+  }
+
+  Future<void> _blockCreator(Reel reel) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Block ${reel.authorName}?'),
+        content: const Text(
+            'You will stop seeing their reels and posts, and they will not see yours.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Block')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    await ModerationService().blockUser(
+      churchId: reel.authorChurchId ?? '',
+      blockedUserId: reel.authorId,
+    );
+    if (!mounted) return;
+    setState(() {
+      _reels.removeWhere((r) => r.authorId == reel.authorId);
+      if (_index >= _reels.length) _index = (_reels.length - 1).clamp(0, 1 << 30);
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('${reel.authorName} is blocked.')),
+    );
+  }
+
+  void _openProfile(Reel reel) {
+    ReelAnalytics.profileOpen(reel);
+    Navigator.of(context).pushNamed('/public_profile', arguments: reel.authorId);
+  }
+
+  Future<void> _showMore(Reel reel) async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.not_interested),
+              title: const Text('Not interested'),
+              subtitle: const Text('Show me fewer reels like this'),
+              onTap: () => Navigator.pop(context, 'not_interested'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.flag_outlined),
+              title: const Text('Report'),
+              onTap: () => Navigator.pop(context, 'report'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.block),
+              title: Text('Block ${reel.authorName}'),
+              onTap: () => Navigator.pop(context, 'block'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (choice == null || !mounted) return;
+    switch (choice) {
+      case 'not_interested':
+        await _notInterested(reel);
+      case 'report':
+        await _report(reel);
+      case 'block':
+        await _blockCreator(reel);
+    }
+  }
+
   Future<void> _toggleMute() async {
     setState(() => _muted = !_muted);
     final prefs = await SharedPreferences.getInstance();
@@ -267,6 +450,15 @@ class _ReelGraceScreenState extends State<ReelGraceScreen>
                       onProgress: (p, d) => _onProgress(reel, p, d),
                       onCompleted: () => ReelAnalytics.complete(reel),
                       onToggleMute: _toggleMute,
+                      onLike: () => _toggleLike(reel),
+                      onComment: () {
+                        ReelAnalytics.commentOpen(reel);
+                        showReelComments(context, reel);
+                      },
+                      onSave: () => _toggleSave(reel),
+                      onShare: () => _share(reel),
+                      onProfile: () => _openProfile(reel),
+                      onMore: () => _showMore(reel),
                     );
                   },
                 ),
@@ -274,11 +466,31 @@ class _ReelGraceScreenState extends State<ReelGraceScreen>
                 top: 8,
                 left: 0,
                 right: 0,
-                child: _ModeSelector(
-                  mode: _mode,
-                  onChanged: _switchMode,
-                  muted: _muted,
-                  onToggleMute: _toggleMute,
+                child: Row(
+                  children: [
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _ModeSelector(
+                        mode: _mode,
+                        onChanged: _switchMode,
+                        muted: _muted,
+                        onToggleMute: _toggleMute,
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'New reel',
+                      onPressed: () async {
+                        final posted = await Navigator.of(context).push<bool>(
+                          MaterialPageRoute(
+                              builder: (_) => const ReelCreateScreen()),
+                        );
+                        if (posted == true) await _load(refresh: true);
+                      },
+                      icon: const Icon(Icons.add_box_outlined,
+                          color: Colors.white),
+                    ),
+                    const SizedBox(width: 4),
+                  ],
                 ),
               ),
             ],
@@ -299,6 +511,12 @@ class _ReelPage extends StatefulWidget {
     required this.onProgress,
     required this.onCompleted,
     required this.onToggleMute,
+    required this.onLike,
+    required this.onComment,
+    required this.onSave,
+    required this.onShare,
+    required this.onProfile,
+    required this.onMore,
   });
 
   final Reel reel;
@@ -309,84 +527,207 @@ class _ReelPage extends StatefulWidget {
   final void Function(Duration, Duration) onProgress;
   final VoidCallback onCompleted;
   final VoidCallback onToggleMute;
+  final VoidCallback onLike;
+  final VoidCallback onComment;
+  final VoidCallback onSave;
+  final VoidCallback onShare;
+  final VoidCallback onProfile;
+  final VoidCallback onMore;
 
   @override
   State<_ReelPage> createState() => _ReelPageState();
 }
 
-class _ReelPageState extends State<_ReelPage> {
+class _ReelPageState extends State<_ReelPage>
+    with SingleTickerProviderStateMixin {
+  bool _captionExpanded = false;
+  late final AnimationController _heart = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 650),
+  );
+
+  @override
+  void dispose() {
+    _heart.dispose();
+    super.dispose();
+  }
+
+  void _onDoubleTap() {
+    // Double tap always likes, never unlikes -- an accidental second
+    // double-tap should not quietly undo the like the member just gave.
+    if (!widget.reel.viewerLiked) widget.onLike();
+    _heart.forward(from: 0);
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        ReelGracePlayer(
-          reel: widget.reel,
-          service: widget.service,
-          isCurrent: widget.isCurrent,
-          shouldInitialize: widget.shouldInitialize,
-          muted: widget.muted,
-          onPlaybackProgress: widget.onProgress,
-          onCompleted: widget.onCompleted,
-        ),
-        Positioned(
-          left: 16,
-          right: 90,
-          bottom: 28,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                widget.reel.authorName,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 16,
-                  shadows: [Shadow(color: Colors.black54, blurRadius: 6)],
+    final reel = widget.reel;
+    final caption = reel.caption.trim();
+    final isLong = caption.length > 90;
+
+    return GestureDetector(
+      onDoubleTap: _onDoubleTap,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          ReelGracePlayer(
+            reel: reel,
+            service: widget.service,
+            isCurrent: widget.isCurrent,
+            shouldInitialize: widget.shouldInitialize,
+            muted: widget.muted,
+            onPlaybackProgress: widget.onProgress,
+            onCompleted: widget.onCompleted,
+          ),
+          // Scrim so white text stays legible over a bright video.
+          const Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            height: 260,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.bottomCenter,
+                  end: Alignment.topCenter,
+                  colors: [Color(0xB3000000), Color(0x00000000)],
                 ),
               ),
-              if (widget.reel.caption.trim().isNotEmpty) ...[
-                const SizedBox(height: 6),
-                Text(
-                  widget.reel.caption,
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    shadows: [Shadow(color: Colors.black54, blurRadius: 6)],
+            ),
+          ),
+          IgnorePointer(
+            child: Center(
+              child: ScaleTransition(
+                scale: Tween<double>(begin: 0.6, end: 1.25).animate(
+                  CurvedAnimation(parent: _heart, curve: Curves.easeOutBack),
+                ),
+                child: FadeTransition(
+                  opacity: Tween<double>(begin: 1, end: 0).animate(
+                    CurvedAnimation(parent: _heart, curve: const Interval(0.5, 1)),
+                  ),
+                  child: const Icon(Icons.favorite,
+                      color: Colors.white, size: 96),
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            left: 16,
+            right: 92,
+            bottom: 26,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                GestureDetector(
+                  onTap: widget.onProfile,
+                  child: Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          reel.authorName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 16,
+                            shadows: [Shadow(color: Colors.black54, blurRadius: 6)],
+                          ),
+                        ),
+                      ),
+                      if (reel.visibility != ReelVisibility.public) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.white24,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            reel.visibility.label,
+                            style: const TextStyle(
+                                color: Colors.white, fontSize: 11),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
-              ],
-              const SizedBox(height: 6),
-              Row(
-                children: [
-                  const Icon(Icons.graphic_eq, color: Colors.white70, size: 14),
-                  const SizedBox(width: 6),
-                  Text(widget.reel.audioLabel,
-                      style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                if (caption.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  GestureDetector(
+                    onTap: isLong
+                        ? () => setState(() => _captionExpanded = !_captionExpanded)
+                        : null,
+                    child: RichText(
+                      maxLines: _captionExpanded ? 8 : 2,
+                      overflow: TextOverflow.ellipsis,
+                      text: TextSpan(
+                        style: const TextStyle(
+                          color: Colors.white,
+                          shadows: [Shadow(color: Colors.black54, blurRadius: 6)],
+                        ),
+                        children: [
+                          TextSpan(text: caption),
+                          if (isLong && !_captionExpanded)
+                            const TextSpan(
+                              text: '  more',
+                              style: TextStyle(
+                                color: Colors.white70,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
                 ],
-              ),
-            ],
-          ),
-        ),
-        Positioned(
-          right: 10,
-          bottom: 28,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              IconButton(
-                onPressed: widget.onToggleMute,
-                icon: Icon(
-                  widget.muted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
-                  color: Colors.white,
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    const Icon(Icons.graphic_eq, color: Colors.white70, size: 14),
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Text(
+                        reel.audioLabel,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: Colors.white70, fontSize: 12),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    GestureDetector(
+                      onTap: widget.onToggleMute,
+                      child: Icon(
+                        widget.muted
+                            ? Icons.volume_off_rounded
+                            : Icons.volume_up_rounded,
+                        color: Colors.white70,
+                        size: 18,
+                      ),
+                    ),
+                  ],
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
-      ],
+          Positioned(
+            right: 12,
+            bottom: 26,
+            child: ReelActionRail(
+              reel: reel,
+              onLike: widget.onLike,
+              onComment: widget.onComment,
+              onSave: widget.onSave,
+              onShare: widget.onShare,
+              onProfile: widget.onProfile,
+              onMore: widget.onMore,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
