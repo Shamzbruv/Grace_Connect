@@ -10,12 +10,17 @@ class MonthlyQuizLeaderboardPanel extends StatelessWidget {
     required this.data,
     required this.loading,
     this.onMonthChanged,
+    this.onScopeChanged,
     this.padding = EdgeInsets.zero,
   });
 
   final Map<String, dynamic> data;
   final bool loading;
   final ValueChanged<String>? onMonthChanged;
+  /// Supplied only where the viewer may switch between their church board
+  /// and the global one. Church-less viewers have no church board to switch
+  /// to, so callers leave this null and no toggle is shown.
+  final ValueChanged<String>? onScopeChanged;
   final EdgeInsetsGeometry padding;
 
   @override
@@ -39,8 +44,8 @@ class MonthlyQuizLeaderboardPanel extends StatelessWidget {
     final officialWinnersSaved = winners.isNotEmpty;
     final leaderboardScope = data['leaderboard_scope']?.toString() ?? 'church';
     final leaderboardSubtitle = leaderboardScope == 'global'
-        ? 'Grace Connect visitors • Jamaica calendar month'
-        : 'Church members only • Jamaica calendar month';
+        ? 'Everyone on Grace Connect • monthly'
+        : 'Church members only • monthly';
 
     return Padding(
       padding: padding,
@@ -83,6 +88,26 @@ class MonthlyQuizLeaderboardPanel extends StatelessWidget {
                 ),
               ],
             ),
+            if (onScopeChanged != null) ...[
+              const SizedBox(height: 16),
+              SegmentedButton<String>(
+                segments: const [
+                  ButtonSegment(
+                    value: 'church',
+                    label: Text('My Church'),
+                    icon: Icon(Icons.church_outlined),
+                  ),
+                  ButtonSegment(
+                    value: 'global',
+                    label: Text('Global'),
+                    icon: Icon(Icons.public_outlined),
+                  ),
+                ],
+                selected: {leaderboardScope},
+                onSelectionChanged: (selection) =>
+                    onScopeChanged!(selection.first),
+              ),
+            ],
             if (months.length > 1) ...[
               const SizedBox(height: 16),
               _MonthSelector(
@@ -254,6 +279,19 @@ class _CurrentMemberStrip extends StatelessWidget {
 
   final Map<String, dynamic>? currentMember;
 
+  /// The church board reports `total_points`; the global ranking RPC reports
+  /// `total_score` and also knows how many people are ranked, which is the
+  /// part that makes a global position meaningful.
+  static String _describeStanding(Map<String, dynamic>? member) {
+    if (member == null) {
+      return 'Your rank appears after you complete a quiz this month.';
+    }
+    final points = member['total_points'] ?? member['total_score'];
+    final total = member['total_ranked'];
+    final of = total == null ? '' : ' of $total';
+    return 'You are #${member['rank']}$of with $points points.';
+  }
+
   @override
   Widget build(BuildContext context) {
     final member = currentMember;
@@ -269,9 +307,7 @@ class _CurrentMemberStrip extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              member == null
-                  ? 'Your rank appears after you complete a quiz this month.'
-                  : 'You are #${member['rank']} with ${member['total_points']} points.',
+              _describeStanding(member),
               style: GoogleFonts.outfit(fontWeight: FontWeight.w800),
             ),
           ),

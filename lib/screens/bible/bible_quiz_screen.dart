@@ -1,9 +1,11 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../providers/user_role_provider.dart';
 import '../../services/daily_bible_quiz_service.dart';
 import '../../models/bible_passage_reference.dart';
 import 'bible_reader_screen.dart';
@@ -34,6 +36,16 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
   Map<String, dynamic>? _completion;
   Map<String, dynamic> _leaderboardData = const {};
   bool _leaderboardLoading = false;
+  // Null until the viewer picks one; the church board stays the default for
+  // members, and a church-less viewer only ever gets the global one.
+  String? _leaderboardScope;
+
+  /// Someone with no church has no church board to switch to, so they are
+  /// not offered a toggle at all.
+  bool get _hasChurch =>
+      (context.read<UserRoleProvider>().userProfile?.churchId ?? '')
+          .trim()
+          .isNotEmpty;
   String? _selectedQuizMonth;
   DateTime? _nextRefreshAt;
   DateTime? _questionDeadlineAt;
@@ -307,12 +319,23 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
     }
   }
 
-  Future<void> _loadLeaderboard({String? quizMonth}) async {
-    if (mounted) setState(() => _leaderboardLoading = true);
+  Future<void> _loadLeaderboard({String? quizMonth, String? scope}) async {
+    final effectiveScope = scope ?? _leaderboardScope;
+    if (mounted) {
+      setState(() {
+        _leaderboardLoading = true;
+        _leaderboardScope = effectiveScope;
+      });
+    }
     try {
-      final data = await _service.leaderboard(
-        quizMonth: quizMonth ?? _selectedQuizMonth,
-      );
+      // The global board spans every church, so it comes from the ranking RPC
+      // rather than the church leaderboard function.
+      final data = effectiveScope == 'global'
+          ? await _service.globalRanking(
+              quizMonth: quizMonth ?? _selectedQuizMonth)
+          : await _service.leaderboard(
+              quizMonth: quizMonth ?? _selectedQuizMonth,
+            );
       if (!mounted) return;
       setState(() {
         _leaderboardData = data;
@@ -327,6 +350,7 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
           if (_selectedQuizMonth != null) 'quiz_month': _selectedQuizMonth,
           'entries': const [],
           'winners': const [],
+          if (effectiveScope != null) 'leaderboard_scope': effectiveScope,
         };
       });
     }
@@ -411,6 +435,9 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
         leaderboardData: _leaderboardData,
         leaderboardLoading: _leaderboardLoading,
         onMonthChanged: (month) => _loadLeaderboard(quizMonth: month),
+        onLeaderboardScopeChanged: _hasChurch
+            ? (scope) => _loadLeaderboard(scope: scope)
+            : null,
         countdown: _countdownText(),
       );
     }
@@ -430,6 +457,9 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
             leaderboardData: _leaderboardData,
             leaderboardLoading: _leaderboardLoading,
             onMonthChanged: (month) => _loadLeaderboard(quizMonth: month),
+            onLeaderboardScopeChanged: _hasChurch
+                ? (scope) => _loadLeaderboard(scope: scope)
+                : null,
           );
         }
         final data = snapshot.data ?? const {};
@@ -474,6 +504,9 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
             leaderboardData: _leaderboardData,
             leaderboardLoading: _leaderboardLoading,
             onMonthChanged: (month) => _loadLeaderboard(quizMonth: month),
+            onLeaderboardScopeChanged: _hasChurch
+                ? (scope) => _loadLeaderboard(scope: scope)
+                : null,
             countdown: _countdownText(),
           );
         }
@@ -499,6 +532,9 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
           leaderboardData: _leaderboardData,
           leaderboardLoading: _leaderboardLoading,
           onMonthChanged: (month) => _loadLeaderboard(quizMonth: month),
+          onLeaderboardScopeChanged: _hasChurch
+              ? (scope) => _loadLeaderboard(scope: scope)
+              : null,
         );
       },
     );
@@ -533,6 +569,7 @@ class _QuizLanding extends StatelessWidget {
     required this.leaderboardData,
     required this.leaderboardLoading,
     required this.onMonthChanged,
+    this.onLeaderboardScopeChanged,
     this.studyChapter,
     this.needsReading = false,
     this.onReadChapter,
@@ -546,6 +583,7 @@ class _QuizLanding extends StatelessWidget {
   final Map<String, dynamic> leaderboardData;
   final bool leaderboardLoading;
   final ValueChanged<String> onMonthChanged;
+  final ValueChanged<String>? onLeaderboardScopeChanged;
   final String? studyChapter;
   final bool needsReading;
   final VoidCallback? onReadChapter;
@@ -644,6 +682,7 @@ class _QuizLanding extends StatelessWidget {
           data: leaderboardData,
           loading: leaderboardLoading,
           onMonthChanged: onMonthChanged,
+          onScopeChanged: onLeaderboardScopeChanged,
         ),
       ],
     );
@@ -818,6 +857,7 @@ class _CompletionView extends StatelessWidget {
     required this.leaderboardData,
     required this.leaderboardLoading,
     required this.onMonthChanged,
+    this.onLeaderboardScopeChanged,
     required this.countdown,
   });
 
@@ -825,6 +865,7 @@ class _CompletionView extends StatelessWidget {
   final Map<String, dynamic> leaderboardData;
   final bool leaderboardLoading;
   final ValueChanged<String> onMonthChanged;
+  final ValueChanged<String>? onLeaderboardScopeChanged;
   final String countdown;
 
   @override
@@ -878,6 +919,7 @@ class _CompletionView extends StatelessWidget {
             data: leaderboardData,
             loading: leaderboardLoading,
             onMonthChanged: onMonthChanged,
+            onScopeChanged: onLeaderboardScopeChanged,
           ),
         ],
       ],
@@ -892,6 +934,7 @@ class _AttemptStatusView extends StatelessWidget {
     required this.leaderboardData,
     required this.leaderboardLoading,
     required this.onMonthChanged,
+    this.onLeaderboardScopeChanged,
     required this.countdown,
   });
 
@@ -900,6 +943,7 @@ class _AttemptStatusView extends StatelessWidget {
   final Map<String, dynamic> leaderboardData;
   final bool leaderboardLoading;
   final ValueChanged<String> onMonthChanged;
+  final ValueChanged<String>? onLeaderboardScopeChanged;
   final String countdown;
 
   @override
@@ -951,6 +995,7 @@ class _AttemptStatusView extends StatelessWidget {
       leaderboardData: leaderboardData,
       leaderboardLoading: leaderboardLoading,
       onMonthChanged: onMonthChanged,
+      onLeaderboardScopeChanged: onLeaderboardScopeChanged,
       countdown: countdown,
     );
   }

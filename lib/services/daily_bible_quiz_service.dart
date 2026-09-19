@@ -56,6 +56,62 @@ class DailyBibleQuizService {
         if (quizMonth != null) 'quiz_month': quizMonth,
       });
 
+  /// Global scoreboard across every Grace Connect member, with the viewer's
+  /// own rank included even when it falls outside the returned page.
+  ///
+  /// This reads the `list_quiz_ranking` RPC rather than the church leaderboard
+  /// edge function: the church board is anchored to one church and one
+  /// calendar, while the global board must span all of them. The result is
+  /// shaped into the same map the church board returns so one panel renders
+  /// both.
+  Future<Map<String, dynamic>> globalRanking({String? quizMonth}) async {
+    final data = await Supabase.instance.client.rpc(
+      'list_quiz_ranking',
+      params: {
+        'p_scope': 'global',
+        if (quizMonth != null) 'p_quiz_month': quizMonth,
+        'result_limit': 50,
+      },
+    );
+    if (data is! Map) return <String, dynamic>{};
+    final envelope = Map<String, dynamic>.from(data);
+    final viewer = envelope['viewer'] is Map
+        ? Map<String, dynamic>.from(envelope['viewer'] as Map)
+        : null;
+    final month = envelope['month']?.toString();
+    return <String, dynamic>{
+      'quiz_month': month,
+      'month_label': _monthLabel(month),
+      'entries': envelope['entries'] ?? const [],
+      // The global board has no church winners ceremony.
+      'winners': const [],
+      'current_member': viewer == null
+          ? null
+          : {
+              'rank': viewer['rank'],
+              'total_score': viewer['total_score'],
+              'total_ranked': viewer['total'],
+            },
+      'leaderboard_scope': 'global',
+      'leaderboard_label': 'Everyone on Grace Connect',
+    };
+  }
+
+  static String _monthLabel(String? month) {
+    final parts = (month ?? '').split('-');
+    if (parts.length != 2) return 'This Month';
+    final year = int.tryParse(parts[0]);
+    final index = int.tryParse(parts[1]);
+    if (year == null || index == null || index < 1 || index > 12) {
+      return 'This Month';
+    }
+    const names = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December',
+    ];
+    return '${names[index - 1]} $year';
+  }
+
   Future<Map<String, dynamic>> _invoke(
     String functionName, {
     Map<String, dynamic>? body,
