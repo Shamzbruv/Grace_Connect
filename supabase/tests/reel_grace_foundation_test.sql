@@ -101,6 +101,34 @@ begin
   perform pg_temp.check_reel(not has_table_privilege('anon','public.reel_upload_sessions','SELECT'),'anon cannot select upload sessions');
   perform pg_temp.check_reel(not has_table_privilege('authenticated','public.reel_upload_sessions','INSERT'),'clients cannot mint upload sessions');
   perform pg_temp.check_reel(not has_function_privilege('authenticated','private.can_view_reel(uuid,uuid)','EXECUTE'),'the visibility predicate is not client callable');
+
+  -- Playback authorization resolves the same rules as the feed. This is the
+  -- gate in front of signed media URLs, so a disagreement here would leak
+  -- private video even with a correct feed.
+  perform pg_temp.check_reel(
+    (select count(*) from public.authorize_reel_playback(stranger,
+      array[public_reel,followers_reel,church_reel,draft_reel])) = 1,
+    'playback authorization returns only the reel a stranger may see');
+  perform pg_temp.check_reel(
+    (select id from public.authorize_reel_playback(stranger, array[public_reel,church_reel])) = public_reel,
+    'playback authorization returns the public reel to a stranger');
+  perform pg_temp.check_reel(
+    (select count(*) from public.authorize_reel_playback(churchmate,
+      array[public_reel,church_reel])) = 2,
+    'playback authorization includes a church reel for a church member');
+  perform pg_temp.check_reel(
+    (select count(*) from public.authorize_reel_playback(blocked, array[public_reel])) = 0,
+    'playback authorization honours blocks');
+  perform pg_temp.check_reel(
+    (select video_object_key from public.authorize_reel_playback(stranger, array[public_reel]))
+      like 'reels/%/video.mp4',
+    'playback authorization returns the object key to sign');
+  perform pg_temp.check_reel(not has_function_privilege('authenticated',
+    'public.authorize_reel_playback(uuid,uuid[])','EXECUTE'),
+    'clients cannot call playback authorization directly');
+  perform pg_temp.check_reel(not has_function_privilege('anon',
+    'public.authorize_reel_playback(uuid,uuid[])','EXECUTE'),
+    'anon cannot call playback authorization');
 end;
 $test$;
 select count(*) as assertions_passed from reel_assertions;

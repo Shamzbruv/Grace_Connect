@@ -104,3 +104,14 @@ verify_jwt = false
 
 [functions.submit-web-subscription-request]
 verify_jwt = false
+
+# Reel Grace media functions. Each authenticates the caller itself with a
+# user JWT, so JWT verification stays on.
+[functions.create-reel-upload]
+verify_jwt = true
+
+[functions.finalize-reel-upload]
+verify_jwt = true
+
+[functions.sign-reel-playback]
+verify_jwt = true
