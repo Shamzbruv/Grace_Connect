@@ -23,8 +23,8 @@
 - `lib/utils/church_time.dart`, `lib/services/media_playback_coordinator.dart`
 - `packages/grace_reel_media/pubspec.yaml`, its Dart interface, Android Kotlin media implementation/build/manifest, and iOS Swift implementation/podspec
 - `supabase/functions/_shared/r2.ts`, `reel_validation.ts`, `reel_media_validation.ts`, `reel_http.ts`
-- `supabase/functions/create-reel-upload/index.ts`, `finalize-reel-upload/index.ts`, `delete-reel/index.ts`, `cleanup-reel-uploads/index.ts`, `reel-media-access/index.ts`
-- `cloudflare/reel-media-worker/src/index.ts`, worker configuration and tests (if available Cloudflare permissions permit the protected media gateway)
+- `supabase/functions/create-reel-upload/index.ts`, `finalize-reel-upload/index.ts`, `sign-reel-playback/index.ts` (batch authorization + presigned GET), `delete-reel/index.ts`, `cleanup-reel-uploads/index.ts`
+- (deferred, not V1) `cloudflare/reel-media-worker/` — only if scale later justifies a gateway in front of private R2; V1 uses presigned GET directly
 - `supabase/functions/reset-platform-once/index.ts` and server reset worker/state helpers
 - CLI-generated migrations for attendance timezone/service handling, launch/global features, one-time reset, and Reel Grace foundation
 - Dart tests for mode switching, playback bounds/lifecycle, optimistic state, cursor pagination, uploads, timezones, service overlap, global scopes and launch controls; SQL security/behavior tests and server-function tests
@@ -41,17 +41,110 @@
 - Church branding: `lib/models/church_model.dart`, `lib/services/church_service.dart`, `lib/screens/settings/church_admin_settings_screen.dart`, `lib/screens/church/church_public_profile_screen.dart`, live-church cards
 - Build/config: `pubspec.yaml`, `pubspec.lock`, `android/app/build.gradle`, `android/app/google-services.json`, iOS plugin/Pods configuration, `supabase/config.toml`, `.github/workflows/flutter-ci.yml`
 
+## Reel Grace media architecture — DECIDED (2026-09-18)
+
+This section is the single source of truth for Reel Grace media. It
+supersedes any earlier note, the original brief's public playback domain,
+and anything in the sections below that contradicts it.
+
+**The R2 bucket `reel-grace-videos` is private and stays private.** No
+permanent public object URLs. `reels.graceconnect.love` is NOT attached as
+a public R2 custom domain. A secured Cloudflare Worker/gateway in front of
+R2 remains a later option if scale demands it, and is explicitly not part
+of V1.
+
+Why: a public bucket URL is a capability. Anyone holding the link can fetch
+the object forever, with no reference to who is asking. Postgres RLS can be
+perfect and a `followers`-only or `church`-only reel would still be
+retrievable by URL. Visibility has to be enforced at the point the bytes
+are handed out, not only at the point the metadata is read.
+
+### Authority split
+
+- **Supabase** is the authority for authentication, reel visibility,
+  followers, church membership, blocks, moderation, likes, comments and
+  saves. It stores metadata and social rows only.
+- **R2** stores the bytes. It never authorizes anyone.
+- **Supabase never carries video bytes.** Devices talk to R2 directly for
+  both upload and playback; no proxying through an Edge Function.
+- **Firebase Analytics** carries high-volume playback behaviour
+  (impressions, watch time, quartiles, completion, skip, replay). These do
+  not become Supabase writes.
+
+### Visibility, supported from the first migration
+
+`public`, `followers`, `church`. Not a later addition — the visibility
+column, its predicate and its tests land with the initial reel schema, so
+there is never a window where everything is effectively public.
+
+### Upload flow
+
+1. Authenticated Flutter calls `create-reel-upload` (Supabase Edge
+   Function, user JWT).
+2. Server authenticates, checks posting permission/account state, validates
+   declared MIME/size/duration, enforces rate limits, generates the reel id
+   and object keys itself, and records an upload session.
+3. Server returns a **short-lived presigned PUT** (5-10 min).
+4. Device uploads bytes **directly to R2**.
+5. `finalize-reel-upload` HEADs the objects, validates what actually landed
+   (size, MIME, media structure — never the device's claim), then publishes
+   the reel row.
+
+### Playback flow
+
+1. `get_reel_grace_feed` (Postgres RPC) returns metadata and **object keys
+   only** — never a URL. Visibility, blocks, moderation and not-interested
+   are filtered here.
+2. Flutter calls `sign-reel-playback` (Edge Function) with a small batch of
+   reel ids.
+3. The function **re-verifies in Supabase that this viewer may see each
+   reel** — it does not trust the ids — and returns a **short-lived
+   presigned GET** per authorized reel. Unauthorized ids are omitted, not
+   errored.
+4. The player fetches bytes straight from R2 with that URL.
+
+Signing happens only inside Edge Functions, from environment secrets
+(`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`,
+`R2_BUCKET_NAME`, `R2_S3_ENDPOINT`). No R2 credential is ever shipped in
+the Flutter app, committed, logged, or returned to a client.
+
+### Seeking and fast swiping under signed URLs
+
+Signed URLs create two real problems. Both are handled explicitly:
+
+- **Range requests / seeking.** `Range` is not a signed header, so an S3
+  presigned GET serves partial content normally. Seeking works, and
+  progressive MP4 (`moov` at the front) still matters so playback starts
+  before the file is complete.
+- **Swipe speed and caching.** A signed URL changes every time it is
+  signed, so URL-keyed HTTP caching breaks and per-reel round trips would
+  stall swiping. Therefore: sign **in batches** alongside feed pagination
+  (one call per page, not per reel), cache each signed URL in memory
+  **keyed by reel id** until shortly before expiry, and give signed URLs a
+  session-length TTL (target ~30 min) so a normal viewing session never
+  re-signs mid-scroll. The on-device media cache is keyed by **reel id**,
+  never by URL, so a re-signed URL does not re-download bytes already held.
+  A reel whose URL expired mid-session is re-signed lazily on its next
+  impression.
+
+### What this rules out
+
+- No `PUBLIC_BASE_URL` playback constant in the app.
+- No storing playback URLs in the `reels` table — only object keys.
+- No "sign once at publish time" long-lived link.
+- No public custom domain in V1.
+
 ## Proposed database and API
 
 Dedicated `reels`, `reel_likes`, `reel_comments`, `reel_user_feedback`, `reel_upload_sessions`, and retryable media cleanup jobs. Reuse `social_saved_items` for reel saves and existing reporting/blocking/follows. Add explicit indexed visibility and ready/moderation predicates, RLS on exposed tables, safe function search paths and minimal grants. Add `reel_grace` to the existing platform flag system after identifying its live representation.
 
 Feed: `get_reel_grace_feed`, default 12/max 20 rows, stable cursor, accepted-follow filtering, bilateral blocks, not-interested exclusion, no comments and no permanent Realtime subscription. Freeze ranking for a pagination session or use a stable ordering to avoid mutable-counter cursor skips; diversify creators without losing cursor progress. Social RPCs transact counters and return confirmed state for optimistic rollback.
 
-Uploads: authenticate with Supabase Auth, enforce trusted posting/account access, rate/size/duration/MIME limits, create server-owned paths, sign short-lived exact-header PUT requests, upload bytes directly to R2. Finalization HEADs both objects and validates MP4/poster structure. Promote staging objects to immutable published keys so reusable PUT authorization cannot overwrite published media. Store secrets only in protected server configuration; delete the supplied credential file after import is verified.
+Uploads and playback: see "Reel Grace media architecture — DECIDED" above, which governs. In short — authenticate with Supabase Auth, enforce trusted posting/account access and rate/size/duration/MIME limits, create server-owned paths, sign short-lived exact-header PUT requests, and upload bytes directly to R2. Finalization HEADs both objects and validates MP4/poster structure rather than the device's claims. Promote staging objects to immutable published keys so reusable PUT authorization cannot overwrite published media. Playback is authorization-checked in Supabase and then served by short-lived presigned GET; the feed returns object keys, never URLs. Store secrets only in protected server configuration; delete the supplied credential file after import is verified.
 
 ## Architecture conflicts and resolutions
 
-1. A public R2 bucket URL bypasses followers/church visibility even with perfect Postgres RLS. Protect the custom playback domain with an authenticated Cloudflare media gateway; require the needed Cloudflare permission before claiming protected playback is deployed. Do not silently publish private uploads publicly.
+1. RESOLVED — see "Reel Grace media architecture — DECIDED" above. The bucket stays private; authorization is checked in Supabase and then a short-lived presigned GET is issued per viewer. No public bucket URL, no public custom domain in V1.
 2. Current+next+previous simultaneously initialized conflicts with the maximum of two players. Keep the previous controller only briefly, then release it before preloading the next. Data Saver initializes only the current reel.
 3. Existing Feed re-tap scroll behavior conflicts with the requested toggle. When Reel Grace is enabled, repeat tap/long press toggles within Feed; with the flag off, retain the previous scroll behavior. Returning from another main tab opens Community Feed.
 4. Existing church-only testimony access and older church-only social policies conflict with global users. Change explicit scopes and permissions without making old church content public.
@@ -63,7 +156,7 @@ Uploads: authenticate with Supabase Auth, enforce trusted posting/account access
 2. Global testimonies, global/church quiz and Bible-streak ranks.
 3. Quote labeling/global wording, haptics, analytics, launch UI/beta removal and church branding.
 4. One-time developer reset implementation, never executed on live data during tests.
-5. Reel schema/RLS/RPCs → R2 configuration → upload/finalization → normalization/upload UI → playback → navigation → social/moderation → analytics → deletion/cleanup.
+5. Reel schema/RLS/RPCs (visibility public/followers/church included from the first migration) → R2 private-bucket + secret configuration → presigned upload/finalization → normalization/upload UI → authorization-checked batch presigned playback → navigation → social/moderation → analytics → deletion/cleanup. Design review with the user before any production change.
 6. Meaningful Dart/native/server/database tests, Flutter analysis, security/performance advisors, bounded-controller stress checks and HTTP Range/media tests.
 7. Signed launch AAB, release notes, exact deployment/test results and remaining physical-device limitations. Do not claim physical device, GA dashboard ingestion or protected Cloudflare deployment without evidence.
 
