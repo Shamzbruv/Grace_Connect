@@ -53,10 +53,13 @@ class AppAccessContext {
       case AppFeature.directMessages:
       case AppFeature.churchTransfer:
       case AppFeature.churchPublicPage:
+      // Testimonies now carry a global scope, so someone with no church can
+      // still read and post there. Which rows they actually see is enforced
+      // by RLS, not by this gate.
+      case AppFeature.churchTestimonies:
         return true;
 
       case AppFeature.churchHome:
-      case AppFeature.churchTestimonies:
       case AppFeature.subscriptionManagement:
         return hasActiveChurchMembership;
 

@@ -2,6 +2,17 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+/// Which population a ranking is measured against.
+enum RankingScope {
+  church('church', 'My Church'),
+  global('global', 'Global');
+
+  const RankingScope(this.wireName, this.label);
+
+  final String wireName;
+  final String label;
+}
+
 class BibleStreakLeaderboardEntry {
   const BibleStreakLeaderboardEntry({
     required this.userId,
@@ -9,6 +20,8 @@ class BibleStreakLeaderboardEntry {
     required this.streakCount,
     this.photoUrl,
     this.lastReadDate,
+    this.rank,
+    this.isViewer = false,
   });
 
   final String userId;
@@ -16,14 +29,62 @@ class BibleStreakLeaderboardEntry {
   final int streakCount;
   final String? photoUrl;
   final DateTime? lastReadDate;
+  final int? rank;
+  final bool isViewer;
 
   factory BibleStreakLeaderboardEntry.fromMap(Map<String, dynamic> data) {
     return BibleStreakLeaderboardEntry(
       userId: data['user_id']?.toString() ?? '',
       userName: data['user_name']?.toString() ?? 'Member',
-      streakCount: data['streak_count'] as int? ?? 0,
+      streakCount: (data['streak_count'] as num?)?.toInt() ?? 0,
       photoUrl: data['photo_url']?.toString(),
       lastReadDate: DateTime.tryParse(data['last_read_date']?.toString() ?? ''),
+      rank: (data['rank'] as num?)?.toInt(),
+      isViewer: data['is_viewer'] == true,
+    );
+  }
+}
+
+/// A ranking page plus where the viewer stands in the whole population --
+/// the viewer's rank is reported even when they are far below the page.
+class BibleStreakRanking {
+  const BibleStreakRanking({
+    required this.scope,
+    required this.entries,
+    this.viewerRank,
+    this.viewerStreak,
+    this.totalRanked,
+  });
+
+  final RankingScope scope;
+  final List<BibleStreakLeaderboardEntry> entries;
+  final int? viewerRank;
+  final int? viewerStreak;
+  final int? totalRanked;
+
+  bool get viewerIsOnPage => entries.any((entry) => entry.isViewer);
+
+  static const empty = BibleStreakRanking(
+    scope: RankingScope.church,
+    entries: <BibleStreakLeaderboardEntry>[],
+  );
+
+  factory BibleStreakRanking.fromMap(
+    Map<String, dynamic> data,
+    RankingScope scope,
+  ) {
+    final viewer = data['viewer'] is Map
+        ? Map<String, dynamic>.from(data['viewer'] as Map)
+        : null;
+    return BibleStreakRanking(
+      scope: scope,
+      entries: (data['entries'] as List? ?? const [])
+          .map((row) => BibleStreakLeaderboardEntry.fromMap(
+              Map<String, dynamic>.from(row as Map)))
+          .toList(growable: false),
+      viewerRank: (viewer?['rank'] as num?)?.toInt(),
+      viewerStreak: (viewer?['streak_count'] as num?)?.toInt(),
+      totalRanked: (viewer?['total'] as num?)?.toInt(),
     );
   }
 }
@@ -194,6 +255,26 @@ class BibleStreakService {
       }
       debugPrint('Bible streak leaderboard RPC unavailable: $error');
       return const [];
+    }
+  }
+
+  /// Church or global ranking. Returns the page and the viewer's own
+  /// position, so someone outside the top results still learns where they
+  /// stand instead of seeing nothing.
+  Future<BibleStreakRanking> fetchRanking({
+    RankingScope scope = RankingScope.church,
+    int limit = 25,
+  }) async {
+    try {
+      final data = await _supabase.rpc(
+        'list_bible_streak_ranking',
+        params: {'p_scope': scope.wireName, 'result_limit': limit},
+      );
+      if (data is! Map) return BibleStreakRanking(scope: scope, entries: const []);
+      return BibleStreakRanking.fromMap(Map<String, dynamic>.from(data), scope);
+    } on PostgrestException catch (error) {
+      debugPrint('Bible streak ranking unavailable: $error');
+      return BibleStreakRanking(scope: scope, entries: const []);
     }
   }
 

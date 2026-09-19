@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../models/bible_data.dart';
+import '../../providers/user_role_provider.dart';
 import '../../services/daily_bible_quiz_service.dart';
 import '../../services/daily_motivation_service.dart';
 import '../../services/bible_streak_service.dart';
@@ -184,85 +186,154 @@ class _BibleBooksScreenState extends State<BibleBooksScreen> {
   }
 
   Future<void> _showLeaderboard() async {
+    var scope = RankingScope.church;
+    final hasChurch =
+        (context.read<UserRoleProvider>().userProfile?.churchId ?? '')
+            .trim()
+            .isNotEmpty;
+    if (!hasChurch) scope = RankingScope.global;
+
     await showModalBottomSheet<void>(
       context: context,
       useSafeArea: true,
-      builder: (context) => FutureBuilder<List<BibleStreakLeaderboardEntry>>(
-        future: BibleStreakService().fetchChurchLeaderboard(),
-        builder: (context, snapshot) {
+      builder: (context) => StatefulBuilder(
+        builder: (context, setSheetState) {
           final theme = Theme.of(context);
-          return Padding(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+          return FutureBuilder<BibleStreakRanking>(
+            future: BibleStreakService().fetchRanking(scope: scope),
+            builder: (context, snapshot) {
+              final ranking = snapshot.data;
+              return Padding(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(Icons.emoji_events_outlined,
-                        color: theme.colorScheme.primary),
-                    const SizedBox(width: 10),
-                    Text(
-                      'Bible Streak Leaderboard',
-                      style: theme.textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 14),
-                if (snapshot.connectionState == ConnectionState.waiting)
-                  const Padding(
-                    padding: EdgeInsets.all(24),
-                    child: Center(child: CircularProgressIndicator()),
-                  )
-                else if (snapshot.hasError)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 18),
-                    child:
-                        Text('Could not load leaderboard: ${snapshot.error}'),
-                  )
-                else if ((snapshot.data ?? const []).isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 18),
-                    child: Text(
-                      'No streaks have been recorded yet. Read for 1 minute to appear here.',
-                    ),
-                  )
-                else
-                  ConstrainedBox(
-                    constraints: BoxConstraints(
-                      maxHeight: MediaQuery.of(context).size.height * 0.62,
-                    ),
-                    child: ListView.separated(
-                      shrinkWrap: true,
-                      itemCount: snapshot.data!.length,
-                      separatorBuilder: (_, __) => const Divider(height: 1),
-                      itemBuilder: (context, index) {
-                        final entry = snapshot.data![index];
-                        return ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          leading: CircleAvatar(
-                            backgroundImage: entry.photoUrl?.isNotEmpty == true
-                                ? NetworkImage(entry.photoUrl!)
-                                : null,
-                            child: entry.photoUrl?.isNotEmpty == true
-                                ? null
-                                : Text('${index + 1}'),
-                          ),
-                          title: Text(entry.userName),
-                          trailing: Text(
-                            '${entry.streakCount} day${entry.streakCount == 1 ? '' : 's'}',
-                            style: const TextStyle(
+                    Row(
+                      children: [
+                        Icon(Icons.emoji_events_outlined,
+                            color: theme.colorScheme.primary),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'Bible Streak Leaderboard',
+                            style: theme.textTheme.titleLarge?.copyWith(
                               fontWeight: FontWeight.w800,
                             ),
                           ),
-                        );
-                      },
+                        ),
+                      ],
                     ),
-                  ),
-              ],
-            ),
+                    if (hasChurch) ...[
+                      const SizedBox(height: 12),
+                      SegmentedButton<RankingScope>(
+                        segments: const [
+                          ButtonSegment(
+                            value: RankingScope.church,
+                            label: Text('My Church'),
+                            icon: Icon(Icons.church_outlined),
+                          ),
+                          ButtonSegment(
+                            value: RankingScope.global,
+                            label: Text('Global'),
+                            icon: Icon(Icons.public_outlined),
+                          ),
+                        ],
+                        selected: {scope},
+                        onSelectionChanged: (selection) =>
+                            setSheetState(() => scope = selection.first),
+                      ),
+                    ],
+                    // Where the viewer stands overall, shown even when their
+                    // rank falls outside the page below.
+                    if (ranking?.viewerRank != null) ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.primaryContainer,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          'You are #${ranking!.viewerRank}'
+                          '${ranking.totalRanked != null ? ' of ${ranking.totalRanked}' : ''}'
+                          '${ranking.viewerStreak != null ? ' · ${ranking.viewerStreak} day streak' : ''}',
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w800,
+                            color: theme.colorScheme.onPrimaryContainer,
+                          ),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 14),
+                    if (snapshot.connectionState == ConnectionState.waiting)
+                      const Padding(
+                        padding: EdgeInsets.all(24),
+                        child: Center(child: CircularProgressIndicator()),
+                      )
+                    else if (snapshot.hasError)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 18),
+                        child: Text(
+                            'Could not load leaderboard: ${snapshot.error}'),
+                      )
+                    else if ((ranking?.entries ?? const []).isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 18),
+                        child: Text(
+                          scope == RankingScope.global
+                              ? 'No streaks have been recorded yet anywhere. Read for 1 minute to appear here.'
+                              : 'No streaks have been recorded yet. Read for 1 minute to appear here.',
+                        ),
+                      )
+                    else
+                      ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxHeight: MediaQuery.of(context).size.height * 0.55,
+                        ),
+                        child: ListView.separated(
+                          shrinkWrap: true,
+                          itemCount: ranking!.entries.length,
+                          separatorBuilder: (_, __) => const Divider(height: 1),
+                          itemBuilder: (context, index) {
+                            final entry = ranking.entries[index];
+                            return ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              selected: entry.isViewer,
+                              leading: CircleAvatar(
+                                backgroundImage:
+                                    entry.photoUrl?.isNotEmpty == true
+                                        ? NetworkImage(entry.photoUrl!)
+                                        : null,
+                                child: entry.photoUrl?.isNotEmpty == true
+                                    ? null
+                                    : Text('${entry.rank ?? index + 1}'),
+                              ),
+                              title: Text(
+                                entry.isViewer
+                                    ? '${entry.userName} (you)'
+                                    : entry.userName,
+                                style: entry.isViewer
+                                    ? const TextStyle(
+                                        fontWeight: FontWeight.w800)
+                                    : null,
+                              ),
+                              trailing: Text(
+                                '${entry.streakCount} day${entry.streakCount == 1 ? '' : 's'}',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                  ],
+                ),
+              );
+            },
           );
         },
       ),

@@ -8,30 +8,42 @@ class TestimonyService {
   final SupabaseClient _supabase = Supabase.instance.client;
   final NotificationService _notificationService = NotificationService();
 
-  Stream<List<Testimony>> watchTestimonies(String churchId) {
-    return _supabase
-        .from('testimonies')
-        .stream(primaryKey: ['id'])
-        .eq('church_id', churchId)
-        .order('created_at', ascending: false)
-        .map((rows) {
-          final testimonies =
-              rows.map((row) => Testimony.fromMap(row)).toList();
-          testimonies.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-          return testimonies;
-        });
+  /// Church rows are filtered by church; global rows have no church at all,
+  /// so they are filtered by scope instead. RLS is still the real boundary --
+  /// this only decides which of the rows the viewer may see are shown here.
+  Stream<List<Testimony>> watchTestimonies(
+    String churchId, {
+    TestimonyScope scope = TestimonyScope.church,
+  }) {
+    final query = _supabase.from('testimonies').stream(primaryKey: ['id']);
+    final filtered = scope == TestimonyScope.global
+        ? query.eq('scope', TestimonyScope.global.wireName)
+        : query.eq('church_id', churchId);
+    return filtered.order('created_at', ascending: false).map((rows) {
+      final testimonies = rows
+          .map((row) => Testimony.fromMap(row))
+          .where((testimony) => testimony.scope == scope)
+          .toList();
+      testimonies.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      return testimonies;
+    });
   }
 
   Future<void> addTestimony({
     required UserProfile author,
     required String content,
     required bool isAnonymous,
+    TestimonyScope scope = TestimonyScope.church,
   }) async {
     final cleanContent = content.trim();
     if (cleanContent.isEmpty) return;
 
+    final isGlobal = scope == TestimonyScope.global;
     await _supabase.from('testimonies').insert({
-      'church_id': author.churchId,
+      // A global testimony belongs to no church; the database constraint
+      // requires church_id to be null for it.
+      'church_id': isGlobal ? null : author.churchId,
+      'scope': scope.wireName,
       'author_id': author.uid,
       'author_name':
           author.fullName.isNotEmpty ? author.fullName : author.email,
@@ -40,6 +52,8 @@ class TestimonyService {
       'created_at': DateTime.now().toUtc().toIso8601String(),
     });
 
+    // Global testimonies have no church audience to notify.
+    if (isGlobal) return;
     final churchId = author.churchId.trim();
     if (churchId.isEmpty) return;
 

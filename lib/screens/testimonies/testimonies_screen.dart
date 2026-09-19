@@ -21,7 +21,14 @@ class _TestimoniesScreenState extends State<TestimoniesScreen> {
   final TestimonyService _service = TestimonyService();
   static const List<String> _reactionOptions = ['🙏', '❤️', '🙌', '🔥', '😊'];
 
-  Future<void> _showAddDialog(UserProfile user) async {
+  // Someone with no church has only one feed to look at, so start them there
+  // rather than on an empty church tab.
+  TestimonyScope? _selectedScope;
+
+  TestimonyScope _scopeFor(String churchId) =>
+      churchId.trim().isEmpty ? TestimonyScope.global : (_selectedScope ?? TestimonyScope.church);
+
+  Future<void> _showAddDialog(UserProfile user, TestimonyScope scope) async {
     final controller = TextEditingController();
     var isAnonymous = false;
     var isSaving = false;
@@ -31,7 +38,9 @@ class _TestimoniesScreenState extends State<TestimoniesScreen> {
       builder: (dialogContext) => StatefulBuilder(
         builder: (context, setDialogState) {
           return AlertDialog(
-            title: const Text('Add Testimony'),
+            title: Text(scope == TestimonyScope.global
+                ? 'Share with everyone'
+                : 'Share with your church'),
             content: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -41,9 +50,11 @@ class _TestimoniesScreenState extends State<TestimoniesScreen> {
                     minLines: 4,
                     maxLines: 8,
                     textCapitalization: TextCapitalization.sentences,
-                    decoration: const InputDecoration(
-                      hintText: 'Share what God has done',
-                      border: OutlineInputBorder(),
+                    decoration: InputDecoration(
+                      hintText: scope == TestimonyScope.global
+                          ? 'Share what God has done -- anyone on Grace Connect can read this'
+                          : 'Share what God has done',
+                      border: const OutlineInputBorder(),
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -81,6 +92,7 @@ class _TestimoniesScreenState extends State<TestimoniesScreen> {
                             author: user,
                             content: text,
                             isAnonymous: isAnonymous,
+                            scope: scope,
                           );
                           if (dialogContext.mounted) {
                             Navigator.pop(dialogContext);
@@ -119,7 +131,9 @@ class _TestimoniesScreenState extends State<TestimoniesScreen> {
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Delete testimony?'),
-        content: const Text('This removes the testimony from the church feed.'),
+        content: Text(testimony.scope == TestimonyScope.global
+            ? 'This removes the testimony from the global feed.'
+            : 'This removes the testimony from the church feed.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
@@ -152,6 +166,8 @@ class _TestimoniesScreenState extends State<TestimoniesScreen> {
   Widget build(BuildContext context) {
     final user = context.watch<UserRoleProvider>().userProfile;
     final churchId = user?.churchId ?? '';
+    final hasChurch = churchId.trim().isNotEmpty;
+    final scope = _scopeFor(churchId);
 
     return AppScaffold(
       title: 'Testimonies',
@@ -159,13 +175,40 @@ class _TestimoniesScreenState extends State<TestimoniesScreen> {
       floatingActionButton: user == null
           ? null
           : FloatingActionButton(
-              onPressed: () => _showAddDialog(user),
+              onPressed: () => _showAddDialog(user, scope),
               child: const Icon(Icons.add),
             ),
-      body: user == null || churchId.isEmpty
+      body: user == null
+          // Only a missing profile is a loading state now. Having no church is
+          // a normal state that shows the global feed.
           ? const Center(child: AppLoader())
-          : StreamBuilder<List<Testimony>>(
-              stream: _service.watchTestimonies(churchId),
+          : Column(
+            children: [
+              if (hasChurch)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                  child: SegmentedButton<TestimonyScope>(
+                    segments: const [
+                      ButtonSegment(
+                        value: TestimonyScope.church,
+                        label: Text('My Church'),
+                        icon: Icon(Icons.church_outlined),
+                      ),
+                      ButtonSegment(
+                        value: TestimonyScope.global,
+                        label: Text('Global'),
+                        icon: Icon(Icons.public_outlined),
+                      ),
+                    ],
+                    selected: {scope},
+                    onSelectionChanged: (selection) =>
+                        setState(() => _selectedScope = selection.first),
+                  ),
+                ),
+              Expanded(
+                child: StreamBuilder<List<Testimony>>(
+              key: ValueKey(scope),
+              stream: _service.watchTestimonies(churchId, scope: scope),
               builder: (context, snapshot) {
                 if (snapshot.hasError) {
                   return Center(
@@ -197,12 +240,14 @@ class _TestimoniesScreenState extends State<TestimoniesScreen> {
                           ),
                           const SizedBox(height: 16),
                           Text(
-                            'No testimonies yet',
+                            scope == TestimonyScope.global
+                                ? 'No global testimonies yet'
+                                : 'No testimonies yet',
                             style: Theme.of(context).textTheme.titleMedium,
                           ),
                           const SizedBox(height: 12),
                           FilledButton.icon(
-                            onPressed: () => _showAddDialog(user),
+                            onPressed: () => _showAddDialog(user, scope),
                             icon: const Icon(Icons.add),
                             label: const Text('Add Testimony'),
                           ),
@@ -231,7 +276,10 @@ class _TestimoniesScreenState extends State<TestimoniesScreen> {
                   },
                 );
               },
-            ),
+                ),
+              ),
+            ],
+          ),
     );
   }
 }

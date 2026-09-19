@@ -1,3 +1,21 @@
+/// Where a testimony lives. `church` rows are visible only inside their own
+/// church; `global` rows have no church and are visible to everyone,
+/// including people who have not joined a church yet.
+enum TestimonyScope {
+  church('church', 'My Church'),
+  global('global', 'Global');
+
+  const TestimonyScope(this.wireName, this.label);
+
+  final String wireName;
+  final String label;
+
+  static TestimonyScope fromName(String? value) =>
+      value?.trim().toLowerCase() == 'global'
+          ? TestimonyScope.global
+          : TestimonyScope.church;
+}
+
 class Testimony {
   const Testimony({
     required this.id,
@@ -8,6 +26,7 @@ class Testimony {
     required this.isAnonymous,
     required this.reactions,
     required this.createdAt,
+    this.scope = TestimonyScope.church,
   });
 
   final String id;
@@ -18,6 +37,7 @@ class Testimony {
   final bool isAnonymous;
   final Map<String, List<String>> reactions;
   final DateTime createdAt;
+  final TestimonyScope scope;
 
   factory Testimony.fromMap(Map<String, dynamic> data) {
     final rawReactions = Map<String, dynamic>.from(data['reactions'] ?? {});
@@ -36,6 +56,7 @@ class Testimony {
         ),
       ),
       createdAt: _parseDate(data['created_at'] ?? data['createdAt']),
+      scope: TestimonyScope.fromName(data['scope']?.toString()),
     );
   }
 
