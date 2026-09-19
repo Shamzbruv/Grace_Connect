@@ -86,9 +86,10 @@ there is never a window where everything is effectively public.
    and object keys itself, and records an upload session.
 3. Server returns a **short-lived presigned PUT** (5-10 min).
 4. Device uploads bytes **directly to R2**.
-5. `finalize-reel-upload` HEADs the objects, validates what actually landed
-   (size, MIME, media structure — never the device's claim), then publishes
-   the reel row.
+5. `finalize-reel-upload` HEADs the objects and validates what R2 can
+   actually prove — existence, byte size, content type — then publishes the
+   reel row. It does **not** verify duration/codec/faststart; see "Final
+   decisions" below for what is client-declared instead.
 
 ### Playback flow
 
@@ -127,6 +128,52 @@ Signed URLs create two real problems. Both are handled explicitly:
   A reel whose URL expired mid-session is re-signed lazily on its next
   impression.
 
+### Final decisions (approved 2026-09-19)
+
+**Posters are private too.** A followers-only or church-only reel must not
+leak its still image through a public poster bucket. Both objects live in
+the private bucket.
+
+**One signing call covers a whole page.** `sign-reel-playback` takes the
+page's reel ids and returns **video and poster URLs together**, so a
+12-reel page costs one request, not 24. Both are cached by reel id.
+
+**Signed URL lifetime: 30 minutes.** Signed URLs are held **in memory
+only**. They are never written into the `reels` table, never persisted to
+disk, and never treated as reel data. A URL with roughly **5 minutes or
+less remaining is refreshed proactively**, so a long session or a seek
+never fails on an expiry that was predictable.
+
+**What `finalize-reel-upload` can and cannot prove.** An R2 HEAD returns
+object existence, actual byte size, and the content type the uploader set.
+It **cannot** parse the MP4 container, so it cannot verify duration,
+codec, dimensions, or whether the `moov` atom is at the front. Treating a
+successful HEAD as proof of those would be false confidence.
+
+So, for V1:
+
+- Flutter runs a **controlled upload pipeline** that produces a
+  standardized MP4 within Reel Grace's limits before anything is uploaded.
+- `finalize-reel-upload` verifies **only what R2 can actually prove**:
+  both objects exist, byte size is within limits and consistent with what
+  was declared, and content type is acceptable. It rejects on those.
+- Duration, dimensions, codec and faststart are stored as
+  **client-declared** values and are documented as such in the schema.
+  They are used for layout and display, not as a security boundary.
+- If trusted server-side media inspection or transcoding is added later,
+  that validation can be tightened and these fields promoted to verified.
+
+**Restated constraints that govern implementation:**
+
+- Both video and poster objects stay private.
+- Supabase stores **object keys**, never permanent playback URLs.
+- All media for a page is batch-signed.
+- Supabase is never in the video-byte path.
+- Community Feed state is preserved when switching to Reel Grace.
+- Feed re-tap and long-press toggle Feed <-> Reel Grace.
+- Data Saver initializes and plays **only the current reel**.
+- No R2 credential appears anywhere in Flutter.
+
 ### What this rules out
 
 - No `PUBLIC_BASE_URL` playback constant in the app.
@@ -140,7 +187,7 @@ Dedicated `reels`, `reel_likes`, `reel_comments`, `reel_user_feedback`, `reel_up
 
 Feed: `get_reel_grace_feed`, default 12/max 20 rows, stable cursor, accepted-follow filtering, bilateral blocks, not-interested exclusion, no comments and no permanent Realtime subscription. Freeze ranking for a pagination session or use a stable ordering to avoid mutable-counter cursor skips; diversify creators without losing cursor progress. Social RPCs transact counters and return confirmed state for optimistic rollback.
 
-Uploads and playback: see "Reel Grace media architecture — DECIDED" above, which governs. In short — authenticate with Supabase Auth, enforce trusted posting/account access and rate/size/duration/MIME limits, create server-owned paths, sign short-lived exact-header PUT requests, and upload bytes directly to R2. Finalization HEADs both objects and validates MP4/poster structure rather than the device's claims. Promote staging objects to immutable published keys so reusable PUT authorization cannot overwrite published media. Playback is authorization-checked in Supabase and then served by short-lived presigned GET; the feed returns object keys, never URLs. Store secrets only in protected server configuration; delete the supplied credential file after import is verified.
+Uploads and playback: see "Reel Grace media architecture — DECIDED" above, which governs. In short — authenticate with Supabase Auth, enforce trusted posting/account access and rate/size/duration/MIME limits, create server-owned paths, sign short-lived exact-header PUT requests, and upload bytes directly to R2. Finalization HEADs both objects and validates what R2 can prove (existence, byte size, content type); MP4 structure is not server-verifiable by HEAD and is client-declared in V1. Promote staging objects to immutable published keys so reusable PUT authorization cannot overwrite published media. Playback is authorization-checked in Supabase and then served by short-lived presigned GET; the feed returns object keys, never URLs. Store secrets only in protected server configuration; delete the supplied credential file after import is verified.
 
 ## Architecture conflicts and resolutions
 
@@ -148,7 +195,7 @@ Uploads and playback: see "Reel Grace media architecture — DECIDED" above, whi
 2. Current+next+previous simultaneously initialized conflicts with the maximum of two players. Keep the previous controller only briefly, then release it before preloading the next. Data Saver initializes only the current reel.
 3. Existing Feed re-tap scroll behavior conflicts with the requested toggle. When Reel Grace is enabled, repeat tap/long press toggles within Feed; with the flag off, retain the previous scroll behavior. Returning from another main tab opens Community Feed.
 4. Existing church-only testimony access and older church-only social policies conflict with global users. Change explicit scopes and permissions without making old church content public.
-5. HEAD size/MIME alone cannot validate duration, codec or fast-start. Validate actual media metadata, and never trust the device's declared duration.
+5. HEAD size/MIME alone cannot validate duration, codec or fast-start — confirmed, and V1 does not pretend otherwise. A controlled Flutter pipeline produces a standardized MP4; finalize enforces only provable properties; duration/codec/dimensions/faststart are stored as client-declared. Server-side inspection/transcoding can strengthen this later.
 
 ## Work sequence and completion gates
 
