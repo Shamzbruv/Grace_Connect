@@ -122,3 +122,8 @@ verify_jwt = true
 # Authenticated with the private cron secret inside the function.
 [functions.cleanup-reel-uploads]
 verify_jwt = false
+
+# Fygaro calls this endpoint directly, so there is no Supabase user JWT to
+# verify. Its own HMAC signature is checked inside the function instead.
+[functions.fygaro-webhook]
+verify_jwt = false
