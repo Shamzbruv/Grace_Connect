@@ -115,7 +115,7 @@ class EmailService {
     required String userId,
   }) async {
     final htmlBody = '''
-      <h2>New Grace Connect Beta Feedback</h2>
+      <h2>New Grace Connect Feedback</h2>
       <p><strong>Reporter:</strong> ${_escape(reporterEmail)}</p>
       <p><strong>Contact Email:</strong> ${_escape(contactEmail.isEmpty ? 'Not provided' : contactEmail)}</p>
       <p><strong>User ID:</strong> ${_escape(userId.isEmpty ? 'Unknown' : userId)}</p>
@@ -127,7 +127,7 @@ class EmailService {
 
     await sendEmail(
       to: [supportInbox],
-      subject: 'Grace Connect Beta Feedback: $type',
+      subject: 'Grace Connect Feedback: $type',
       htmlBody: htmlBody,
     );
   }

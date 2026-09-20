@@ -99,11 +99,16 @@ class _ChurchPublicProfileScreenState extends State<ChurchPublicProfileScreen> {
                       radius: 34,
                       backgroundColor:
                           theme.colorScheme.primary.withValues(alpha: 0.16),
-                      child: Icon(
-                        Icons.church_outlined,
-                        color: theme.colorScheme.primary,
-                        size: 34,
-                      ),
+                      backgroundImage: church.logoUrl.trim().isNotEmpty
+                          ? NetworkImage(church.logoUrl.trim())
+                          : null,
+                      child: church.logoUrl.trim().isNotEmpty
+                          ? null
+                          : Icon(
+                              Icons.church_outlined,
+                              color: theme.colorScheme.primary,
+                              size: 34,
+                            ),
                     ),
                     const SizedBox(width: 14),
                     Expanded(
@@ -131,6 +136,39 @@ class _ChurchPublicProfileScreenState extends State<ChurchPublicProfileScreen> {
                     ),
                   ],
                 ),
+                // Who leads the church is one of the first things a visitor
+                // wants to know, so it sits with the header rather than in a
+                // details list further down.
+                if (church.managingPastorName.trim().isNotEmpty) ...[
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      Icon(Icons.person_outline,
+                          size: 18, color: theme.colorScheme.primary),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text.rich(
+                          TextSpan(children: [
+                            TextSpan(
+                              text: church.managingPastorTitle.trim().isEmpty
+                                  ? church.managingPastorName.trim()
+                                  : '${church.managingPastorTitle.trim()} '
+                                      '${church.managingPastorName.trim()}',
+                              style: const TextStyle(fontWeight: FontWeight.w800),
+                            ),
+                            if (church.managingPastorSince != null)
+                              TextSpan(
+                                text: '  ·  leading since '
+                                    '${church.managingPastorSince!.year}',
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                    color: theme.colorScheme.onSurfaceVariant),
+                              ),
+                          ]),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
                 const SizedBox(height: 18),
                 if (church.about.trim().isNotEmpty)
                   Text(church.about.trim())

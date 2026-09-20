@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../services/haptic_service.dart';
+import 'package:image_picker/image_picker.dart';
 import '../../providers/user_role_provider.dart';
 import '../../services/church_service.dart';
 import '../../models/church_model.dart';
@@ -29,9 +31,14 @@ class _ChurchAdminSettingsScreenState extends State<ChurchAdminSettingsScreen> {
   final _contactPhoneController = TextEditingController();
   final _websiteController = TextEditingController();
   final _serviceTimesController = TextEditingController();
+  final _pastorNameController = TextEditingController();
+  final _pastorTitleController = TextEditingController();
   Church? _church;
+  DateTime? _pastorSince;
+  String _logoUrl = '';
   bool _isLoading = true;
   bool _isSaving = false;
+  bool _isUploadingLogo = false;
 
   @override
   void initState() {
@@ -57,6 +64,10 @@ class _ChurchAdminSettingsScreenState extends State<ChurchAdminSettingsScreen> {
           _contactPhoneController.text = church?.contactPhone ?? '';
           _websiteController.text = church?.websiteUrl ?? '';
           _serviceTimesController.text = church?.serviceTimesNote ?? '';
+          _pastorNameController.text = church?.managingPastorName ?? '';
+          _pastorTitleController.text = church?.managingPastorTitle ?? '';
+          _pastorSince = church?.managingPastorSince;
+          _logoUrl = church?.logoUrl ?? '';
         });
       }
     }
@@ -64,6 +75,41 @@ class _ChurchAdminSettingsScreenState extends State<ChurchAdminSettingsScreen> {
       setState(() {
         _isLoading = false;
       });
+    }
+  }
+
+  Future<void> _pickLogo() async {
+    final picked = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 800,
+      maxHeight: 800,
+      imageQuality: 85,
+    );
+    if (picked == null) return;
+    final churchId = _church?.placeId.isNotEmpty == true
+        ? _church!.placeId
+        : _church?.id ?? '';
+    if (churchId.isEmpty) return;
+
+    setState(() => _isUploadingLogo = true);
+    final bytes = await picked.readAsBytes();
+    final extension = picked.path.split('.').last;
+    final url = await _churchService.uploadChurchLogo(
+      churchId: churchId,
+      bytes: bytes,
+      fileExtension: extension.isEmpty ? 'jpg' : extension,
+    );
+    if (!mounted) return;
+    setState(() {
+      _isUploadingLogo = false;
+      if (url != null) _logoUrl = url;
+    });
+    if (url == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('That logo could not be uploaded.')),
+      );
+    } else {
+      HapticService.success();
     }
   }
 
@@ -79,6 +125,8 @@ class _ChurchAdminSettingsScreenState extends State<ChurchAdminSettingsScreen> {
     _contactPhoneController.dispose();
     _websiteController.dispose();
     _serviceTimesController.dispose();
+    _pastorNameController.dispose();
+    _pastorTitleController.dispose();
     super.dispose();
   }
 
@@ -128,6 +176,10 @@ class _ChurchAdminSettingsScreenState extends State<ChurchAdminSettingsScreen> {
       contactPhone: _contactPhoneController.text.trim(),
       websiteUrl: _websiteController.text.trim(),
       serviceTimesNote: _serviceTimesController.text.trim(),
+      logoUrl: _logoUrl,
+      managingPastorName: _pastorNameController.text.trim(),
+      managingPastorTitle: _pastorTitleController.text.trim(),
+      managingPastorSince: _pastorSince,
     );
 
     try {
@@ -159,6 +211,52 @@ class _ChurchAdminSettingsScreenState extends State<ChurchAdminSettingsScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              // The picture is what a member sees first on a church profile,
+              // so it sits at the top of the form rather than buried below
+              // the text fields.
+              Center(
+                child: Column(
+                  children: [
+                    GestureDetector(
+                      onTap: _isUploadingLogo ? null : _pickLogo,
+                      child: Container(
+                        width: 96,
+                        height: 96,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .surfaceContainerHighest,
+                          image: _logoUrl.isNotEmpty
+                              ? DecorationImage(
+                                  image: NetworkImage(_logoUrl),
+                                  fit: BoxFit.cover)
+                              : null,
+                        ),
+                        child: _isUploadingLogo
+                            ? const Center(
+                                child: SizedBox(
+                                    width: 22,
+                                    height: 22,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2)))
+                            : _logoUrl.isEmpty
+                                ? const Icon(Icons.add_a_photo_outlined,
+                                    size: 30)
+                                : null,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextButton(
+                      onPressed: _isUploadingLogo ? null : _pickLogo,
+                      child: Text(_logoUrl.isEmpty
+                          ? 'Add church photo'
+                          : 'Change photo'),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
               AppTextField(controller: _nameController, label: 'Church Name'),
               const SizedBox(height: 12),
               AppTextField(controller: _addressController, label: 'Address'),
@@ -169,6 +267,38 @@ class _ChurchAdminSettingsScreenState extends State<ChurchAdminSettingsScreen> {
               ),
               const SizedBox(height: 12),
               AppTextField(controller: _timezoneController, label: 'Timezone'),
+              const SizedBox(height: 12),
+              AppTextField(
+                controller: _pastorNameController,
+                label: 'Managing pastor',
+              ),
+              const SizedBox(height: 12),
+              AppTextField(
+                controller: _pastorTitleController,
+                label: 'Title (e.g. Senior Pastor)',
+              ),
+              const SizedBox(height: 12),
+              // Leadership changes, so the profile records when this pastor
+              // took over rather than implying they always led it.
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.event_outlined),
+                title: const Text('Leading since'),
+                subtitle: Text(_pastorSince == null
+                    ? 'Not set'
+                    : '${_pastorSince!.year}-${_pastorSince!.month.toString().padLeft(2, '0')}'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () async {
+                  final now = DateTime.now();
+                  final picked = await showDatePicker(
+                    context: context,
+                    initialDate: _pastorSince ?? now,
+                    firstDate: DateTime(1900),
+                    lastDate: now,
+                  );
+                  if (picked != null) setState(() => _pastorSince = picked);
+                },
+              ),
               const SizedBox(height: 12),
               AppTextField(
                 controller: _aboutController,

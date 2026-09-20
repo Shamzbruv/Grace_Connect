@@ -102,7 +102,46 @@ class ChurchService {
       'p_contact_phone': church.contactPhone,
       'p_website_url': church.websiteUrl,
       'p_service_times_note': church.serviceTimesNote,
+      // Empty means "unchanged" for the logo: a text-only profile save must
+      // not wipe an image uploaded separately.
+      'p_logo_url': church.logoUrl.trim().isEmpty ? null : church.logoUrl.trim(),
+      'p_managing_pastor_name': church.managingPastorName,
+      'p_managing_pastor_title': church.managingPastorTitle,
+      'p_managing_pastor_since':
+          church.managingPastorSince?.toIso8601String().split('T').first,
     });
+  }
+
+  /// Uploads a church logo and returns its public URL.
+  ///
+  /// The object is stored under the church's own id prefix, which is what
+  /// the storage policy checks -- one church cannot write into another's
+  /// folder even with a valid session.
+  Future<String?> uploadChurchLogo({
+    required String churchId,
+    required Uint8List bytes,
+    required String fileExtension,
+  }) async {
+    try {
+      final safeExtension =
+          fileExtension.replaceAll(RegExp(r'[^A-Za-z0-9]'), '').toLowerCase();
+      // A new name each time: an overwritten object keeps its old URL, so
+      // caches and already-rendered profiles would keep the previous image.
+      final path =
+          '\$churchId/logo_\${DateTime.now().millisecondsSinceEpoch}.\$safeExtension';
+      await _supabase.storage.from('church_media').uploadBinary(
+            path,
+            bytes,
+            fileOptions: FileOptions(
+              contentType: safeExtension == 'png' ? 'image/png' : 'image/jpeg',
+              upsert: false,
+            ),
+          );
+      return _supabase.storage.from('church_media').getPublicUrl(path);
+    } catch (error) {
+      debugPrint('Church logo upload failed: \$error');
+      return null;
+    }
   }
 
   Stream<List<ServiceSchedule>> getSchedules(String churchId) {

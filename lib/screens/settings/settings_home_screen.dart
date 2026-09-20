@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 import '../../providers/user_role_provider.dart';
 import '../../services/developer_service.dart';
@@ -155,8 +156,9 @@ class SettingsHomeScreen extends StatelessWidget {
                   _buildSettingsTile(context, Icons.help_outline,
                       'Help & Support', 'Tickets, Contact', '/support'),
                   const Divider(height: 1),
-                  _buildSettingsTile(context, Icons.bug_report_outlined,
-                      'Beta Feedback', 'Report a bug', '/settings/feedback'),
+                  _buildSettingsTile(context, Icons.feedback_outlined,
+                      'Send Feedback', 'Report a problem or suggest an idea',
+                      '/settings/feedback'),
                 ],
               ),
             ),
@@ -189,9 +191,20 @@ class SettingsHomeScreen extends StatelessWidget {
               },
             ),
             const SizedBox(height: 32),
-            Text('Version 1.0.15-beta',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant)),
+            // Was hardcoded to 1.0.15-beta and had drifted several releases
+            // behind the real build, which makes a support report useless.
+            FutureBuilder<PackageInfo>(
+              future: PackageInfo.fromPlatform(),
+              builder: (context, snapshot) {
+                final info = snapshot.data;
+                final label = info == null
+                    ? 'Grace Connect'
+                    : 'Version ${info.version} (${info.buildNumber})';
+                return Text(label,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant));
+              },
+            ),
             const SizedBox(height: 32),
           ],
         ),

@@ -20,6 +20,10 @@ class Church {
   final String contactEmail;
   final String contactPhone;
   final String websiteUrl;
+  final String logoUrl;
+  final String managingPastorName;
+  final String managingPastorTitle;
+  final DateTime? managingPastorSince;
   final String serviceTimesNote;
 
   Church({
@@ -44,6 +48,10 @@ class Church {
     this.contactEmail = '',
     this.contactPhone = '',
     this.websiteUrl = '',
+    this.logoUrl = '',
+    this.managingPastorName = '',
+    this.managingPastorTitle = '',
+    this.managingPastorSince,
     this.serviceTimesNote = '',
   });
 
@@ -71,6 +79,11 @@ class Church {
       liveIsPublic:
           data['live_is_public'] == true || data['liveIsPublic'] == true,
       about: data['about'] ?? '',
+      logoUrl: data['logo_url']?.toString() ?? '',
+      managingPastorName: data['managing_pastor_name']?.toString() ?? '',
+      managingPastorTitle: data['managing_pastor_title']?.toString() ?? '',
+      managingPastorSince:
+          DateTime.tryParse(data['managing_pastor_since']?.toString() ?? ''),
       foundedYear: data['founded_year'] is int
           ? data['founded_year'] as int
           : data['foundedYear'] is int

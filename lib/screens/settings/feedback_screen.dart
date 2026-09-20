@@ -68,7 +68,7 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
       'platform': platform,
       'appVersion': packageInfo.version,
       'buildNumber': packageInfo.buildNumber,
-      'source': 'Beta Feedback',
+      'source': 'App Feedback',
     };
 
     if (kIsWeb) {
@@ -159,7 +159,7 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
         'submit_support_ticket',
         params: {
           'p_issue_type': _type,
-          'p_app_section': 'Beta Feedback',
+          'p_app_section': 'App Feedback',
           'p_summary': _type,
           'p_description': message,
           'p_impact': _type == 'Bug Report' ? 'Medium' : 'Low',
@@ -203,7 +203,7 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
     final theme = Theme.of(context);
 
     return AppScaffold(
-      title: 'Beta Feedback',
+      title: 'Send Feedback',
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),
         child: Column(
