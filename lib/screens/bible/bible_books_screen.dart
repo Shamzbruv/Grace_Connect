@@ -8,6 +8,7 @@ import '../../services/daily_bible_quiz_service.dart';
 import '../../services/daily_motivation_service.dart';
 import '../../services/bible_streak_service.dart';
 import 'bible_chapters_screen.dart';
+import 'bible_search_delegate.dart';
 
 class BibleBooksScreen extends StatefulWidget {
   const BibleBooksScreen({
@@ -375,6 +376,14 @@ class _BibleBooksScreenState extends State<BibleBooksScreen> {
           ),
           backgroundColor: Colors.indigo,
           actions: [
+            IconButton(
+              tooltip: 'Search scriptures',
+              onPressed: () => showSearch(
+                context: context,
+                delegate: BibleSearchDelegate(),
+              ),
+              icon: const Icon(Icons.search),
+            ),
             FutureBuilder<_BibleActionAvailability>(
               future: _actionAvailabilityFuture,
               builder: (context, snapshot) {
