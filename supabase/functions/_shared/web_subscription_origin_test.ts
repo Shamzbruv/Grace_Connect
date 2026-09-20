@@ -21,6 +21,21 @@ Deno.test("web subscription origins require an exact production origin", () => {
   assert(!isAllowedWebSubscriptionOrigin(null), "missing origin rejected");
 });
 
+Deno.test("the live graceconnect.love site is allowed", () => {
+  assert(
+    isAllowedWebSubscriptionOrigin("https://www.graceconnect.love"),
+    "www live origin",
+  );
+  assert(
+    isAllowedWebSubscriptionOrigin("https://graceconnect.love"),
+    "apex live origin",
+  );
+  assert(
+    !isAllowedWebSubscriptionOrigin("https://graceconnect.love.attacker.example"),
+    "lookalike of the live origin must be rejected",
+  );
+});
+
 Deno.test("configured and local development origins are explicit", () => {
   const origins = webSubscriptionOrigins("https://staging.graceconnect.app");
   assert(origins.has("https://staging.graceconnect.app"), "configured origin");

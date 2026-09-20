@@ -1,4 +1,9 @@
+// graceconnect.love is the live site. The .app entries predate it and no
+// longer resolve at all, so on their own this list would have rejected every
+// real request from the actual website.
 const defaultOrigins = [
+  "https://graceconnect.love",
+  "https://www.graceconnect.love",
   "https://graceconnect.app",
   "https://www.graceconnect.app",
   "https://graceconnect-app.onrender.com",

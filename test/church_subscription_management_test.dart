@@ -173,11 +173,24 @@ void main() {
     expect(screen, isNot(contains('Card Number')));
     expect(screen, isNot(contains('CVV')));
     expect(screen, isNot(contains('isPremium')));
-    expect(screen, contains('no card details, payment links'));
+    // These assertions used to require the screen to state that it offered
+    // no payment link at all. Subscribing and cancelling now deliberately
+    // redirect to the Grace Connect website, so what still has to hold is
+    // narrower but unchanged in spirit: no card is ever entered or charged
+    // inside the app, and the only destination it opens is our own site.
+    expect(screen, contains('no card details are entered or stored in this app'));
     expect(screen, contains('JMD amounts in brackets are approximate'));
-    expect(screen, contains('ACCOUNT MANAGEMENT ONLY'));
-    expect(screen, contains('Purchasing and enrollment are unavailable'));
-    expect(screen, contains('pricing table is read-only'));
+    expect(screen, contains('No payment is taken inside this app'));
+    expect(screen, contains('Subscriptions are purchased on the Grace Connect website'));
+
+    // The redirect targets are pinned: a payment provider's domain must never
+    // be opened straight from the app, because the amount is only signed
+    // server-side once the leader has authenticated on the website.
+    expect(screen, contains("_openSubscriptionWebsite('subscribe.html')"));
+    expect(screen, contains("_openSubscriptionWebsite('manage-subscription.html')"));
+    expect(screen, contains("Uri.https('www.graceconnect.love', path)"));
+    expect(screen, isNot(contains('fygaro')));
+    expect(screen, isNot(contains('checkoutUrl')));
     expect(screen, contains('Plan contact name'));
     expect(screen, contains('Plan contact email'));
     expect(screen, isNot(contains('Billing contact name')));

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../models/church_subscription_management.dart';
 import '../../providers/user_role_provider.dart';
@@ -22,6 +23,23 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
   final TextEditingController _contactEmailController = TextEditingController();
   final TextEditingController _contactPhoneController = TextEditingController();
   final TextEditingController _noteController = TextEditingController();
+
+  /// Opens a page on the Grace Connect website.
+  ///
+  /// Paying and cancelling both live on the website rather than in the app.
+  /// An external browser is used deliberately: the church leader signs in
+  /// there with the same credentials, and a payment page inside an embedded
+  /// webview is both harder to trust and harder for a password manager to
+  /// fill.
+  Future<void> _openSubscriptionWebsite(String path) async {
+    final uri = Uri.https('www.graceconnect.love', path);
+    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!opened && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not open ${uri.toString()}')),
+      );
+    }
+  }
 
   Future<ChurchSubscriptionManagement>? _managementFuture;
   bool _contactSeeded = false;
@@ -332,10 +350,12 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                     snapshot.data!,
                     requestType: 'billing_support',
                   ),
-                  onCancellation: () => _openRequestSheet(
-                    snapshot.data!,
-                    requestType: 'cancellation',
-                  ),
+                  // Cancelling and subscribing both happen on the website,
+                  // where the church leader signs in with these same
+                  // credentials and the payment provider is reachable.
+                  onSubscribe: () => _openSubscriptionWebsite('subscribe.html'),
+                  onManageOnline: () =>
+                      _openSubscriptionWebsite('manage-subscription.html'),
                 );
               },
             ),
@@ -371,13 +391,15 @@ class _SubscriptionBody extends StatelessWidget {
     required this.management,
     required this.onRefresh,
     required this.onBillingHelp,
-    required this.onCancellation,
+    required this.onSubscribe,
+    required this.onManageOnline,
   });
 
   final ChurchSubscriptionManagement management;
   final Future<void> Function() onRefresh;
   final VoidCallback onBillingHelp;
-  final VoidCallback onCancellation;
+  final VoidCallback onSubscribe;
+  final VoidCallback onManageOnline;
 
   @override
   Widget build(BuildContext context) {
@@ -489,12 +511,12 @@ class _SubscriptionBody extends StatelessWidget {
           ),
           const SizedBox(height: 20),
           if (subscription == null)
-            const _EnrollmentUnavailablePanel()
+            _SubscribeOnWebPanel(onSubscribe: onSubscribe)
           else ...[
             const _SectionTitle(
               title: 'Existing-plan account management',
               subtitle:
-                  'Contact billing support or request cancellation for the recorded plan.',
+                  'Contact billing support, or manage and cancel this plan on the Grace Connect website.',
             ),
             const SizedBox(height: 10),
             Row(
@@ -517,9 +539,9 @@ class _SubscriptionBody extends StatelessWidget {
                   const SizedBox(width: 10),
                   Expanded(
                     child: OutlinedButton.icon(
-                      onPressed: onCancellation,
-                      icon: const Icon(Icons.event_busy_outlined),
-                      label: const Text('Cancel plan'),
+                      onPressed: onManageOnline,
+                      icon: const Icon(Icons.open_in_new_rounded),
+                      label: const Text('Manage / cancel'),
                       style: OutlinedButton.styleFrom(
                         minimumSize: const Size.fromHeight(50),
                         foregroundColor: Theme.of(context).colorScheme.error,
@@ -675,7 +697,7 @@ class _HeroCard extends StatelessWidget {
           Text(
             active
                 ? 'View the recorded monthly terms and manage this existing church plan. No purchase or payment happens in this Android app.'
-                : 'Purchasing and enrollment are unavailable in this Android app. Pricing below is reference information only, with no external payment destination.',
+                : 'Subscriptions are purchased on the Grace Connect website, not inside this app. Pricing below shows what your church would pay.',
             style: TextStyle(
               color: Colors.white.withValues(alpha: 0.86),
               height: 1.4,
@@ -689,22 +711,45 @@ class _HeroCard extends StatelessWidget {
   }
 }
 
-class _EnrollmentUnavailablePanel extends StatelessWidget {
-  const _EnrollmentUnavailablePanel();
+class _SubscribeOnWebPanel extends StatelessWidget {
+  const _SubscribeOnWebPanel({required this.onSubscribe});
+
+  final VoidCallback onSubscribe;
 
   @override
   Widget build(BuildContext context) {
-    return const _SoftPanel(
-      padding: EdgeInsets.all(16),
-      child: Row(
+    return _SoftPanel(
+      padding: const EdgeInsets.all(16),
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.mobile_off_outlined, color: Color(0xFF245FC8)),
-          SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              'Plan purchasing and enrollment are unavailable in this Android app. The pricing table is read-only, and this screen provides no external payment link or payment instructions.',
-              style: TextStyle(fontSize: 12, height: 1.45),
+          const Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.language_rounded, color: Color(0xFF245FC8)),
+              SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Subscriptions are purchased on the Grace Connect website. '
+                  'Sign in there with this same account, choose your billing '
+                  'currency, and pay securely. Your plan follows your active '
+                  'member count, and access is activated automatically once '
+                  'the payment is confirmed.',
+                  style: TextStyle(fontSize: 12, height: 1.45),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          FilledButton.icon(
+            onPressed: onSubscribe,
+            icon: const Icon(Icons.open_in_new_rounded),
+            label: const Text('Subscribe on the website'),
+            style: FilledButton.styleFrom(
+              minimumSize: const Size.fromHeight(50),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
             ),
           ),
         ],
@@ -965,7 +1010,7 @@ class _NonTransactionalNotice extends StatelessWidget {
           SizedBox(width: 10),
           Expanded(
             child: Text(
-              'ACCOUNT MANAGEMENT ONLY — This Android screen does not sell, purchase, enroll, activate, or take payment for a plan. It shows pricing and terms, and supports existing-plan help or cancellation only.',
+              'No payment is taken inside this app. This screen shows your plan, pricing, and terms, and links out to the Grace Connect website where subscribing, managing, and cancelling actually happen.',
               style: TextStyle(
                 color: Color(0xFF12396F),
                 fontSize: 12,
@@ -1001,7 +1046,7 @@ class _HonestBillingNotice extends StatelessWidget {
           const SizedBox(width: 10),
           const Expanded(
             child: Text(
-              'Monthly billing disclosure: no card details, payment links, or payment instructions are provided here. Purchasing and enrollment are unavailable in this Android app. Plans, trials, and manual grants do not auto-renew or auto-convert. Existing subscriptions show their access-through date below and can request cancellation here.',
+              'Monthly billing disclosure: no card details are entered or stored in this app. Subscriptions bought on the website renew monthly until cancelled; developer grants and invoiced plans do not auto-renew or auto-convert. Cancelling never ends access early — the access-through date below is honoured in full.',
               style: TextStyle(
                 color: Color(0xFF624A0D),
                 fontSize: 12,
