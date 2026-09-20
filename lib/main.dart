@@ -10,6 +10,7 @@ import 'access/app_feature.dart';
 import 'providers/user_role_provider.dart';
 import 'services/attendance_service.dart';
 import 'services/auth_flow_service.dart';
+import 'services/haptic_service.dart';
 import 'services/notification_service.dart';
 import 'services/supabase_resilience.dart';
 import 'package:flutter/material.dart';
@@ -115,6 +116,10 @@ Future<void> main() async {
     );
   }
   await _configureCrashReporting();
+
+  // The haptics switch was writing a preference nothing read. Load it once
+  // here so feedback can fire synchronously on tap.
+  await HapticService.load();
 
   await Supabase.initialize(
     url: 'https://nimgsgnkcvddomrgkawb.supabase.co',

@@ -15,6 +15,7 @@ class AppBottomMenu extends StatelessWidget {
     this.selectedIndex,
     this.onDestinationSelected,
     this.onDestinationLongPressed,
+    this.feedShowsReels = false,
     this.subscriptionLimited = false,
     this.limitedAllowedIndexes = const {0},
     this.limitedAllowedRoutes = const {'/community', '/subscription'},
@@ -29,6 +30,12 @@ class AppBottomMenu extends StatelessWidget {
   /// Community Feed and Reel Grace without a trip through the tab bar's
   /// normal selection path.
   final ValueChanged<int>? onDestinationLongPressed;
+
+  /// Reel Grace is a mode of the Feed destination, so the bar has to say
+  /// which mode is showing. Without this the label still reads "Feed" while
+  /// reels are full screen, and there is no way to tell you are in a
+  /// sub-mode or how to get back.
+  final bool feedShowsReels;
   final bool subscriptionLimited;
   final Set<int> limitedAllowedIndexes;
   final Set<String> limitedAllowedRoutes;
@@ -251,7 +258,7 @@ class AppBottomMenu extends StatelessWidget {
               index,
               _menuIcon(
                 context,
-                _primaryItems[index].icon,
+                _iconFor(index, selected: false),
                 disabled: _isPrimaryDisabled(index, effectiveAccess),
               ),
             ),
@@ -259,11 +266,11 @@ class AppBottomMenu extends StatelessWidget {
               index,
               _menuIcon(
                 context,
-                _primaryItems[index].selectedIcon,
+                _iconFor(index, selected: true),
                 disabled: _isPrimaryDisabled(index, effectiveAccess),
               ),
             ),
-            label: _primaryItems[index].label,
+            label: _labelFor(index),
           ),
       ],
     );
@@ -271,6 +278,21 @@ class AppBottomMenu extends StatelessWidget {
 
   /// NavigationBar exposes no long-press callback, so the icon carries it.
   /// HitTestBehavior.translucent keeps the normal tap working underneath.
+  /// Index 0 is Feed, which hosts both the Community Feed and Reel Grace.
+  IconData _iconFor(int index, {required bool selected}) {
+    if (index == 0 && feedShowsReels) {
+      return selected
+          ? Icons.play_circle_fill_rounded
+          : Icons.play_circle_outline_rounded;
+    }
+    return selected
+        ? _primaryItems[index].selectedIcon
+        : _primaryItems[index].icon;
+  }
+
+  String _labelFor(int index) =>
+      index == 0 && feedShowsReels ? 'Reels' : _primaryItems[index].label;
+
   Widget _longPressable(int index, Widget child) {
     final handler = onDestinationLongPressed;
     if (handler == null) return child;

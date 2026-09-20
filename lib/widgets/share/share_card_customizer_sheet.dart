@@ -23,6 +23,7 @@ Future<void> showShareCardCustomizer(
   required String shareFileName,
   required String shareText,
   String? shareSubject,
+  String? sourceNote,
 }) {
   return showModalBottomSheet<void>(
     context: context,
@@ -34,6 +35,7 @@ Future<void> showShareCardCustomizer(
     builder: (_) => _ShareCardCustomizerSheet(
       quoteText: quoteText,
       attribution: attribution,
+      sourceNote: sourceNote,
       shareFileName: shareFileName,
       shareText: shareText,
       shareSubject: shareSubject,
@@ -45,6 +47,7 @@ class _ShareCardCustomizerSheet extends StatefulWidget {
   const _ShareCardCustomizerSheet({
     required this.quoteText,
     required this.attribution,
+    required this.sourceNote,
     required this.shareFileName,
     required this.shareText,
     required this.shareSubject,
@@ -52,6 +55,7 @@ class _ShareCardCustomizerSheet extends StatefulWidget {
 
   final String quoteText;
   final String? attribution;
+  final String? sourceNote;
   final String shareFileName;
   final String shareText;
   final String? shareSubject;
@@ -230,6 +234,7 @@ class _ShareCardCustomizerSheetState
                         style: style,
                         quoteText: widget.quoteText,
                         attribution: widget.attribution,
+                        sourceNote: widget.sourceNote,
                       ),
                     ),
                   ),

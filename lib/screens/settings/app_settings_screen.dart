@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import '../../services/haptic_service.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../providers/theme_provider.dart';
@@ -128,6 +130,10 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
                   (value) {
                     setState(() => _haptics = value);
                     _saveBool('haptics_enabled', value);
+                    // Apply now rather than at next launch, and confirm the
+                    // change with the very feedback being switched on.
+                    HapticService.setEnabled(value);
+                    if (value) HapticService.success();
                   },
                 ),
                 _buildActionTile(

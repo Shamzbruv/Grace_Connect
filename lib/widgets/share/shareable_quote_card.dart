@@ -20,12 +20,34 @@ class ShareableQuoteCard extends StatelessWidget {
     required this.style,
     required this.quoteText,
     this.attribution,
+    this.sourceNote,
   });
 
   final QuoteBackground background;
   final ShareCardStyle style;
   final String quoteText;
   final String? attribution;
+
+  /// Shown under the reference. The Daily Word is the app's own reflection
+  /// drawn from a passage, not the passage itself -- without saying so, a
+  /// shared card reads as though scripture said these exact words.
+  final String? sourceNote;
+
+  /// A size that fits the card on its own, before the member touches the
+  /// slider. The card is square and the text block is the only thing in it,
+  /// so length is a good predictor: a 60-word Daily Word at 24pt overflows,
+  /// while a short verse at 15pt looks lost. The slider still scales on top
+  /// of this, so choosing a size by hand keeps working.
+  double _autoFitBaseSize() {
+    final characters = quoteText.trim().length;
+    if (characters <= 70) return 26;
+    if (characters <= 140) return 23;
+    if (characters <= 220) return 20;
+    if (characters <= 320) return 17.5;
+    if (characters <= 430) return 15.5;
+    if (characters <= 560) return 14;
+    return 12.5;
+  }
 
   Alignment _textAlignmentFor(String safeArea) {
     switch (safeArea) {
@@ -43,6 +65,7 @@ class ShareableQuoteCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final textColor = style.textColor.color;
+    final baseSize = _autoFitBaseSize();
     return AspectRatio(
       aspectRatio: 1,
       child: ClipRRect(
@@ -94,7 +117,7 @@ class ShareableQuoteCard extends StatelessWidget {
                         style.font.familyName,
                         textStyle: TextStyle(
                           color: textColor,
-                          fontSize: 24 * style.fontScale,
+                          fontSize: baseSize * style.fontScale,
                           fontWeight: FontWeight.w700,
                           height: 1.35,
                           shadows: [
@@ -115,9 +138,27 @@ class ShareableQuoteCard extends StatelessWidget {
                           style.font.familyName,
                           textStyle: TextStyle(
                             color: textColor.withValues(alpha: 0.9),
-                            fontSize: 16 * style.fontScale,
+                            fontSize: (baseSize * 0.62).clamp(11, 18) *
+                                style.fontScale,
                             fontWeight: FontWeight.w600,
                             fontStyle: FontStyle.italic,
+                          ),
+                        ),
+                      ),
+                    ],
+                    if (sourceNote != null && sourceNote!.trim().isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        sourceNote!,
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.getFont(
+                          style.font.familyName,
+                          textStyle: TextStyle(
+                            color: textColor.withValues(alpha: 0.75),
+                            fontSize: (baseSize * 0.46).clamp(9, 13) *
+                                style.fontScale,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 0.2,
                           ),
                         ),
                       ),

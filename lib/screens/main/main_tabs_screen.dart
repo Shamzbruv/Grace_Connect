@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -11,6 +10,7 @@ import '../../widgets/app_bottom_menu.dart';
 import '../../widgets/main_tab_scope.dart';
 import '../bible/bible_home_screen.dart';
 import '../../models/reel.dart';
+import '../../services/haptic_service.dart';
 import '../community/feed_hub_screen.dart';
 import '../dashboard/dashboard_screen.dart';
 import '../dashboard/variants/unconnected_dashboard.dart';
@@ -53,14 +53,23 @@ class _MainTabsScreenState extends State<MainTabsScreen> {
   void initState() {
     super.initState();
     _currentIndex = widget.initialIndex.clamp(0, 4);
+    // The bottom bar shows which Feed mode is active, so it has to rebuild
+    // when the mode changes -- otherwise it still reads "Feed" while Reel
+    // Grace is on screen.
+    _feedHub.addListener(_onFeedModeChanged);
     _pageController = PageController(initialPage: _currentIndex);
   }
 
   @override
   void dispose() {
+    _feedHub.removeListener(_onFeedModeChanged);
     _feedHub.dispose();
     _pageController.dispose();
     super.dispose();
+  }
+
+  void _onFeedModeChanged() {
+    if (mounted) setState(() {});
   }
 
   void _setTab(int index) {
@@ -80,7 +89,7 @@ class _MainTabsScreenState extends State<MainTabsScreen> {
         } else {
           _feedHub.showCommunity();
         }
-        HapticFeedback.selectionClick();
+        HapticService.selection();
         return;
       }
       return;
@@ -164,12 +173,13 @@ class _MainTabsScreenState extends State<MainTabsScreen> {
         ),
         bottomNavigationBar: AppBottomMenu(
           selectedIndex: _currentIndex,
+          feedShowsReels: _feedHub.value == PrimaryFeedMode.reelGrace,
           onDestinationSelected: _setTab,
           onDestinationLongPressed: (index) {
             if (index != 0) return;
             if (_currentIndex != 0) _setTab(0);
             _feedHub.toggle();
-            HapticFeedback.selectionClick();
+            HapticService.selection();
           },
           access: access,
         ),

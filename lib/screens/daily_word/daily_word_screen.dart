@@ -113,7 +113,12 @@ class _DailyWordScreenState extends State<DailyWordScreen> {
                   'grace_daily_word_${DateFormat('yyyyMMdd').format(motivation.publishDate.toLocal())}.png',
             ),
           ],
-          text: 'Grace Connect Daily Word • ${motivation.scriptureReference}',
+          // Says plainly that this is a reflection, not the passage itself.
+          // "Original" is the first option, so this is the path most shares
+          // take -- it cannot be the one that reads as scripture.
+          text: 'Grace Connect Daily Word — a reflection on '
+              '${motivation.scriptureReference} (not a direct quotation of '
+              'Scripture).',
           subject: motivation.title,
         ),
       );
@@ -165,6 +170,10 @@ class _DailyWordScreenState extends State<DailyWordScreen> {
       context,
       quoteText: motivation.message,
       attribution: motivation.scriptureReference,
+      // The Daily Word is the app's own reflection drawn from the passage,
+      // not the passage itself. Shared without this, the card reads as
+      // though scripture said these exact words.
+      sourceNote: 'A Grace Connect reflection on this passage — not a direct quotation of Scripture.',
       shareFileName:
           'grace_daily_word_${DateFormat('yyyyMMdd').format(motivation.publishDate.toLocal())}',
       shareText: 'Grace Connect Daily Word • ${motivation.scriptureReference}',
