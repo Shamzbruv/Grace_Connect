@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../models/church_subscription_management.dart';
 import '../../providers/user_role_provider.dart';
+import '../../services/analytics_service.dart';
 import '../../services/church_subscription_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_bottom_menu.dart';
@@ -32,6 +33,11 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
   /// webview is both harder to trust and harder for a password manager to
   /// fill.
   Future<void> _openSubscriptionWebsite(String path) async {
+    if (path.startsWith('subscribe')) {
+      Analytics.subscriptionCheckoutOpened();
+    } else {
+      Analytics.subscriptionManageOpened();
+    }
     final uri = Uri.https('www.graceconnect.love', path);
     final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
     if (!opened && mounted) {

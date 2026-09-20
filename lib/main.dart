@@ -83,6 +83,7 @@ import 'screens/ministries/ministries_screen.dart';
 import 'screens/transfer/church_transfer_screen.dart';
 import 'screens/grace_rooms/grace_rooms_home_screen.dart';
 import 'screens/grace_rooms/grace_room_chat_screen.dart';
+import 'services/analytics_service.dart';
 import 'widgets/auth_required.dart';
 import 'widgets/live_mini_player_overlay.dart';
 
@@ -278,6 +279,12 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
             title: 'Grace Connect',
             debugShowCheckedModeBanner: false,
             navigatorKey: NotificationService.navigatorKey,
+            // Reports every pushed route as a screen view, so screen
+            // tracking does not depend on remembering to instrument each
+            // new screen by hand.
+            navigatorObservers: [
+              if (Analytics.observer != null) Analytics.observer!,
+            ],
             builder: (context, child) => LiveMiniPlayerOverlay(
               child: child ?? const SizedBox.shrink(),
             ),
