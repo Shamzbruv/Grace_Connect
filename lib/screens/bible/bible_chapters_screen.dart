@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../../services/haptic_service.dart';
 import '../../models/bible_data.dart';
 import 'bible_reader_screen.dart';
 
@@ -28,6 +29,7 @@ class BibleChaptersScreen extends StatelessWidget {
           final chapterNum = i + 1;
           return InkWell(
             onTap: () {
+              HapticService.selection();
               Navigator.push(
                   context,
                   MaterialPageRoute(

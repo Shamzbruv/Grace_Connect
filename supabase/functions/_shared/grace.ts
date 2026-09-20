@@ -111,6 +111,19 @@ export function profileDisplayName(profile: Record<string, unknown>): string {
   return String(profile.fullName ?? profile.displayName ?? "Member").trim();
 }
 
+/**
+ * The first name on its own.
+ *
+ * Global boards mix every church on the platform, so showing a member's full
+ * legal name there exposes it to strangers. A first name is enough to
+ * recognise someone you know without handing their full name to people who
+ * do not.
+ */
+export function displayFirstName(fullName: string): string {
+  const first = String(fullName ?? "").trim().split(/\s+/)[0] ?? "";
+  return first || "Member";
+}
+
 export function jamaicaDateString(date = new Date()): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/Jamaica",

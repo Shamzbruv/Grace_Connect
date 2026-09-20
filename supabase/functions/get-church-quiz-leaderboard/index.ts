@@ -6,6 +6,7 @@ import {
   jamaicaMonthRange,
   jsonResponse,
   parseJamaicaMonthKey,
+  displayFirstName,
   profileDisplayName,
   profileQuizChurchId,
   profileQuizScope,
@@ -89,10 +90,32 @@ Deno.serve(async (request) => {
         ...(winnerRows ?? []).map((winner) => String(winner.member_id ?? "")),
       ].filter(Boolean)),
     );
+    const quotedIds = memberIds.map((id) => `"${id}"`).join(",");
     const { data: users } = memberIds.length
-      ? await client.from("users").select("id, uid, fullName, displayName, photoUrl").in("id", memberIds)
+      ? await client
+        .from("users")
+        .select("id, uid, fullName, displayName, photoUrl")
+        .or(`id.in.(${quotedIds}),uid.in.(${quotedIds})`)
       : { data: [] };
-    const userMap = new Map((users ?? []).map((row) => [String(row.id ?? row.uid), row]));
+
+    // Indexed under both keys, because which one a row carries varies.
+    const userMap = new Map<string, Record<string, unknown>>();
+    for (const row of users ?? []) {
+      const record = row as Record<string, unknown>;
+      if (record.id) userMap.set(String(record.id), record);
+      if (record.uid) userMap.set(String(record.uid), record);
+    }
+
+    // On a global board every member but the viewer is shown by first name.
+    // The viewer keeps their own full name so they can find themselves.
+    const nameFor = (
+      member: Record<string, unknown>,
+      memberId: string,
+    ): string => {
+      const full = profileDisplayName(member);
+      if (leaderboardScope !== "global" || memberId === user.id) return full;
+      return displayFirstName(full);
+    };
 
     const entries = Array.from(grouped.values())
       .sort((a, b) =>
@@ -107,7 +130,7 @@ Deno.serve(async (request) => {
         return {
           rank: index + 1,
           member_id: entry.member_id,
-          display_name: profileDisplayName(member),
+          display_name: nameFor(member, entry.member_id),
           photo_url: String(member.photoUrl ?? ""),
           total_points: entry.total_score,
           correct_answers: entry.correct_answers,
@@ -125,7 +148,7 @@ Deno.serve(async (request) => {
         rank: winner.rank,
         quiz_month: winner.quiz_month,
         member_id: winner.member_id,
-        display_name: profileDisplayName(member),
+        display_name: nameFor(member, String(winner.member_id)),
         photo_url: String(member.photoUrl ?? ""),
         total_points: winner.total_points,
         correct_answers: winner.correct_answers,

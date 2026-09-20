@@ -10,6 +10,7 @@ import '../../services/direct_message_service.dart';
 import '../../services/social_profile_service.dart';
 import '../../services/user_service.dart';
 import '../../widgets/message_request_composer.dart';
+import '../../widgets/profile/public_posts_grid.dart';
 import '../../widgets/profile_photo_viewer.dart';
 import '../../widgets/ui/app_scaffold.dart';
 import '../messages/message_thread_screen.dart';
@@ -272,7 +273,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                       ),
                 ),
                 const SizedBox(height: 12),
-                _PublicPostsList(postsFuture: _postsFuture),
+                _PublicPostsSection(postsFuture: _postsFuture),
               ],
             ),
           );
@@ -350,8 +351,29 @@ class _ProfileHeader extends StatelessWidget {
   }
 }
 
-class _PublicPostsList extends StatelessWidget {
-  const _PublicPostsList({required this.postsFuture});
+class _StatChip extends StatelessWidget {
+  const _StatChip({
+    required this.icon,
+    required this.label,
+  });
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Chip(
+      avatar: Icon(icon, size: 16),
+      label: Text(label),
+      visualDensity: VisualDensity.compact,
+      backgroundColor: theme.colorScheme.surfaceContainerHighest,
+    );
+  }
+}
+
+class _PublicPostsSection extends StatelessWidget {
+  const _PublicPostsSection({required this.postsFuture});
 
   final Future<List<Post>> postsFuture;
 
@@ -372,176 +394,15 @@ class _PublicPostsList extends StatelessWidget {
             ),
           );
         }
-
-        final posts = snapshot.data ?? const <Post>[];
-        if (posts.isEmpty) {
-          return _InfoSection(
-            icon: Icons.feed_outlined,
+        return PublicPostsGrid(
+          posts: snapshot.data ?? const <Post>[],
+          emptyState: _InfoSection(
+            icon: Icons.grid_on_outlined,
             title: 'No public posts yet',
             body: 'Public posts will appear here.',
-          );
-        }
-
-        return Column(
-          children: [
-            for (final post in posts)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.surface,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: theme.dividerColor.withValues(alpha: 0.18),
-                    ),
-                  ),
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(14),
-                    onTap: () => Navigator.of(context).pushNamed(
-                      '/community_post?entityTable=community_posts&entityId=${Uri.encodeComponent(post.id)}',
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(14),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  post.content.isEmpty
-                                      ? 'Shared a post'
-                                      : post.content,
-                                  maxLines: 4,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  _formatPostDate(post.timestamp),
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    color: theme.colorScheme.onSurfaceVariant,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          _PublicPostPreview(post: post),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-          ],
+          ),
         );
       },
-    );
-  }
-}
-
-class _PublicPostPreview extends StatelessWidget {
-  const _PublicPostPreview({required this.post});
-
-  final Post post;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final mediaUrl = post.mediaUrl?.trim() ?? '';
-    final mediaType = post.mediaType?.toLowerCase() ?? '';
-    final isVideo = mediaType.startsWith('video');
-
-    Widget child;
-    if (mediaUrl.isEmpty) {
-      child = Icon(
-        Icons.chevron_right,
-        color: theme.colorScheme.onSurfaceVariant,
-      );
-    } else if (isVideo) {
-      child = Stack(
-        fit: StackFit.expand,
-        children: [
-          ColoredBox(color: theme.colorScheme.primaryContainer),
-          Center(
-            child: Icon(
-              Icons.play_circle_outline,
-              color: theme.colorScheme.onPrimaryContainer,
-            ),
-          ),
-        ],
-      );
-    } else {
-      child = Image.network(
-        mediaUrl,
-        fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => Icon(
-          Icons.image_not_supported_outlined,
-          color: theme.colorScheme.onSurfaceVariant,
-        ),
-      );
-    }
-
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(10),
-      child: ColoredBox(
-        color: theme.colorScheme.surfaceContainerHighest,
-        child: SizedBox(
-          width: 64,
-          height: 64,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              Center(child: child),
-              if (isVideo)
-                Align(
-                  alignment: Alignment.bottomRight,
-                  child: Container(
-                    margin: const EdgeInsets.all(4),
-                    padding: const EdgeInsets.all(3),
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.surface.withValues(alpha: 0.9),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Icon(
-                      Icons.videocam_outlined,
-                      size: 14,
-                      color: theme.colorScheme.onSurface,
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-String _formatPostDate(DateTime date) {
-  final local = date.toLocal();
-  return '${local.year.toString().padLeft(4, '0')}-'
-      '${local.month.toString().padLeft(2, '0')}-'
-      '${local.day.toString().padLeft(2, '0')}';
-}
-
-class _StatChip extends StatelessWidget {
-  const _StatChip({
-    required this.icon,
-    required this.label,
-  });
-
-  final IconData icon;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Chip(
-      avatar: Icon(icon, size: 16),
-      label: Text(label),
-      visualDensity: VisualDensity.compact,
-      backgroundColor: theme.colorScheme.surfaceContainerHighest,
     );
   }
 }

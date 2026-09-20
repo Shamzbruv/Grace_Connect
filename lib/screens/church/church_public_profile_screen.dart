@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../models/church_model.dart';
+import '../../widgets/profile/public_posts_grid.dart';
 import '../../models/post.dart';
 import '../../providers/user_role_provider.dart';
 import '../../services/community_service.dart';
@@ -250,14 +251,7 @@ class _ChurchPublicProfileScreenState extends State<ChurchPublicProfileScreen> {
                   child: Text('No public posts from this church yet.'),
                 );
               }
-              return Column(
-                children: [
-                  for (final post in posts.take(12)) ...[
-                    _ChurchPostTile(post: post),
-                    const SizedBox(height: 10),
-                  ],
-                ],
-              );
+              return PublicPostsGrid(posts: posts.take(18).toList());
             },
           ),
         ],
@@ -288,67 +282,3 @@ class _InfoRow extends StatelessWidget {
   }
 }
 
-class _ChurchPostTile extends StatelessWidget {
-  const _ChurchPostTile({required this.post});
-
-  final Post post;
-
-  @override
-  Widget build(BuildContext context) {
-    final mediaUrl = post.mediaUrl?.trim() ?? '';
-    final isVideo = post.mediaType == 'video';
-    return AppCard(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(10),
-            child: Container(
-              width: 78,
-              height: 78,
-              color: Theme.of(context)
-                  .colorScheme
-                  .surfaceContainerHighest
-                  .withValues(alpha: 0.55),
-              child: mediaUrl.isEmpty
-                  ? const Icon(Icons.dynamic_feed_outlined)
-                  : isVideo
-                      ? const Icon(Icons.play_circle_outline, size: 34)
-                      : Image.network(
-                          mediaUrl,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) =>
-                              const Icon(Icons.image_not_supported_outlined),
-                        ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  post.content.trim().isEmpty
-                      ? 'Shared a post'
-                      : post.content.trim(),
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  '${post.likes.length} likes',
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}

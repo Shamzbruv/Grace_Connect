@@ -1419,6 +1419,13 @@ class _EventCard extends StatelessWidget {
               if (isRsvped && onCalendar != null) ...[
                 const SizedBox(width: 10),
                 IconButton.filledTonal(
+                  // Explicit colours: ThemeData.iconTheme's colour is adopted by
+                  // IconButton as its foreground, which in light mode painted a
+                  // near-black icon on the near-black primary background.
+                  style: IconButton.styleFrom(
+                    backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
+                    foregroundColor: Theme.of(context).colorScheme.onSecondaryContainer,
+                  ),
                   tooltip: 'Add or update device calendar',
                   onPressed: isCalendarBusy ? null : onCalendar,
                   icon: isCalendarBusy
@@ -1433,6 +1440,13 @@ class _EventCard extends StatelessWidget {
               if (canViewRsvps && onViewRsvps != null) ...[
                 const SizedBox(width: 10),
                 IconButton.filledTonal(
+                  // Explicit colours: ThemeData.iconTheme's colour is adopted by
+                  // IconButton as its foreground, which in light mode painted a
+                  // near-black icon on the near-black primary background.
+                  style: IconButton.styleFrom(
+                    backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
+                    foregroundColor: Theme.of(context).colorScheme.onSecondaryContainer,
+                  ),
                   tooltip: 'View RSVPs',
                   onPressed: onViewRsvps,
                   icon: Badge.count(

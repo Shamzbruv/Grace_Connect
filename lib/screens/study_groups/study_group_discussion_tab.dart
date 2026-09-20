@@ -148,6 +148,13 @@ class _StudyGroupDiscussionTabState extends State<StudyGroupDiscussionTab> {
                 ),
                 const SizedBox(width: 8),
                 IconButton.filled(
+                  // Explicit colours: ThemeData.iconTheme's colour is adopted by
+                  // IconButton as its foreground, which in light mode painted a
+                  // near-black icon on the near-black primary background.
+                  style: IconButton.styleFrom(
+                    backgroundColor: Theme.of(context).colorScheme.primary,
+                    foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                  ),
                   onPressed: _canSend ? _send : null,
                   icon: _isSending
                       ? const SizedBox(

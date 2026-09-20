@@ -368,6 +368,13 @@ class _AttendanceInsightsScreenState extends State<AttendanceInsightsScreen> {
             Row(
               children: [
                 IconButton.filledTonal(
+                  // Explicit colours: ThemeData.iconTheme's colour is adopted by
+                  // IconButton as its foreground, which in light mode painted a
+                  // near-black icon on the near-black primary background.
+                  style: IconButton.styleFrom(
+                    backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
+                    foregroundColor: Theme.of(context).colorScheme.onSecondaryContainer,
+                  ),
                   tooltip: 'Decrease weeks',
                   onPressed: _isSavingThreshold || _thresholdWeeks <= 1
                       ? null
@@ -392,6 +399,13 @@ class _AttendanceInsightsScreenState extends State<AttendanceInsightsScreen> {
                   ),
                 ),
                 IconButton.filledTonal(
+                  // Explicit colours: ThemeData.iconTheme's colour is adopted by
+                  // IconButton as its foreground, which in light mode painted a
+                  // near-black icon on the near-black primary background.
+                  style: IconButton.styleFrom(
+                    backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
+                    foregroundColor: Theme.of(context).colorScheme.onSecondaryContainer,
+                  ),
                   tooltip: 'Increase weeks',
                   onPressed: _isSavingThreshold || _thresholdWeeks >= 12
                       ? null
@@ -543,6 +557,13 @@ class _AttendanceInsightsScreenState extends State<AttendanceInsightsScreen> {
               if (canManage) ...[
                 const SizedBox(width: 10),
                 IconButton.filledTonal(
+                  // Explicit colours: ThemeData.iconTheme's colour is adopted by
+                  // IconButton as its foreground, which in light mode painted a
+                  // near-black icon on the near-black primary background.
+                  style: IconButton.styleFrom(
+                    backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
+                    foregroundColor: Theme.of(context).colorScheme.onSecondaryContainer,
+                  ),
                   tooltip: 'Mark resolved',
                   onPressed: () => _resolve(followUp),
                   icon: const Icon(Icons.check),

@@ -1201,6 +1201,13 @@ class _MemberRoleCard extends StatelessWidget {
                 ),
                 const SizedBox(width: 8),
                 IconButton.filledTonal(
+                  // Explicit colours: ThemeData.iconTheme's colour is adopted by
+                  // IconButton as its foreground, which in light mode painted a
+                  // near-black icon on the near-black primary background.
+                  style: IconButton.styleFrom(
+                    backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
+                    foregroundColor: Theme.of(context).colorScheme.onSecondaryContainer,
+                  ),
                   onPressed: onTap,
                   tooltip: isEditing ? 'Close role editor' : 'Manage roles',
                   icon: Icon(

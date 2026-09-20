@@ -11,6 +11,7 @@ import '../../providers/user_role_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:timeago/timeago.dart' as timeago;
 import '../../services/community_service.dart';
+import '../../services/haptic_service.dart';
 import '../../services/church_service.dart';
 import '../../services/bible_nudge_service.dart';
 import '../../services/direct_message_service.dart';
@@ -4055,6 +4056,7 @@ class _StatusViewerDialogState extends State<_StatusViewerDialog> {
   }
 
   Future<void> _toggleLike() async {
+    HapticService.light();
     if (widget.readOnly) return;
 
     final uid = widget.currentUserId;

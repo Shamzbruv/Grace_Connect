@@ -6,6 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../models/bible_data.dart';
 import '../../services/analytics_service.dart';
 import '../../services/bible_service.dart';
+import '../../services/haptic_service.dart';
 import 'bible_chapters_screen.dart';
 import 'bible_reader_screen.dart';
 
@@ -50,6 +51,7 @@ class BibleSearchDelegate extends SearchDelegate<void> {
       },
       onSelected: (suggestion) {
         Analytics.bibleSearchResultOpened();
+        HapticService.selection();
         close(context, null);
         final book =
             BibleData.allBooks.firstWhere((b) => b.name == suggestion.book);

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../../services/haptic_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../providers/user_role_provider.dart';
@@ -216,6 +217,9 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
   }
 
   Future<void> _submitAnswer(int selectedIndex) async {
+    // Only a deliberate answer buzzes; index -1 is the timeout path, and
+    // vibrating when time simply ran out would feel like a reprimand.
+    if (selectedIndex >= 0) HapticService.light();
     if (_submitting || !_active || _question == null || _attempt == null) {
       return;
     }

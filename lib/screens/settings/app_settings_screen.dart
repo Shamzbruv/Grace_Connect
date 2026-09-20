@@ -136,6 +136,42 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
                     if (value) HapticService.success();
                   },
                 ),
+                // "Is this even working?" is otherwise unanswerable: a
+                // selection buzz is 12ms and easy to miss, and Android
+                // silently drops haptics entirely when its own touch
+                // vibration setting is off. This fires an unmistakable
+                // double pulse and says plainly when the device cannot.
+                _buildActionTile(
+                  context,
+                  HapticService.isSupported
+                      ? 'Test vibration'
+                      : 'Test vibration (no motor detected)',
+                  Icons.play_circle_outline,
+                  () async {
+                    if (!_haptics) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Turn Haptic Feedback on first, then test it.',
+                          ),
+                        ),
+                      );
+                      return;
+                    }
+                    await HapticService.test();
+                    if (!context.mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          HapticService.isSupported
+                              ? 'Sent a double buzz. If you felt nothing, check '
+                                  'your phone\'s own vibration settings.'
+                              : 'This device reports no vibration motor.',
+                        ),
+                      ),
+                    );
+                  },
+                ),
                 _buildActionTile(
                     context, 'Check for Updates', Icons.system_update, () {
                   ScaffoldMessenger.of(context).showSnackBar(
