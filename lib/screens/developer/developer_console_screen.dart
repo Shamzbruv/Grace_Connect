@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../services/developer_service.dart';
 import 'developer_email_test_screen.dart';
+import 'quote_backgrounds_admin_screen.dart';
 
 const _scheduledQuizMutationRoles = <String>{
   'super_developer',
@@ -344,6 +345,23 @@ class _DeveloperConsoleScreenState extends State<DeveloperConsoleScreen>
           onTap: () {
             Navigator.push(context,
                 MaterialPageRoute(builder: (_) => DeveloperEmailTestScreen()));
+          },
+        ),
+        const Divider(),
+        ListTile(
+          leading: const Icon(Icons.wallpaper_outlined, color: Colors.purple),
+          title: const Text('Quote Backgrounds'),
+          subtitle: const Text(
+            'Add, hide, or edit share-card backgrounds — live immediately',
+          ),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const QuoteBackgroundsAdminScreen(),
+              ),
+            );
           },
         ),
       ],

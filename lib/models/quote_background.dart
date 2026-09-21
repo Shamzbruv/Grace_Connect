@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 // Public Supabase Storage bucket -- adding, replacing, or fixing a
 // background is now an upload, not an app release. The bucket is public
@@ -29,6 +30,18 @@ class QuoteBackground {
   final Color recommendedTextColor;
   final String safeTextArea;
 
+  /// A row of the developer-managed `quote_backgrounds` table.
+  factory QuoteBackground.fromRow(Map<String, dynamic> row) {
+    return QuoteBackground(
+      imageUrl: '$_quoteBackgroundsBaseUrl/${row['file_name']}',
+      title: row['title']?.toString() ?? 'Background',
+      category: row['category']?.toString() ?? '',
+      recommendedTextColor:
+          _parseColor(row['recommended_text_color']?.toString()),
+      safeTextArea: row['safe_text_area']?.toString() ?? 'center',
+    );
+  }
+
   factory QuoteBackground.fromManifestEntry(Map<String, dynamic> entry) {
     return QuoteBackground(
       imageUrl: '$_quoteBackgroundsBaseUrl/${entry['file']}',
@@ -55,9 +68,43 @@ class QuoteBackgroundCatalogue {
 
   static List<QuoteBackground>? _cache;
 
+  /// The public URL of a catalogue image, so the developer screen and the
+  /// share card resolve the same object from the same one place.
+  static String publicUrlFor(String fileName) =>
+      '$_quoteBackgroundsBaseUrl/$fileName';
+
+  /// Drops the cache so a developer's change shows on the next open rather
+  /// than after an app restart.
+  static void invalidate() => _cache = null;
+
   static Future<List<QuoteBackground>> load() async {
     final cached = _cache;
     if (cached != null) return cached;
+
+    // The catalogue is a table now, so a background added in the developer
+    // screen appears immediately. The manifest is still read when the table
+    // returns nothing, which keeps older installs and any environment whose
+    // table has not been seeded working exactly as before.
+    try {
+      final rows = await Supabase.instance.client
+          .from('quote_backgrounds')
+          .select()
+          .eq('is_active', true)
+          .order('sort_order')
+          .order('created_at');
+      final entries = (rows as List<dynamic>)
+          .cast<Map<String, dynamic>>()
+          .map(QuoteBackground.fromRow)
+          .toList(growable: false);
+      if (entries.isNotEmpty) {
+        _cache = entries;
+        return entries;
+      }
+    } catch (_) {
+      // Fall through to the manifest rather than leaving the customiser
+      // with nothing to show.
+    }
+
     final response = await http
         .get(Uri.parse('$_quoteBackgroundsBaseUrl/catalogue_manifest.json'))
         .timeout(const Duration(seconds: 15));
