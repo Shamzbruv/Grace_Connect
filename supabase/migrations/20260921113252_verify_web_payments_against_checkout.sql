@@ -546,4 +546,3 @@ revoke all on function public.start_web_checkout_session_internal(uuid, text, te
   from public, anon, authenticated;
 grant execute on function public.start_web_checkout_session_internal(uuid, text, text, text, text)
   to service_role;
-
