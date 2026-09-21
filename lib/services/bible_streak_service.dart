@@ -276,8 +276,9 @@ class BibleStreakService {
         'list_bible_streak_ranking',
         params: {'p_scope': scope.wireName, 'result_limit': limit},
       );
-      if (data is! Map)
+      if (data is! Map) {
         return BibleStreakRanking(scope: scope, entries: const []);
+      }
       return BibleStreakRanking.fromMap(Map<String, dynamic>.from(data), scope);
     } on PostgrestException catch (error) {
       // Deliberately rethrown. Swallowing this returned an empty list, which

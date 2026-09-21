@@ -42,7 +42,10 @@ void main() {
     expect(requests, hasLength(2));
     expect(
         requests.first.url.path, matches(r'/church_a/logo_[a-f0-9-]+\.png$'));
-    expect(requests.first.headers['content-type'], contains('image/png'));
+    expect(requests.first.headers['content-type'],
+        contains('multipart/form-data'));
+    expect(String.fromCharCodes(requests.first.bodyBytes),
+        contains('content-type: image/png'));
     await client.dispose();
   });
 
@@ -141,8 +144,10 @@ void main() {
     var fallbacks = 0;
     messenger.setMockMethodCallHandler(const MethodChannel('vibration'),
         (call) async {
-      if (call.method == 'hasVibrator' || call.method == 'hasAmplitudeControl')
+      if (call.method == 'hasVibrator' ||
+          call.method == 'hasAmplitudeControl') {
         return true;
+      }
       if (call.method == 'vibrate') {
         buzzes++;
         throw PlatformException(code: 'unavailable');

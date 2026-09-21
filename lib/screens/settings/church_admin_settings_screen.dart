@@ -99,15 +99,17 @@ class _ChurchAdminSettingsScreenState extends State<ChurchAdminSettingsScreen> {
         fileExtension: picked.path.split('.').last,
       );
       if (!mounted) return;
-      if (url == null)
+      if (url == null) {
         throw Exception('Choose a PNG, JPEG or WebP under 5 MB.');
+      }
       setState(() => _logoUrl = url);
       HapticService.success();
     } catch (error) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Could not upload the logo: $error')),
         );
+      }
     } finally {
       if (mounted) setState(() => _isUploadingLogo = false);
     }
