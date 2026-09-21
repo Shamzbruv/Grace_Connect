@@ -16,10 +16,12 @@ class FeedHubScreen extends StatefulWidget {
     super.key,
     this.showFindChurchAction = false,
     this.controller,
+    this.isActive = true,
   });
 
   final bool showFindChurchAction;
   final FeedHubController? controller;
+  final bool isActive;
 
   @override
   State<FeedHubScreen> createState() => _FeedHubScreenState();
@@ -56,9 +58,7 @@ class _FeedHubScreenState extends State<FeedHubScreen> {
   void _onModeChanged() {
     // Leaving Reel Grace must silence it immediately rather than waiting for
     // a visibility callback that may not arrive while it stays mounted.
-    if (_controller.value == PrimaryFeedMode.community) {
-      MediaPlaybackCoordinator.instance.stopAll();
-    }
+    MediaPlaybackCoordinator.instance.stopAll();
     if (mounted) setState(() {});
   }
 
@@ -72,7 +72,8 @@ class _FeedHubScreenState extends State<FeedHubScreen> {
           showBottomMenu: false,
           showFindChurchAction: widget.showFindChurchAction,
         ),
-        ReelGraceScreen(isActive: mode == PrimaryFeedMode.reelGrace),
+        ReelGraceScreen(
+            isActive: widget.isActive && mode == PrimaryFeedMode.reelGrace),
       ],
     );
   }

@@ -1,15 +1,14 @@
 // Subscription self-service for the public website.
 //
-// The Android app deliberately sells nothing -- it shows plans and terms and
-// links out. Everything transactional (starting a payment, seeing what is
-// being billed, cancelling) happens here, called from the website after the
+// The Android app provides account support. Website transactions (starting a
+// payment, reviewing billing, requesting cancellation) happen here after the
 // church leader signs in with the same credentials they use in the app.
 
 import { authenticatedUser, serviceClient } from "../_shared/grace.ts";
 import { isAllowedWebSubscriptionOrigin } from "../_shared/web_subscription_origin.ts";
 import {
   buildFygaroCheckoutUrl,
-  fygaroCheckoutConfigFromEnv,
+  fygaroPaymentConfigFromEnv,
   signFygaroCheckoutJwt,
 } from "../_shared/fygaro.ts";
 
@@ -110,7 +109,12 @@ Deno.serve(async (request) => {
         { p_actor_id: user.id },
       );
       if (error) throw error;
-      return response(origin, { ok: true, context: data });
+      let checkoutReady = false;
+      try {
+        fygaroPaymentConfigFromEnv();
+        checkoutReady = true;
+      } catch (_) { /* Account management remains available during setup. */ }
+      return response(origin, { ok: true, context: { ...data, checkoutReady } });
     }
 
     if (action === "checkout") {
@@ -126,7 +130,7 @@ Deno.serve(async (request) => {
       // Configuration is read before the session row is created, so a
       // misconfigured deployment does not leave orphan "created" sessions
       // that were never offered to anyone.
-      const config = fygaroCheckoutConfigFromEnv();
+      const config = fygaroPaymentConfigFromEnv();
 
       const returnUrl = String(body.returnUrl ?? "").trim() || null;
       const { data: session, error } = await client.rpc(
@@ -196,7 +200,7 @@ Deno.serve(async (request) => {
         ...data,
         context,
         notice:
-          "The plan will not renew. Access continues until the date shown above.",
+          "Cancellation recorded. Access continues through the paid-through date. If you separately arranged recurring charges, contact billing to confirm they have stopped.",
       });
     }
 

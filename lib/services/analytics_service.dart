@@ -1,5 +1,5 @@
 import 'package:firebase_analytics/firebase_analytics.dart';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 
 /// App-wide analytics.
 ///
@@ -33,30 +33,52 @@ class Analytics {
 
   /// Attach to MaterialApp.navigatorObservers for automatic screen tracking.
   ///
-  /// Built once and cached. A getter that returned a fresh observer each call
-  /// handed MaterialApp a different navigatorObservers list on every rebuild,
-  /// and Navigator responds to that by detaching and re-attaching its
-  /// observers -- which made every screen with a ticking timer flicker about
-  /// once a second.
+  /// Reuse the observer across rebuilds. Route parameters never become
+  /// analytics data; they can contain account IDs or recovery credentials.
   static FirebaseAnalyticsObserver? get observer {
     if (_observerResolved) return _observer;
     _observerResolved = true;
     final analytics = instance;
-    _observer =
-        analytics == null ? null : FirebaseAnalyticsObserver(analytics: analytics);
+    _observer = analytics == null
+        ? null
+        : FirebaseAnalyticsObserver(
+            analytics: analytics,
+            nameExtractor: screenNameForRoute,
+          );
     return _observer;
   }
 
   static void log(String name, [Map<String, Object?> parameters = const {}]) {
     final analytics = instance;
     if (analytics == null) return;
-    final clean = <String, Object>{};
-    parameters.forEach((key, value) {
-      if (value != null) clean[key] = value;
-    });
-    analytics.logEvent(name: name, parameters: clean).catchError((Object error) {
+    final clean = cleanParameters(parameters);
+    analytics
+        .logEvent(name: name, parameters: clean)
+        .catchError((Object error) {
       debugPrint('Analytics failed ($name): $error');
     });
+  }
+
+  @visibleForTesting
+  static Map<String, Object> cleanParameters(Map<String, Object?> parameters) =>
+      {
+        for (final entry in parameters.entries)
+          if (entry.value is bool)
+            entry.key: entry.value == true ? 1 : 0
+          else if (entry.value is String ||
+              (entry.value is num && (entry.value as num).isFinite))
+            entry.key: entry.value!,
+      };
+
+  static String? screenNameForRoute(RouteSettings settings) {
+    final uri = Uri.tryParse(settings.name ?? '');
+    if (uri == null || uri.hasScheme || uri.pathSegments.isEmpty) return null;
+    final page = uri.pathSegments.first;
+    return RegExp(r'^[a-z_]+$').hasMatch(page) ? '/$page' : null;
+  }
+
+  static void screenViewed(String name) {
+    instance?.logScreenView(screenName: name).catchError((Object _) {});
   }
 
   // --- Sessions -------------------------------------------------------
@@ -103,7 +125,8 @@ class Analytics {
   static void subscriptionScreenViewed(String status) =>
       log('subscription_viewed', {'status': status});
 
-  static void subscriptionCheckoutOpened() => log('subscription_checkout_opened');
+  static void subscriptionCheckoutOpened() =>
+      log('subscription_checkout_opened');
 
   static void subscriptionManageOpened() => log('subscription_manage_opened');
 }

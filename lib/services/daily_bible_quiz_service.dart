@@ -65,7 +65,7 @@ class DailyBibleQuizService {
   /// shaped into the same map the church board returns so one panel renders
   /// both.
   Future<Map<String, dynamic>> globalRanking({String? quizMonth}) async {
-    final data = await Supabase.instance.client.rpc(
+    final data = await _client.rpc(
       'list_quiz_ranking',
       params: {
         'p_scope': 'global',
@@ -104,6 +104,7 @@ class DailyBibleQuizService {
     return <String, dynamic>{
       'quiz_month': month,
       'month_label': _monthLabel(month),
+      'next_month_at': envelope['next_month_at'],
       'entries': entries,
       // The global board has no church winners ceremony.
       'winners': const [],
@@ -114,11 +115,10 @@ class DailyBibleQuizService {
               'total_score': viewer['total_score'],
               'total_points': viewer['total_score'],
               'total_ranked': viewer['total'],
-              'display_name': entries
-                      .firstWhere(
-                        (e) => e['is_current_user'] == true,
-                        orElse: () => const <String, dynamic>{},
-                      )['display_name'] ??
+              'display_name': entries.firstWhere(
+                    (e) => e['is_current_user'] == true,
+                    orElse: () => const <String, dynamic>{},
+                  )['display_name'] ??
                   'You',
             },
       'leaderboard_scope': 'global',
@@ -135,8 +135,18 @@ class DailyBibleQuizService {
       return 'This Month';
     }
     const names = [
-      'January', 'February', 'March', 'April', 'May', 'June',
-      'July', 'August', 'September', 'October', 'November', 'December',
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
     ];
     return '${names[index - 1]} $year';
   }

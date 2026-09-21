@@ -4745,10 +4745,22 @@ class _LiveChurchBubble extends StatelessWidget {
                   CircleAvatar(
                     radius: 24,
                     backgroundColor: theme.colorScheme.primaryContainer,
-                    child: Icon(
-                      Icons.church_outlined,
-                      color: theme.colorScheme.onPrimaryContainer,
-                    ),
+                    child: church.logoUrl.trim().isNotEmpty
+                        ? ClipOval(
+                            child: Image.network(
+                              church.logoUrl.trim(),
+                              width: 48,
+                              height: 48,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => Icon(
+                                  Icons.church_outlined,
+                                  color: theme.colorScheme.onPrimaryContainer),
+                            ),
+                          )
+                        : Icon(
+                            Icons.church_outlined,
+                            color: theme.colorScheme.onPrimaryContainer,
+                          ),
                   ),
                   Positioned(
                     left: -5,

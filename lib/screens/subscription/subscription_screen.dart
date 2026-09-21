@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -33,6 +34,9 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
   /// webview is both harder to trust and harder for a password manager to
   /// fill.
   Future<void> _openSubscriptionWebsite(String path) async {
+    // External checkout programs need storefront eligibility and integration.
+    // Keep the globally distributed mobile build to existing-account support.
+    if (!kIsWeb) return;
     if (path.startsWith('subscribe')) {
       Analytics.subscriptionCheckoutOpened();
     } else {
@@ -360,8 +364,10 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                   // where the church leader signs in with these same
                   // credentials and the payment provider is reachable.
                   onSubscribe: () => _openSubscriptionWebsite('subscribe.html'),
-                  onManageOnline: () =>
-                      _openSubscriptionWebsite('manage-subscription.html'),
+                  onManageOnline: () => kIsWeb
+                      ? _openSubscriptionWebsite('manage-subscription.html')
+                      : _openRequestSheet(snapshot.data!,
+                          requestType: 'cancellation'),
                 );
               },
             ),
@@ -547,7 +553,8 @@ class _SubscriptionBody extends StatelessWidget {
                     child: OutlinedButton.icon(
                       onPressed: onManageOnline,
                       icon: const Icon(Icons.open_in_new_rounded),
-                      label: const Text('Manage / cancel'),
+                      label: const Text(
+                          kIsWeb ? 'Manage / cancel' : 'Request cancellation'),
                       style: OutlinedButton.styleFrom(
                         minimumSize: const Size.fromHeight(50),
                         foregroundColor: Theme.of(context).colorScheme.error,
@@ -701,9 +708,11 @@ class _HeroCard extends StatelessWidget {
           ),
           const SizedBox(height: 20),
           Text(
-            active
-                ? 'View the recorded monthly terms and manage this existing church plan. No purchase or payment happens in this Android app.'
-                : 'Subscriptions are purchased on the Grace Connect website, not inside this app. Pricing below shows what your church would pay.',
+            !kIsWeb
+                ? 'Review your church plan, access dates, and billing support. Purchasing is unavailable in this app.'
+                : active
+                    ? 'View the recorded monthly terms and manage this existing church plan. No purchase or payment happens in this Android app.'
+                    : 'Subscriptions are purchased on the Grace Connect website, not inside this app. Pricing below shows what your church would pay.',
             style: TextStyle(
               color: Colors.white.withValues(alpha: 0.86),
               height: 1.4,
@@ -736,28 +745,31 @@ class _SubscribeOnWebPanel extends StatelessWidget {
               SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  'Subscriptions are purchased on the Grace Connect website. '
-                  'Sign in there with this same account, choose your billing '
-                  'currency, and pay securely. Your plan follows your active '
-                  'member count, and access is activated automatically once '
-                  'the payment is confirmed.',
+                  kIsWeb
+                      ? 'Subscriptions are purchased on the Grace Connect website. '
+                          'Sign in there with this same account, choose your billing '
+                          'currency, and pay securely. Your plan follows your active '
+                          'member count, and access is activated automatically once '
+                          'the payment is confirmed.'
+                      : 'Purchasing is unavailable in this app. Existing church subscriptions and account support remain available.',
                   style: TextStyle(fontSize: 12, height: 1.45),
                 ),
               ),
             ],
           ),
           const SizedBox(height: 14),
-          FilledButton.icon(
-            onPressed: onSubscribe,
-            icon: const Icon(Icons.open_in_new_rounded),
-            label: const Text('Subscribe on the website'),
-            style: FilledButton.styleFrom(
-              minimumSize: const Size.fromHeight(50),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
+          if (kIsWeb)
+            FilledButton.icon(
+              onPressed: onSubscribe,
+              icon: const Icon(Icons.open_in_new_rounded),
+              label: const Text('Subscribe on the website'),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(50),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
               ),
             ),
-          ),
         ],
       ),
     );
@@ -1016,7 +1028,7 @@ class _NonTransactionalNotice extends StatelessWidget {
           SizedBox(width: 10),
           Expanded(
             child: Text(
-              'No payment is taken inside this app. This screen shows your plan, pricing, and terms, and links out to the Grace Connect website where subscribing, managing, and cancelling actually happen.',
+              'No payment is taken inside this app. This screen shows your plan, pricing, and terms, and provides existing-account support.',
               style: TextStyle(
                 color: Color(0xFF12396F),
                 fontSize: 12,
@@ -1052,7 +1064,7 @@ class _HonestBillingNotice extends StatelessWidget {
           const SizedBox(width: 10),
           const Expanded(
             child: Text(
-              'Monthly billing disclosure: no card details are entered or stored in this app. Subscriptions bought on the website renew monthly until cancelled; developer grants and invoiced plans do not auto-renew or auto-convert. Cancelling never ends access early — the access-through date below is honoured in full.',
+              'Monthly billing disclosure: no card details are entered or stored in this app. A web payment purchases a month of access. Any recurring-payment terms require confirmation from the payment provider. Cancellation requests preserve paid access; contact billing to confirm any separately arranged recurring charges have stopped.',
               style: TextStyle(
                 color: Color(0xFF624A0D),
                 fontSize: 12,

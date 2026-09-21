@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-// import 'package:vibration/vibration.dart'; // Optional: Add if package is stable
+import '../../services/haptic_service.dart';
 
 class ScaleButton extends StatefulWidget {
   final Widget child;
@@ -28,7 +27,7 @@ class _ScaleButtonState extends State<ScaleButton> {
   void _handleTapDown(TapDownDetails details) {
     setState(() => _isPressed = true);
     if (widget.enableHaptic) {
-      HapticFeedback.lightImpact();
+      HapticService.light();
     }
   }
 

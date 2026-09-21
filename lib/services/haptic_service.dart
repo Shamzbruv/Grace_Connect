@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -32,7 +34,10 @@ class HapticService {
   /// two responses, so the second is dropped.
   static const Duration _minimumGap = Duration(milliseconds: 60);
 
-  static Future<void> load() async {
+  static Future<void> load({
+    Future<bool> Function()? vibratorProbe,
+    Future<bool> Function()? amplitudeProbe,
+  }) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       _enabled = prefs.getBool('haptics_enabled') ?? true;
@@ -42,9 +47,10 @@ class HapticService {
     // Probed once at startup: asking the platform on every tap would add a
     // channel round trip to the one code path that must not be delayed.
     try {
-      _hasVibrator = await Vibration.hasVibrator();
+      _hasVibrator = await (vibratorProbe ?? Vibration.hasVibrator)();
       if (_hasVibrator) {
-        _hasAmplitude = await Vibration.hasAmplitudeControl();
+        _hasAmplitude =
+            await (amplitudeProbe ?? Vibration.hasAmplitudeControl)();
       }
     } catch (error) {
       debugPrint('Vibration capability unavailable: $error');
@@ -71,77 +77,87 @@ class HapticService {
     return true;
   }
 
-  /// Drives the motor for [ms] at [amplitude] (1-255), falling back to the
-  /// platform haptic when the device has no amplitude control.
-  static void _buzz(int ms, int amplitude, void Function() fallback) {
+  /// Contains unsupported-platform errors from the native haptic fallback.
+  static Future<void> _fallback(Future<void> Function() feedback) async {
+    try {
+      await feedback();
+    } catch (_) {
+      // Unsupported platforms and platform-channel failures must not break taps.
+    }
+  }
+
+  /// Uses the motor's default strength if amplitude control is unavailable.
+  static Future<void> _buzz(
+      int ms, int amplitude, Future<void> Function() fallback) async {
     if (!_hasVibrator) {
-      fallback();
+      await _fallback(fallback);
       return;
     }
     if (defaultTargetPlatform == TargetPlatform.iOS) {
       // iOS's Taptic engine through HapticFeedback feels far better than a
       // raw duration, and iOS ignores amplitude anyway.
-      fallback();
+      await _fallback(fallback);
       return;
     }
     try {
-      Vibration.vibrate(
+      await Vibration.vibrate(
         duration: ms,
         amplitude: _hasAmplitude ? amplitude : -1,
       );
     } catch (error) {
       debugPrint('Vibration failed: $error');
-      fallback();
+      await _fallback(fallback);
     }
   }
 
   /// Moving between options: tab switches, toggles, selection changes.
   static void selection() {
     if (!_allow()) return;
-    _buzz(12, 90, HapticFeedback.selectionClick);
+    unawaited(_buzz(12, 90, HapticFeedback.selectionClick));
   }
 
   /// A deliberate action completed: like, save, send, post.
   static void light() {
     if (!_allow()) return;
-    _buzz(20, 140, HapticFeedback.lightImpact);
+    unawaited(_buzz(20, 140, HapticFeedback.lightImpact));
   }
 
   /// Something notable: check-in confirmed, upload finished.
   static void success() {
     if (!_allow()) return;
-    _buzz(35, 200, HapticFeedback.mediumImpact);
+    unawaited(_buzz(35, 200, HapticFeedback.mediumImpact));
   }
 
   /// A refusal or error the member should feel, not just read.
   static void warning() {
     if (!_allow()) return;
-    _buzz(60, 255, HapticFeedback.heavyImpact);
+    unawaited(_buzz(60, 255, HapticFeedback.heavyImpact));
   }
 
   /// A distinct double pulse used by the Settings test button, so "is this
   /// working?" has an unambiguous answer rather than a buzz so short it can
   /// be mistaken for nothing.
   static Future<void> test() async {
+    if (!_enabled || !_loaded) return;
     _last = DateTime.fromMillisecondsSinceEpoch(0);
     if (!_hasVibrator) {
-      HapticFeedback.heavyImpact();
+      await _fallback(HapticFeedback.heavyImpact);
       return;
     }
     if (defaultTargetPlatform == TargetPlatform.iOS) {
-      HapticFeedback.heavyImpact();
+      await _fallback(HapticFeedback.heavyImpact);
       await Future<void>.delayed(const Duration(milliseconds: 160));
-      HapticFeedback.heavyImpact();
+      if (_enabled) await _fallback(HapticFeedback.heavyImpact);
       return;
     }
     try {
-      Vibration.vibrate(
+      await Vibration.vibrate(
         pattern: [0, 90, 110, 200],
         intensities: _hasAmplitude ? [0, 180, 0, 255] : const [],
       );
     } catch (error) {
       debugPrint('Vibration test failed: $error');
-      HapticFeedback.heavyImpact();
+      await _fallback(HapticFeedback.heavyImpact);
     }
   }
 }

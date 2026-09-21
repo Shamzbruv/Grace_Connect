@@ -1,0 +1,1 @@
+Improved church logos, haptic feedback and Bible search. Fixed quiz and Bible streak rankings, including global privacy and current-streak labels. Improved shared quote layouts and background updates. Reel Grace now pauses when leaving Feed. Strengthened attendance timezone validation and private live-stream access. Improved analytics privacy and subscription account support.

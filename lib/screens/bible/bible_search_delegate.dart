@@ -52,16 +52,17 @@ class BibleSearchDelegate extends SearchDelegate<void> {
       onSelected: (suggestion) {
         Analytics.bibleSearchResultOpened();
         HapticService.selection();
+        final navigator = Navigator.of(context);
         close(context, null);
         final book =
             BibleData.allBooks.firstWhere((b) => b.name == suggestion.book);
         if (suggestion.chapter == null) {
-          Navigator.of(context).push(MaterialPageRoute(
+          navigator.push(MaterialPageRoute(
             builder: (_) => BibleChaptersScreen(book: book),
           ));
           return;
         }
-        Navigator.of(context).push(MaterialPageRoute(
+        navigator.push(MaterialPageRoute(
           builder: (_) => BibleReaderScreen(
             book: book,
             chapter: suggestion.chapter!,
@@ -120,6 +121,7 @@ class _BibleSuggestionsViewState extends State<_BibleSuggestionsView> {
 
   void _schedulePreview() {
     _debounce?.cancel();
+    final token = ++_requestToken;
     final suggestions = BiblePassageSearch.search(widget.query);
     final target = suggestions.isNotEmpty ? suggestions.first : null;
 
@@ -147,7 +149,6 @@ class _BibleSuggestionsViewState extends State<_BibleSuggestionsView> {
 
     // Typing "John 3:16" fires five usable references on the way through; a
     // debounce keeps the lookup to the one the member actually stopped on.
-    final token = ++_requestToken;
     _debounce = Timer(const Duration(milliseconds: 350), () async {
       try {
         final data = await _bibleService.getPassage(reference);
@@ -331,18 +332,48 @@ class BiblePassageSearch {
   const BiblePassageSearch._();
 
   static const Map<String, String> _aliases = {
-    'gen': 'Genesis', 'ex': 'Exodus', 'exo': 'Exodus', 'lev': 'Leviticus',
-    'num': 'Numbers', 'deut': 'Deuteronomy', 'dt': 'Deuteronomy',
-    'josh': 'Joshua', 'judg': 'Judges', 'ps': 'Psalms', 'psalm': 'Psalms',
-    'pss': 'Psalms', 'prov': 'Proverbs', 'pr': 'Proverbs',
-    'eccl': 'Ecclesiastes', 'song': 'Song of Solomon', 'isa': 'Isaiah',
-    'jer': 'Jeremiah', 'lam': 'Lamentations', 'ezek': 'Ezekiel',
-    'dan': 'Daniel', 'hos': 'Hosea', 'mt': 'Matthew', 'matt': 'Matthew',
-    'mk': 'Mark', 'mrk': 'Mark', 'lk': 'Luke', 'jn': 'John', 'joh': 'John',
-    'rom': 'Romans', 'cor': 'Corinthians', 'gal': 'Galatians',
-    'eph': 'Ephesians', 'phil': 'Philippians', 'col': 'Colossians',
-    'thess': 'Thessalonians', 'tim': 'Timothy', 'tit': 'Titus',
-    'heb': 'Hebrews', 'jas': 'James', 'pet': 'Peter', 'rev': 'Revelation',
+    'gen': 'Genesis',
+    'ex': 'Exodus',
+    'exo': 'Exodus',
+    'lev': 'Leviticus',
+    'num': 'Numbers',
+    'deut': 'Deuteronomy',
+    'dt': 'Deuteronomy',
+    'josh': 'Joshua',
+    'judg': 'Judges',
+    'ps': 'Psalms',
+    'psalm': 'Psalms',
+    'pss': 'Psalms',
+    'prov': 'Proverbs',
+    'pr': 'Proverbs',
+    'eccl': 'Ecclesiastes',
+    'song': 'Song of Solomon',
+    'isa': 'Isaiah',
+    'jer': 'Jeremiah',
+    'lam': 'Lamentations',
+    'ezek': 'Ezekiel',
+    'dan': 'Daniel',
+    'hos': 'Hosea',
+    'mt': 'Matthew',
+    'matt': 'Matthew',
+    'mk': 'Mark',
+    'mrk': 'Mark',
+    'lk': 'Luke',
+    'jn': 'John',
+    'joh': 'John',
+    'rom': 'Romans',
+    'cor': 'Corinthians',
+    'gal': 'Galatians',
+    'eph': 'Ephesians',
+    'phil': 'Philippians',
+    'col': 'Colossians',
+    'thess': 'Thessalonians',
+    'tim': 'Timothy',
+    'tit': 'Titus',
+    'heb': 'Hebrews',
+    'jas': 'James',
+    'pet': 'Peter',
+    'rev': 'Revelation',
     'apoc': 'Revelation',
   };
 
@@ -352,10 +383,12 @@ class BiblePassageSearch {
 
     // Split a trailing "3:16" or "3" off the book name, tolerating a missing
     // space ("john3:16") which is how references get typed in a hurry.
-    final match = RegExp(r'^(.*?)\s*(\d+)?\s*(?::\s*(\d+))?$').firstMatch(query);
+    final match =
+        RegExp(r'^(.*?)\s*(\d+)?\s*(?::\s*(\d+))?$').firstMatch(query);
     var bookPart = (match?.group(1) ?? query).trim();
     final chapter = int.tryParse(match?.group(2) ?? '');
     final verse = int.tryParse(match?.group(3) ?? '');
+    if (bookPart.isEmpty || chapter == 0 || verse == 0) return const [];
 
     // A leading ordinal ("1 john", "2tim") belongs to the book name, not to
     // the chapter.
@@ -372,6 +405,9 @@ class BiblePassageSearch {
 
     final books = BibleData.allBooks.where((book) {
       final name = book.name.toLowerCase();
+      if (ordinalPrefix != null && !name.startsWith('$ordinalPrefix ')) {
+        return false;
+      }
       if (name.startsWith(needle) || name.contains(needle)) return true;
       // "thess" should still find "1 Thessalonians" when no ordinal is typed.
       final withoutOrdinal = name.replaceFirst(RegExp(r'^[123]\s+'), '');

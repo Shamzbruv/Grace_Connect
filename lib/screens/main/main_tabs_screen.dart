@@ -11,6 +11,7 @@ import '../../widgets/main_tab_scope.dart';
 import '../bible/bible_home_screen.dart';
 import '../../models/reel.dart';
 import '../../services/haptic_service.dart';
+import '../../services/analytics_service.dart';
 import '../community/feed_hub_screen.dart';
 import '../dashboard/dashboard_screen.dart';
 import '../dashboard/variants/unconnected_dashboard.dart';
@@ -58,6 +59,8 @@ class _MainTabsScreenState extends State<MainTabsScreen> {
     // Grace is on screen.
     _feedHub.addListener(_onFeedModeChanged);
     _pageController = PageController(initialPage: _currentIndex);
+    Analytics.appOpened();
+    _trackTab();
   }
 
   @override
@@ -70,7 +73,20 @@ class _MainTabsScreenState extends State<MainTabsScreen> {
 
   void _onFeedModeChanged() {
     if (mounted) setState(() {});
+    if (_currentIndex == 0) _trackTab();
   }
+
+  void _trackTab() => Analytics.screenViewed(_currentIndex == 0
+      ? (_feedHub.value == PrimaryFeedMode.reelGrace
+          ? 'reel_grace'
+          : 'community_feed')
+      : const [
+          'community_feed',
+          'events',
+          'dashboard',
+          'bible',
+          'more'
+        ][_currentIndex]);
 
   void _setTab(int index) {
     final access = _readAccess();
@@ -99,6 +115,7 @@ class _MainTabsScreenState extends State<MainTabsScreen> {
     // from another tab never lands unexpectedly inside Reel Grace.
     if (_currentIndex == 0 && index != 0) _feedHub.showCommunity();
     setState(() => _currentIndex = index);
+    HapticService.selection();
     _pageController.animateToPage(
       index,
       duration: const Duration(milliseconds: 260),
@@ -151,10 +168,12 @@ class _MainTabsScreenState extends State<MainTabsScreen> {
                 return;
               }
               setState(() => _currentIndex = index);
+              _trackTab();
             },
             children: [
               FeedHubScreen(
                 controller: _feedHub,
+                isActive: _currentIndex == 0,
                 showFindChurchAction: widget.showFindChurchAction,
               ),
               const EventsScreen(showBottomMenu: false),

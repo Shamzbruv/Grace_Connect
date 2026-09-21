@@ -6,6 +6,7 @@ import {
 import {
   buildFygaroCheckoutUrl,
   formatFygaroAmount,
+  fygaroPaymentConfigFromEnv,
   monthlyPeriodFrom,
   normalizeFygaroPayment,
   parseFygaroSignature,
@@ -19,6 +20,22 @@ const checkoutConfig = {
   keyId: "test-key",
   secret: "test-secret",
 };
+
+Deno.test('checkout requires a usable webhook verifier as well as payment keys', () => {
+  const env: Record<string, string> = {
+    FYGARO_BUTTON_URL: checkoutConfig.buttonUrl,
+    FYGARO_KEY_ID: checkoutConfig.keyId,
+    FYGARO_SECRET_KEY: checkoutConfig.secret,
+  };
+  const read = (key: string) => env[key];
+  assertThrows(() => fygaroPaymentConfigFromEnv(read), Error, 'webhook verification is not configured');
+  env.FYGARO_WEBHOOK_SECRETS = '{"empty":"","invalid":3}';
+  assertThrows(() => fygaroPaymentConfigFromEnv(read), Error, 'webhook verification is not configured');
+  env.FYGARO_WEBHOOK_SECRET = 'test-hook-secret';
+  assertEquals(fygaroPaymentConfigFromEnv(read), checkoutConfig);
+  env.FYGARO_BUTTON_URL = 'http://insecure.example/pay';
+  assertThrows(() => fygaroPaymentConfigFromEnv(read), Error, 'HTTPS');
+});
 
 function decodeSegment(segment: string): Record<string, unknown> {
   const padded = segment.replace(/-/g, "+").replace(/_/g, "/");
@@ -262,4 +279,19 @@ Deno.test("a monthly period does not overshoot a short month", () => {
 
   const leapYear = monthlyPeriodFrom(new Date("2028-01-31T00:00:00Z"));
   assertEquals(leapYear.end.toISOString(), "2028-02-29T00:00:00.000Z");
+});
+
+Deno.test('malformed monetary values cannot be rounded into a valid payment', () => {
+  const valid = { transactionId: 'tx', currency: 'USD', amount: '17.00', createdAt: '2026-09-20T12:00:00Z' };
+  for (const amount of ['', ' ', '0.00', '-1.00', '1e3', '17.001', '0x11', 'NaN']) {
+    assertThrows(() => normalizeFygaroPayment({ ...valid, amount }));
+  }
+  assertThrows(() => normalizeFygaroPayment({ ...valid, createdAt: 'invalid' }));
+  assertThrows(() => normalizeFygaroPayment({ ...valid, currency: '' }));
+  assertThrows(() => formatFygaroAmount(1700.5));
+});
+
+Deno.test('checkout never sends the signed price to an insecure URL', () => {
+  assertThrows(() => buildFygaroCheckoutUrl('http://example.org/pay', 'signed'));
+  assertThrows(() => buildFygaroCheckoutUrl('https://user:pass@example.org/pay', 'signed'));
 });
