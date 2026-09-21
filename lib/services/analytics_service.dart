@@ -28,11 +28,23 @@ class Analytics {
     }
   }
 
+  static FirebaseAnalyticsObserver? _observer;
+  static bool _observerResolved = false;
+
   /// Attach to MaterialApp.navigatorObservers for automatic screen tracking.
+  ///
+  /// Built once and cached. A getter that returned a fresh observer each call
+  /// handed MaterialApp a different navigatorObservers list on every rebuild,
+  /// and Navigator responds to that by detaching and re-attaching its
+  /// observers -- which made every screen with a ticking timer flicker about
+  /// once a second.
   static FirebaseAnalyticsObserver? get observer {
+    if (_observerResolved) return _observer;
+    _observerResolved = true;
     final analytics = instance;
-    if (analytics == null) return null;
-    return FirebaseAnalyticsObserver(analytics: analytics);
+    _observer =
+        analytics == null ? null : FirebaseAnalyticsObserver(analytics: analytics);
+    return _observer;
   }
 
   static void log(String name, [Map<String, Object?> parameters = const {}]) {

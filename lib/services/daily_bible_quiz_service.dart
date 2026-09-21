@@ -79,10 +79,32 @@ class DailyBibleQuizService {
         ? Map<String, dynamic>.from(envelope['viewer'] as Map)
         : null;
     final month = envelope['month']?.toString();
+    // The ranking RPC names its fields user_name/total_score/is_viewer; the
+    // shared panel reads display_name/total_points/is_current_user. Without
+    // this translation every row fell back to its placeholder, which is why
+    // the global board showed "Member" and "0 pts" for everyone while the
+    // correct-answer counts beside them were right.
+    final entries = (envelope['entries'] as List<dynamic>? ?? const [])
+        .whereType<Map<dynamic, dynamic>>()
+        .map((raw) {
+      final entry = Map<String, dynamic>.from(raw);
+      return <String, dynamic>{
+        'rank': entry['rank'],
+        'member_id': entry['user_id'],
+        'display_name': entry['user_name'],
+        'photo_url': entry['photo_url'] ?? '',
+        'total_points': entry['total_score'] ?? 0,
+        'correct_answers': entry['correct_answers'] ?? 0,
+        'perfect_quizzes': entry['perfect_quizzes'] ?? 0,
+        'quizzes_completed': entry['quizzes_completed'] ?? 0,
+        'is_current_user': entry['is_viewer'] == true,
+      };
+    }).toList();
+
     return <String, dynamic>{
       'quiz_month': month,
       'month_label': _monthLabel(month),
-      'entries': envelope['entries'] ?? const [],
+      'entries': entries,
       // The global board has no church winners ceremony.
       'winners': const [],
       'current_member': viewer == null
@@ -90,7 +112,14 @@ class DailyBibleQuizService {
           : {
               'rank': viewer['rank'],
               'total_score': viewer['total_score'],
+              'total_points': viewer['total_score'],
               'total_ranked': viewer['total'],
+              'display_name': entries
+                      .firstWhere(
+                        (e) => e['is_current_user'] == true,
+                        orElse: () => const <String, dynamic>{},
+                      )['display_name'] ??
+                  'You',
             },
       'leaderboard_scope': 'global',
       'leaderboard_label': 'Everyone on Grace Connect',

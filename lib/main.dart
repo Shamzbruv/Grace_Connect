@@ -87,6 +87,12 @@ import 'services/analytics_service.dart';
 import 'widgets/auth_required.dart';
 import 'widgets/live_mini_player_overlay.dart';
 
+/// Resolved once. Rebuilding this list would make Navigator re-attach its
+/// observers on every frame that rebuilds MaterialApp.
+final List<NavigatorObserver> _navigatorObservers = [
+  if (Analytics.observer != null) Analytics.observer!,
+];
+
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   if (kIsWeb) return;
@@ -282,9 +288,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
             // Reports every pushed route as a screen view, so screen
             // tracking does not depend on remembering to instrument each
             // new screen by hand.
-            navigatorObservers: [
-              if (Analytics.observer != null) Analytics.observer!,
-            ],
+            navigatorObservers: _navigatorObservers,
             builder: (context, child) => LiveMiniPlayerOverlay(
               child: child ?? const SizedBox.shrink(),
             ),

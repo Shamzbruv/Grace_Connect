@@ -273,8 +273,12 @@ class BibleStreakService {
       if (data is! Map) return BibleStreakRanking(scope: scope, entries: const []);
       return BibleStreakRanking.fromMap(Map<String, dynamic>.from(data), scope);
     } on PostgrestException catch (error) {
+      // Deliberately rethrown. Swallowing this returned an empty list, which
+      // the leaderboard renders as "no streaks have been recorded yet" -- so
+      // a broken query and genuinely empty data looked identical, on screen
+      // and in a bug report. The UI already has an error branch; let it show.
       debugPrint('Bible streak ranking unavailable: $error');
-      return BibleStreakRanking(scope: scope, entries: const []);
+      throw Exception(error.message);
     }
   }
 
