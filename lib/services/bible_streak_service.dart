@@ -22,6 +22,7 @@ class BibleStreakLeaderboardEntry {
     this.lastReadDate,
     this.rank,
     this.isViewer = false,
+    this.isCurrent = true,
   });
 
   final String userId;
@@ -31,6 +32,7 @@ class BibleStreakLeaderboardEntry {
   final DateTime? lastReadDate;
   final int? rank;
   final bool isViewer;
+  final bool isCurrent;
 
   factory BibleStreakLeaderboardEntry.fromMap(Map<String, dynamic> data) {
     return BibleStreakLeaderboardEntry(
@@ -41,6 +43,7 @@ class BibleStreakLeaderboardEntry {
       lastReadDate: DateTime.tryParse(data['last_read_date']?.toString() ?? ''),
       rank: (data['rank'] as num?)?.toInt(),
       isViewer: data['is_viewer'] == true,
+      isCurrent: data['is_current'] != false,
     );
   }
 }
@@ -54,6 +57,7 @@ class BibleStreakRanking {
     this.viewerRank,
     this.viewerStreak,
     this.totalRanked,
+    this.viewerIsCurrent = true,
   });
 
   final RankingScope scope;
@@ -61,6 +65,7 @@ class BibleStreakRanking {
   final int? viewerRank;
   final int? viewerStreak;
   final int? totalRanked;
+  final bool viewerIsCurrent;
 
   bool get viewerIsOnPage => entries.any((entry) => entry.isViewer);
 
@@ -85,6 +90,7 @@ class BibleStreakRanking {
       viewerRank: (viewer?['rank'] as num?)?.toInt(),
       viewerStreak: (viewer?['streak_count'] as num?)?.toInt(),
       totalRanked: (viewer?['total'] as num?)?.toInt(),
+      viewerIsCurrent: viewer?['is_current'] != false,
     );
   }
 }
@@ -270,7 +276,8 @@ class BibleStreakService {
         'list_bible_streak_ranking',
         params: {'p_scope': scope.wireName, 'result_limit': limit},
       );
-      if (data is! Map) return BibleStreakRanking(scope: scope, entries: const []);
+      if (data is! Map)
+        return BibleStreakRanking(scope: scope, entries: const []);
       return BibleStreakRanking.fromMap(Map<String, dynamic>.from(data), scope);
     } on PostgrestException catch (error) {
       // Deliberately rethrown. Swallowing this returned an empty list, which

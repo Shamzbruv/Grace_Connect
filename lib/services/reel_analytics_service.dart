@@ -1,5 +1,4 @@
-import 'package:firebase_analytics/firebase_analytics.dart';
-import 'package:flutter/foundation.dart';
+import 'analytics_service.dart';
 
 import '../models/reel.dart';
 
@@ -15,29 +14,12 @@ import '../models/reel.dart';
 class ReelAnalytics {
   ReelAnalytics._();
 
-  static FirebaseAnalytics? _analytics;
-
-  static FirebaseAnalytics? get _instance {
-    try {
-      return _analytics ??= FirebaseAnalytics.instance;
-    } catch (_) {
-      return null;
-    }
-  }
-
   static void _log(String name, Map<String, Object?> parameters) {
-    final analytics = _instance;
-    if (analytics == null) return;
-    final clean = <String, Object>{};
-    parameters.forEach((key, value) {
-      if (value != null) clean[key] = value;
-    });
-    analytics.logEvent(name: name, parameters: clean).catchError((Object error) {
-      debugPrint('Reel analytics failed: $error');
-    });
+    Analytics.log(name, parameters);
   }
 
-  static void impression(Reel reel, {required int position, required String feedMode}) =>
+  static void impression(Reel reel,
+          {required int position, required String feedMode}) =>
       _log('reel_impression', {
         'reel_id': reel.id,
         'category': reel.category ?? 'other',
@@ -46,8 +28,8 @@ class ReelAnalytics {
         'duration_ms': reel.durationMs,
       });
 
-  static void play(Reel reel) =>
-      _log('reel_play', {'reel_id': reel.id, 'category': reel.category ?? 'other'});
+  static void play(Reel reel) => _log(
+      'reel_play', {'reel_id': reel.id, 'category': reel.category ?? 'other'});
 
   /// label is one of 3s, 25, 50, 75 -- each fires once per playback.
   static void progress(Reel reel, String label, {required Duration position}) {
@@ -74,7 +56,8 @@ class ReelAnalytics {
 
   static void replay(Reel reel) => _log('reel_replay', {'reel_id': reel.id});
 
-  static void skip(Reel reel, {required Duration watched}) => _log('reel_skip', {
+  static void skip(Reel reel, {required Duration watched}) =>
+      _log('reel_skip', {
         'reel_id': reel.id,
         'category': reel.category ?? 'other',
         'watch_ms': watched.inMilliseconds,
@@ -88,12 +71,16 @@ class ReelAnalytics {
 
   static void share(Reel reel) => _log('reel_share', {'reel_id': reel.id});
 
-  static void commentOpen(Reel reel) => _log('reel_comment_open', {'reel_id': reel.id});
+  static void commentOpen(Reel reel) =>
+      _log('reel_comment_open', {'reel_id': reel.id});
 
-  static void profileOpen(Reel reel) => _log('reel_profile_open', {'reel_id': reel.id});
+  static void profileOpen(Reel reel) =>
+      _log('reel_profile_open', {'reel_id': reel.id});
 
   static void uploadStarted() => _log('reel_upload_started', const {});
   static void uploadCompleted({required int bytes, required int durationMs}) =>
-      _log('reel_upload_completed', {'bytes': bytes, 'duration_ms': durationMs});
-  static void uploadFailed(String stage) => _log('reel_upload_failed', {'stage': stage});
+      _log(
+          'reel_upload_completed', {'bytes': bytes, 'duration_ms': durationMs});
+  static void uploadFailed(String stage) =>
+      _log('reel_upload_failed', {'stage': stage});
 }

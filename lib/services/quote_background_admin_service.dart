@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:uuid/uuid.dart';
 
 import '../models/quote_background.dart';
 
@@ -86,29 +87,39 @@ class QuoteBackgroundAdminService {
           bytes,
           fileOptions: FileOptions(
             contentType: _contentTypeFor(safeName),
-            upsert: true,
+            upsert: false,
           ),
         );
 
-    final highest = await _client
-        .from('quote_backgrounds')
-        .select('sort_order')
-        .order('sort_order', ascending: false)
-        .limit(1);
-    final nextOrder = highest.isEmpty
-        ? 1
-        : ((highest.first['sort_order'] as num?)?.toInt() ?? 0) + 1;
+    try {
+      final highest = await _client
+          .from('quote_backgrounds')
+          .select('sort_order')
+          .order('sort_order', ascending: false)
+          .limit(1);
+      final nextOrder = highest.isEmpty
+          ? 1
+          : ((highest.first['sort_order'] as num?)?.toInt() ?? 0) + 1;
 
-    await _client.from('quote_backgrounds').insert({
-      'file_name': safeName,
-      'title': title.trim(),
-      'category': category.trim(),
-      'recommended_text_color': recommendedTextColor,
-      'safe_text_area': safeTextArea,
-      'sort_order': nextOrder,
-      'is_active': true,
-      'created_by': _client.auth.currentUser?.id,
-    });
+      await _client.from('quote_backgrounds').insert({
+        'file_name': safeName,
+        'title': title.trim(),
+        'category': category.trim(),
+        'recommended_text_color': recommendedTextColor,
+        'safe_text_area': safeTextArea,
+        'sort_order': nextOrder,
+        'is_active': true,
+        'created_by': _client.auth.currentUser?.id,
+      });
+    } catch (_) {
+      // Roll back only this new upload; never overwrite an existing object.
+      try {
+        await _client.storage.from(bucket).remove(['$folder/$safeName']);
+      } catch (_) {
+        // The original database error is the actionable failure.
+      }
+      rethrow;
+    }
     QuoteBackgroundCatalogue.invalidate();
   }
 
@@ -121,7 +132,9 @@ class QuoteBackgroundAdminService {
     bool? isActive,
     int? sortOrder,
   }) async {
-    final patch = <String, dynamic>{'updated_at': DateTime.now().toIso8601String()};
+    final patch = <String, dynamic>{
+      'updated_at': DateTime.now().toIso8601String()
+    };
     if (title != null) patch['title'] = title.trim();
     if (category != null) patch['category'] = category.trim();
     if (recommendedTextColor != null) {
@@ -159,7 +172,7 @@ class QuoteBackgroundAdminService {
         ? cleaned
         : '$cleaned.png';
     // Prefixed so two uploads of "background.png" cannot collide.
-    return '${DateTime.now().millisecondsSinceEpoch}_$withExtension';
+    return '${const Uuid().v4()}_$withExtension';
   }
 
   static String _contentTypeFor(String fileName) {

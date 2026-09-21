@@ -71,10 +71,10 @@ export function timingSafeEqual(a: string, b: string): boolean {
 
 /** Fygaro expects the amount as a decimal string, e.g. "100.01". */
 export function formatFygaroAmount(amountMinor: number): string {
-  if (!Number.isFinite(amountMinor) || amountMinor < 0) {
+  if (!Number.isSafeInteger(amountMinor) || amountMinor < 0) {
     throw new Error("A valid amount is required");
   }
-  return (Math.round(amountMinor) / 100).toFixed(2);
+  return (amountMinor / 100).toFixed(2);
 }
 
 export interface SignCheckoutOptions {
@@ -128,6 +128,9 @@ export async function signFygaroCheckoutJwt(
 export function buildFygaroCheckoutUrl(buttonUrl: string, jwt: string): string {
   if (!buttonUrl) throw new Error("Fygaro button URL is not configured");
   const url = new URL(buttonUrl);
+  if (url.protocol !== 'https:' || url.username || url.password) {
+    throw new Error('Fygaro must use a secure HTTPS payment URL');
+  }
   url.searchParams.set("jwt", jwt);
   return url.toString();
 }
@@ -211,10 +214,13 @@ export async function verifyFygaroWebhook(
   }
 }
 
-export function fygaroCheckoutConfigFromEnv(): FygaroCheckoutConfig {
-  const buttonUrl = Deno.env.get("FYGARO_BUTTON_URL") ?? "";
-  const keyId = Deno.env.get("FYGARO_KEY_ID") ?? "";
-  const secret = Deno.env.get("FYGARO_SECRET_KEY") ?? "";
+type ReadEnvironment = (name: string) => string | undefined;
+const readEnvironment: ReadEnvironment = (name) => Deno.env.get(name);
+
+export function fygaroCheckoutConfigFromEnv(read = readEnvironment): FygaroCheckoutConfig {
+  const buttonUrl = read("FYGARO_BUTTON_URL")?.trim() ?? "";
+  const keyId = read("FYGARO_KEY_ID")?.trim() ?? "";
+  const secret = read("FYGARO_SECRET_KEY")?.trim() ?? "";
   if (!buttonUrl || !keyId || !secret) {
     throw new Error(
       "Fygaro is not configured. Set FYGARO_BUTTON_URL, FYGARO_KEY_ID and FYGARO_SECRET_KEY.",
@@ -223,27 +229,37 @@ export function fygaroCheckoutConfigFromEnv(): FygaroCheckoutConfig {
   return { buttonUrl, keyId, secret };
 }
 
-export function fygaroWebhookConfigFromEnv(): FygaroWebhookConfig {
-  const raw = Deno.env.get("FYGARO_WEBHOOK_SECRETS") ?? "";
+export function fygaroWebhookConfigFromEnv(read = readEnvironment): FygaroWebhookConfig {
+  const raw = read("FYGARO_WEBHOOK_SECRETS") ?? "";
   let secrets: Record<string, string> = {};
   if (raw.trim()) {
     try {
       const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === "object") {
-        secrets = parsed as Record<string, string>;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        secrets = Object.fromEntries(Object.entries(parsed).filter(
+          ([key, value]) => key.trim() && typeof value === 'string' && value.trim(),
+        )) as Record<string, string>;
       }
     } catch (_) {
       // A malformed rotation map must not silently disable verification --
       // the default secret below still applies, and a missing secret throws.
     }
   }
-  const defaultSecret = Deno.env.get("FYGARO_WEBHOOK_SECRET") ?? undefined;
+  const defaultSecret = read("FYGARO_WEBHOOK_SECRET")?.trim() || undefined;
   if (!defaultSecret && Object.keys(secrets).length === 0) {
     throw new Error(
       "Fygaro webhook verification is not configured. Set FYGARO_WEBHOOK_SECRET.",
     );
   }
   return { secrets, defaultSecret };
+}
+
+/** Never send a payer to checkout before payment verification is configured. */
+export function fygaroPaymentConfigFromEnv(read = readEnvironment): FygaroCheckoutConfig {
+  const config = fygaroCheckoutConfigFromEnv(read);
+  fygaroWebhookConfigFromEnv(read);
+  buildFygaroCheckoutUrl(config.buttonUrl, 'configuration-check');
+  return config;
 }
 
 export interface FygaroWebhookPayload {
@@ -274,19 +290,27 @@ export function normalizeFygaroPayment(
   if (!transactionId) {
     throw new Error("Fygaro payload has no transactionId");
   }
-  const amount = Number(payload.amount);
-  if (!Number.isFinite(amount) || amount < 0) {
+  if (typeof payload.amount !== 'string' ||
+      !/^\d{1,12}\.\d{2}$/.test(payload.amount)) {
     throw new Error("Fygaro payload has no usable amount");
   }
+  const [whole, cents] = payload.amount.split('.');
+  const amountMinor = Number(whole) * 100 + Number(cents);
+  if (!Number.isSafeInteger(amountMinor) || amountMinor <= 0) {
+    throw new Error('Fygaro payload has no usable amount');
+  }
+  const currency = (payload.currency ?? '').trim().toUpperCase();
+  if (!['USD', 'JMD'].includes(currency)) throw new Error('Unsupported currency');
   const parsedDate = payload.createdAt ? new Date(payload.createdAt) : null;
+  if (!parsedDate || Number.isNaN(parsedDate.getTime())) {
+    throw new Error('Fygaro payload has no valid payment date');
+  }
   return {
     transactionId,
     customReference: (payload.customReference ?? "").trim() || null,
-    currency: (payload.currency ?? "").trim().toUpperCase(),
-    amountMinor: Math.round(amount * 100),
-    paidAt: parsedDate && !Number.isNaN(parsedDate.getTime())
-      ? parsedDate
-      : new Date(),
+    currency,
+    amountMinor,
+    paidAt: parsedDate,
     customerEmail: (payload.client?.email ?? "").trim() || null,
   };
 }

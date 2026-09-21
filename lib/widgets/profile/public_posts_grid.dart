@@ -58,7 +58,9 @@ class PublicPostTile extends StatelessWidget {
     // expensive to open on a phone connection.
     final mediaUrl = (post.mediaThumbnailUrl?.trim().isNotEmpty ?? false)
         ? post.mediaThumbnailUrl!.trim()
-        : (post.mediaUrl?.trim() ?? '');
+        : (post.mediaType?.toLowerCase().startsWith('video') == true
+            ? ''
+            : (post.mediaUrl?.trim() ?? ''));
     final isVideo = (post.mediaType?.toLowerCase() ?? '').startsWith('video');
 
     return InkWell(

@@ -102,68 +102,77 @@ class ShareableQuoteCard extends StatelessWidget {
               ),
             ),
             if (style.darkenOpacity > 0)
-              Container(color: Colors.black.withValues(alpha: style.darkenOpacity)),
+              Container(
+                  color: Colors.black.withValues(alpha: style.darkenOpacity)),
             Padding(
               padding: const EdgeInsets.fromLTRB(28, 40, 28, 40),
               child: Align(
                 alignment: _textAlignmentFor(background.safeTextArea),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      quoteText,
-                      textAlign: TextAlign.center,
-                      style: GoogleFonts.getFont(
-                        style.font.familyName,
-                        textStyle: TextStyle(
-                          color: textColor,
-                          fontSize: baseSize * style.fontScale,
-                          fontWeight: FontWeight.w700,
-                          height: 1.35,
-                          shadows: [
-                            Shadow(
-                              color: Colors.black.withValues(alpha: 0.35),
-                              blurRadius: 8,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: SizedBox(
+                    width: 300,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          quoteText,
+                          textAlign: TextAlign.center,
+                          style: GoogleFonts.getFont(
+                            style.font.familyName,
+                            textStyle: TextStyle(
+                              color: textColor,
+                              fontSize: baseSize * style.fontScale,
+                              fontWeight: FontWeight.w700,
+                              height: 1.35,
+                              shadows: [
+                                Shadow(
+                                  color: Colors.black.withValues(alpha: 0.35),
+                                  blurRadius: 8,
+                                ),
+                              ],
                             ),
-                          ],
+                          ),
                         ),
-                      ),
+                        if (attribution != null &&
+                            attribution!.trim().isNotEmpty) ...[
+                          const SizedBox(height: 14),
+                          Text(
+                            attribution!,
+                            textAlign: TextAlign.center,
+                            style: GoogleFonts.getFont(
+                              style.font.familyName,
+                              textStyle: TextStyle(
+                                color: textColor.withValues(alpha: 0.9),
+                                fontSize: (baseSize * 0.62).clamp(11, 18) *
+                                    style.fontScale,
+                                fontWeight: FontWeight.w600,
+                                fontStyle: FontStyle.italic,
+                              ),
+                            ),
+                          ),
+                        ],
+                        if (sourceNote != null &&
+                            sourceNote!.trim().isNotEmpty) ...[
+                          const SizedBox(height: 10),
+                          Text(
+                            sourceNote!,
+                            textAlign: TextAlign.center,
+                            style: GoogleFonts.getFont(
+                              style.font.familyName,
+                              textStyle: TextStyle(
+                                color: textColor.withValues(alpha: 0.75),
+                                fontSize: (baseSize * 0.46).clamp(9, 13) *
+                                    style.fontScale,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: 0.2,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
-                    if (attribution != null && attribution!.trim().isNotEmpty) ...[
-                      const SizedBox(height: 14),
-                      Text(
-                        attribution!,
-                        textAlign: TextAlign.center,
-                        style: GoogleFonts.getFont(
-                          style.font.familyName,
-                          textStyle: TextStyle(
-                            color: textColor.withValues(alpha: 0.9),
-                            fontSize: (baseSize * 0.62).clamp(11, 18) *
-                                style.fontScale,
-                            fontWeight: FontWeight.w600,
-                            fontStyle: FontStyle.italic,
-                          ),
-                        ),
-                      ),
-                    ],
-                    if (sourceNote != null && sourceNote!.trim().isNotEmpty) ...[
-                      const SizedBox(height: 10),
-                      Text(
-                        sourceNote!,
-                        textAlign: TextAlign.center,
-                        style: GoogleFonts.getFont(
-                          style.font.familyName,
-                          textStyle: TextStyle(
-                            color: textColor.withValues(alpha: 0.75),
-                            fontSize: (baseSize * 0.46).clamp(9, 13) *
-                                style.fontScale,
-                            fontWeight: FontWeight.w600,
-                            letterSpacing: 0.2,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
+                  ),
                 ),
               ),
             ),

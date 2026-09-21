@@ -1,186 +1,73 @@
 import {
-  authenticatedUser,
-  handleOptions,
-  jamaicaMonthDateKey,
-  jamaicaMonthLabel,
-  jamaicaMonthRange,
-  jsonResponse,
-  parseJamaicaMonthKey,
-  displayFirstName,
-  profileDisplayName,
-  profileQuizChurchId,
-  profileQuizScope,
-  serviceClient,
-  userProfile,
-} from "../_shared/grace.ts";
-
-type Row = {
-  member_id: string;
-  total_score: number;
-  correct_answers: number;
-  total_response_time_ms: number;
-};
+  accessTokenFromRequest, anonClient, authenticatedUser, handleOptions,
+  jamaicaMonthLabel, jsonResponse,
+  parseJamaicaMonthKey, profileDisplayName, profileQuizChurchId,
+  profileQuizScope, serviceClient, userProfile,
+} from '../_shared/grace.ts';
 
 Deno.serve(async (request) => {
   const options = handleOptions(request);
   if (options) return options;
-  if (request.method !== "POST") return jsonResponse({ error: "POST required." }, 405);
-
+  if (request.method !== 'POST') return jsonResponse({ error: 'POST required.' }, 405);
   try {
-    const client = serviceClient();
     const user = await authenticatedUser(request);
-    const body = await request.json().catch(() => ({}));
+    const client = serviceClient();
     const profile = await userProfile(client, user.id);
+    const scope = profileQuizScope(profile);
     const churchId = profileQuizChurchId(profile);
-    const leaderboardScope = profileQuizScope(profile);
-
-    const selectedMonth = parseJamaicaMonthKey(String(body.quiz_month ?? ""));
-    const selectedMonthKey = jamaicaMonthDateKey(selectedMonth);
-    const { start, end } = jamaicaMonthRange(selectedMonth);
-
-    const { data: attempts } = await client
-      .from("quiz_attempts")
-      .select("member_id, total_score, correct_answers, total_response_time_ms, completed_at")
-      .eq("church_id_at_attempt", churchId)
-      .eq("status", "completed")
-      .gte("completed_at", start.toISOString())
-      .lt("completed_at", end.toISOString());
-
-    const grouped = new Map<string, Row & { perfect_quizzes: number; quizzes_completed: number }>();
-    for (const attempt of attempts ?? []) {
-      const memberId = String(attempt.member_id);
-      const current = grouped.get(memberId) ?? {
-        member_id: memberId,
-        total_score: 0,
-        correct_answers: 0,
-        total_response_time_ms: 0,
-        perfect_quizzes: 0,
-        quizzes_completed: 0,
-      };
-      current.total_score += Number(attempt.total_score ?? 0);
-      current.correct_answers += Number(attempt.correct_answers ?? 0);
-      current.total_response_time_ms += Number(attempt.total_response_time_ms ?? 0);
-      current.perfect_quizzes += Number(attempt.total_score ?? 0) === 100 ? 1 : 0;
-      current.quizzes_completed += 1;
-      grouped.set(memberId, current);
-    }
-
-    const { data: winnerRows } = await client
-      .from("monthly_quiz_winners")
-      .select("id, member_id, rank, total_points, correct_answers, perfect_quizzes, total_response_time_ms, quiz_month")
-      .eq("church_id", churchId)
-      .eq("quiz_month", selectedMonthKey)
-      .order("rank", { ascending: true });
-
-    const { data: allWinnerMonths } = await client
-      .from("monthly_quiz_winners")
-      .select("quiz_month")
-      .eq("church_id", churchId)
-      .order("quiz_month", { ascending: false });
-
-    const availableMonthKeys = new Set<string>([selectedMonthKey]);
-    for (const winner of allWinnerMonths ?? []) {
-      const month = String(winner.quiz_month ?? "");
-      if (month) availableMonthKeys.add(month);
-    }
-
-    const memberIds = Array.from(
-      new Set([
-        ...Array.from(grouped.keys()),
-        ...(winnerRows ?? []).map((winner) => String(winner.member_id ?? "")),
-      ].filter(Boolean)),
-    );
-    const quotedIds = memberIds.map((id) => `"${id}"`).join(",");
-    const { data: users } = memberIds.length
-      ? await client
-        .from("users")
-        .select("id, uid, fullName, displayName, photoUrl")
-        .or(`id.in.(${quotedIds}),uid.in.(${quotedIds})`)
-      : { data: [] };
-
-    // Indexed under both keys, because which one a row carries varies.
-    const userMap = new Map<string, Record<string, unknown>>();
-    for (const row of users ?? []) {
-      const record = row as Record<string, unknown>;
-      if (record.id) userMap.set(String(record.id), record);
-      if (record.uid) userMap.set(String(record.uid), record);
-    }
-
-    // On a global board every member but the viewer is shown by first name.
-    // The viewer keeps their own full name so they can find themselves.
-    const nameFor = (
-      member: Record<string, unknown>,
-      memberId: string,
-    ): string => {
-      const full = profileDisplayName(member);
-      if (leaderboardScope !== "global" || memberId === user.id) return full;
-      return displayFirstName(full);
-    };
-
-    const entries = Array.from(grouped.values())
-      .sort((a, b) =>
-        b.total_score - a.total_score ||
-        b.perfect_quizzes - a.perfect_quizzes ||
-        b.correct_answers - a.correct_answers ||
-        a.total_response_time_ms - b.total_response_time_ms ||
-        a.member_id.localeCompare(b.member_id)
-      )
-      .map((entry, index) => {
-        const member = (userMap.get(entry.member_id) ?? {}) as Record<string, unknown>;
-        return {
-          rank: index + 1,
-          member_id: entry.member_id,
-          display_name: nameFor(member, entry.member_id),
-          photo_url: String(member.photoUrl ?? ""),
-          total_points: entry.total_score,
-          correct_answers: entry.correct_answers,
-          perfect_quizzes: entry.perfect_quizzes,
-          quizzes_completed: entry.quizzes_completed,
-          is_current_user: entry.member_id === user.id,
-        };
-      });
-
-    const currentMember = entries.find((entry) => entry.member_id === user.id) ?? null;
-    const winners = (winnerRows ?? []).map((winner) => {
-      const member = (userMap.get(String(winner.member_id)) ?? {}) as Record<string, unknown>;
-      return {
-        id: winner.id,
-        rank: winner.rank,
-        quiz_month: winner.quiz_month,
-        member_id: winner.member_id,
-        display_name: nameFor(member, String(winner.member_id)),
-        photo_url: String(member.photoUrl ?? ""),
-        total_points: winner.total_points,
-        correct_answers: winner.correct_answers,
-        perfect_quizzes: winner.perfect_quizzes,
-        total_response_time_ms: winner.total_response_time_ms,
-      };
+    const body = await request.json().catch(() => ({}));
+    // Aggregate in Postgres: fetching attempt rows here silently capped scores
+    // at the Data API's row limit and could omit the viewer entirely.
+    const { data: ranking, error: rankingError } = await anonClient(
+      accessTokenFromRequest(request) ?? undefined,
+    ).rpc('list_quiz_ranking', {
+      p_scope: scope, p_quiz_month: body.quiz_month ?? null, result_limit: 50,
     });
-
+    if (rankingError) throw rankingError;
+    // The RPC validates the input and selects the current month using the
+    // ranking's calendar (UTC globally, the existing church quiz calendar locally).
+    const monthKey = `${ranking.month}-01`;
+    const month = parseJamaicaMonthKey(monthKey);
+    const entries = (ranking.entries ?? []).map((row: Record<string, unknown>) => ({
+      rank: row.rank, member_id: row.user_id, display_name: row.user_name,
+      photo_url: row.photo_url ?? '', total_points: row.total_score,
+      correct_answers: row.correct_answers, perfect_quizzes: row.perfect_quizzes,
+      quizzes_completed: row.quizzes_completed, is_current_user: row.is_viewer,
+    }));
+    // Saved church awards remain historical. Visitor awards are not worldwide awards.
+    let winners: Record<string, unknown>[] = [];
+    const monthKeys = new Set<string>([monthKey]);
+    if (scope === 'church') {
+      const { data: rows, error } = await client.from('monthly_quiz_winners')
+        .select('id,member_id,rank,total_points,correct_answers,perfect_quizzes,quiz_month')
+        .eq('church_id', churchId).eq('quiz_month', monthKey).order('rank').limit(3);
+      if (error) throw error;
+      for (const row of rows ?? []) {
+        const { data: person, error: personError } = await client.from('users')
+          .select('id,uid,fullName,displayName,photoUrl')
+          .or(`id.eq.${row.member_id},uid.eq.${row.member_id}`).limit(1).maybeSingle();
+        if (personError) throw personError;
+        winners.push({ ...row, display_name: profileDisplayName(person ?? {}),
+          photo_url: person?.photoUrl ?? '' });
+      }
+      const { data: months, error: monthsError } = await client.from('monthly_quiz_winners')
+        .select('quiz_month').eq('church_id',churchId).order('quiz_month',{ascending:false}).limit(120);
+      if (monthsError) throw monthsError;
+      for (const row of months ?? []) monthKeys.add(row.quiz_month);
+    }
     return jsonResponse({
-      ok: true,
-      quiz_month: selectedMonthKey,
-      month_label: jamaicaMonthLabel(selectedMonth),
-      next_month_at: end.toISOString(),
-      entries: entries.slice(0, 50),
-      current_member: currentMember,
-      winners,
-      leaderboard_scope: leaderboardScope,
-      leaderboard_label: leaderboardScope === "global"
-        ? "Grace Connect visitors"
-        : "Church members",
-      available_months: Array.from(availableMonthKeys)
-        .sort()
-        .reverse()
-        .map((month) => {
-          const date = parseJamaicaMonthKey(month);
-          return {
-            quiz_month: month,
-            label: jamaicaMonthLabel(date),
-          };
-        }),
+      ok: true, quiz_month: monthKey, month_label: jamaicaMonthLabel(month),
+      next_month_at: ranking.next_month_at,
+      entries, current_member: ranking.viewer ? {
+        rank: ranking.viewer.rank, total_points: ranking.viewer.total_score,
+      } : null, winners,
+      leaderboard_scope: scope,
+      leaderboard_label: scope === 'global' ? 'Worldwide' : 'Church members',
+      available_months: [...monthKeys].sort().reverse().map(key => ({
+        quiz_month: key, label: jamaicaMonthLabel(parseJamaicaMonthKey(key)),
+      })),
     });
   } catch (error) {
-    return jsonResponse({ error: error instanceof Error ? error.message : "Unable to load leaderboard." }, 400);
+    return jsonResponse({error: error instanceof Error ? error.message : 'Unable to load leaderboard.'},400);
   }
 });

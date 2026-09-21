@@ -84,7 +84,15 @@ Deno.serve(async (request) => {
         p_current_period_start: period.start.toISOString(),
         p_current_period_end: period.end.toISOString(),
         p_cancel_at: null,
-        p_payload: payload,
+        // Keep the reconciliation fields, never the legacy JWT, card data,
+        // billing address, or full customer contact payload.
+        p_payload: {
+          transactionId: payment.transactionId,
+          customReference: payment.customReference,
+          currency: payment.currency,
+          amountMinor: payment.amountMinor,
+          paidAt: payment.paidAt.toISOString(),
+        },
       },
     );
     if (error) throw error;

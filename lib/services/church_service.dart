@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:uuid/uuid.dart';
 import '../models/church_stats.dart';
 import '../models/church_model.dart';
 import '../models/service_schedule.dart';
@@ -7,7 +8,9 @@ import '../data/initial_churches.dart';
 import '../services/church_stats_service.dart';
 
 class ChurchService {
-  final SupabaseClient _supabase = Supabase.instance.client;
+  ChurchService({SupabaseClient? client})
+      : _supabase = client ?? Supabase.instance.client;
+  final SupabaseClient _supabase;
 
   Future<Church?> getChurch(String churchId) async {
     try {
@@ -104,7 +107,8 @@ class ChurchService {
       'p_service_times_note': church.serviceTimesNote,
       // Empty means "unchanged" for the logo: a text-only profile save must
       // not wipe an image uploaded separately.
-      'p_logo_url': church.logoUrl.trim().isEmpty ? null : church.logoUrl.trim(),
+      'p_logo_url':
+          church.logoUrl.trim().isEmpty ? null : church.logoUrl.trim(),
       'p_managing_pastor_name': church.managingPastorName,
       'p_managing_pastor_title': church.managingPastorTitle,
       'p_managing_pastor_since':
@@ -125,21 +129,32 @@ class ChurchService {
     try {
       final safeExtension =
           fileExtension.replaceAll(RegExp(r'[^A-Za-z0-9]'), '').toLowerCase();
+      if (!{'png', 'jpg', 'jpeg', 'webp'}.contains(safeExtension) ||
+          bytes.isEmpty ||
+          bytes.length > 5 * 1024 * 1024 ||
+          churchId.trim().isEmpty ||
+          churchId.contains('/')) {
+        throw ArgumentError('Choose a PNG, JPEG or WebP logo under 5 MB.');
+      }
       // A new name each time: an overwritten object keeps its old URL, so
       // caches and already-rendered profiles would keep the previous image.
       final path =
-          '\$churchId/logo_\${DateTime.now().millisecondsSinceEpoch}.\$safeExtension';
+          '${churchId.trim()}/logo_${const Uuid().v4()}.$safeExtension';
       await _supabase.storage.from('church_media').uploadBinary(
             path,
             bytes,
             fileOptions: FileOptions(
-              contentType: safeExtension == 'png' ? 'image/png' : 'image/jpeg',
+              contentType: safeExtension == 'png'
+                  ? 'image/png'
+                  : safeExtension == 'webp'
+                      ? 'image/webp'
+                      : 'image/jpeg',
               upsert: false,
             ),
           );
       return _supabase.storage.from('church_media').getPublicUrl(path);
     } catch (error) {
-      debugPrint('Church logo upload failed: \$error');
+      debugPrint('Church logo upload failed: $error');
       return null;
     }
   }

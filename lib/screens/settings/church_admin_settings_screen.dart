@@ -57,7 +57,7 @@ class _ChurchAdminSettingsScreenState extends State<ChurchAdminSettingsScreen> {
           _nameController.text = church?.name ?? '';
           _addressController.text = church?.address ?? '';
           _denominationController.text = church?.denomination ?? '';
-          _timezoneController.text = church?.timezone ?? 'America/Jamaica';
+          _timezoneController.text = church?.timezone ?? 'UTC';
           _aboutController.text = church?.about ?? '';
           _foundedYearController.text = church?.foundedYear?.toString() ?? '';
           _contactEmailController.text = church?.contactEmail ?? '';
@@ -79,37 +79,37 @@ class _ChurchAdminSettingsScreenState extends State<ChurchAdminSettingsScreen> {
   }
 
   Future<void> _pickLogo() async {
-    final picked = await ImagePicker().pickImage(
-      source: ImageSource.gallery,
-      maxWidth: 800,
-      maxHeight: 800,
-      imageQuality: 85,
-    );
-    if (picked == null) return;
-    final churchId = _church?.placeId.isNotEmpty == true
-        ? _church!.placeId
-        : _church?.id ?? '';
-    if (churchId.isEmpty) return;
-
+    if (_isUploadingLogo) return;
     setState(() => _isUploadingLogo = true);
-    final bytes = await picked.readAsBytes();
-    final extension = picked.path.split('.').last;
-    final url = await _churchService.uploadChurchLogo(
-      churchId: churchId,
-      bytes: bytes,
-      fileExtension: extension.isEmpty ? 'jpg' : extension,
-    );
-    if (!mounted) return;
-    setState(() {
-      _isUploadingLogo = false;
-      if (url != null) _logoUrl = url;
-    });
-    if (url == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('That logo could not be uploaded.')),
+    try {
+      final picked = await ImagePicker().pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 800,
+        maxHeight: 800,
+        imageQuality: 85,
       );
-    } else {
+      if (!mounted || picked == null) return;
+      final churchId = _church?.placeId.isNotEmpty == true
+          ? _church!.placeId
+          : _church?.id ?? '';
+      if (churchId.isEmpty) return;
+      final url = await _churchService.uploadChurchLogo(
+        churchId: churchId,
+        bytes: await picked.readAsBytes(),
+        fileExtension: picked.path.split('.').last,
+      );
+      if (!mounted) return;
+      if (url == null)
+        throw Exception('Choose a PNG, JPEG or WebP under 5 MB.');
+      setState(() => _logoUrl = url);
       HapticService.success();
+    } catch (error) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not upload the logo: $error')),
+        );
+    } finally {
+      if (mounted) setState(() => _isUploadingLogo = false);
     }
   }
 
@@ -160,7 +160,7 @@ class _ChurchAdminSettingsScreenState extends State<ChurchAdminSettingsScreen> {
       denomination: _denominationController.text.trim(),
       ownerUserId: church.ownerUserId,
       timezone: _timezoneController.text.trim().isEmpty
-          ? 'America/Jamaica'
+          ? church.timezone
           : _timezoneController.text.trim(),
       status: church.status,
       createdAt: church.createdAt,
@@ -205,151 +205,176 @@ class _ChurchAdminSettingsScreenState extends State<ChurchAdminSettingsScreen> {
   void _showChurchProfileDialog() {
     showDialog(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Church Profile'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // The picture is what a member sees first on a church profile,
-              // so it sits at the top of the form rather than buried below
-              // the text fields.
-              Center(
-                child: Column(
-                  children: [
-                    GestureDetector(
-                      onTap: _isUploadingLogo ? null : _pickLogo,
-                      child: Container(
-                        width: 96,
-                        height: 96,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: Theme.of(context)
-                              .colorScheme
-                              .surfaceContainerHighest,
-                          image: _logoUrl.isNotEmpty
-                              ? DecorationImage(
-                                  image: NetworkImage(_logoUrl),
-                                  fit: BoxFit.cover)
-                              : null,
+      barrierDismissible: false,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (editorContext, refresh) {
+          Future<void> run(Future<void> Function() action) async {
+            final task = action();
+            if (editorContext.mounted) refresh(() {});
+            await task;
+            if (editorContext.mounted) refresh(() {});
+          }
+
+          return AlertDialog(
+            title: const Text('Church Profile'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // The picture is what a member sees first on a church profile,
+                  // so it sits at the top of the form rather than buried below
+                  // the text fields.
+                  Center(
+                    child: Column(
+                      children: [
+                        GestureDetector(
+                          onTap: _isUploadingLogo || _isSaving
+                              ? null
+                              : () => run(_pickLogo),
+                          child: Container(
+                            width: 96,
+                            height: 96,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .surfaceContainerHighest,
+                              image: _logoUrl.isNotEmpty
+                                  ? DecorationImage(
+                                      image: NetworkImage(_logoUrl),
+                                      fit: BoxFit.cover)
+                                  : null,
+                            ),
+                            child: _isUploadingLogo
+                                ? const Center(
+                                    child: SizedBox(
+                                        width: 22,
+                                        height: 22,
+                                        child: CircularProgressIndicator(
+                                            strokeWidth: 2)))
+                                : _logoUrl.isEmpty
+                                    ? const Icon(Icons.add_a_photo_outlined,
+                                        size: 30)
+                                    : null,
+                          ),
                         ),
-                        child: _isUploadingLogo
-                            ? const Center(
-                                child: SizedBox(
-                                    width: 22,
-                                    height: 22,
-                                    child: CircularProgressIndicator(
-                                        strokeWidth: 2)))
-                            : _logoUrl.isEmpty
-                                ? const Icon(Icons.add_a_photo_outlined,
-                                    size: 30)
-                                : null,
-                      ),
+                        const SizedBox(height: 8),
+                        TextButton(
+                          onPressed: _isUploadingLogo || _isSaving
+                              ? null
+                              : () => run(_pickLogo),
+                          child: Text(_logoUrl.isEmpty
+                              ? 'Add church photo'
+                              : 'Change photo'),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 8),
-                    TextButton(
-                      onPressed: _isUploadingLogo ? null : _pickLogo,
-                      child: Text(_logoUrl.isEmpty
-                          ? 'Add church photo'
-                          : 'Change photo'),
-                    ),
-                  ],
-                ),
+                  ),
+                  const SizedBox(height: 12),
+                  AppTextField(
+                      controller: _nameController, label: 'Church Name'),
+                  const SizedBox(height: 12),
+                  AppTextField(
+                      controller: _addressController, label: 'Address'),
+                  const SizedBox(height: 12),
+                  AppTextField(
+                    controller: _denominationController,
+                    label: 'Denomination',
+                  ),
+                  const SizedBox(height: 12),
+                  AppTextField(
+                      controller: _timezoneController, label: 'Timezone'),
+                  const SizedBox(height: 12),
+                  AppTextField(
+                    controller: _pastorNameController,
+                    label: 'Managing pastor',
+                  ),
+                  const SizedBox(height: 12),
+                  AppTextField(
+                    controller: _pastorTitleController,
+                    label: 'Title (e.g. Senior Pastor)',
+                  ),
+                  const SizedBox(height: 12),
+                  // Leadership changes, so the profile records when this pastor
+                  // took over rather than implying they always led it.
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.event_outlined),
+                    title: const Text('Leading since'),
+                    subtitle: Text(_pastorSince == null
+                        ? 'Not set'
+                        : '${_pastorSince!.year}-${_pastorSince!.month.toString().padLeft(2, '0')}'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () async {
+                      final now = DateTime.now();
+                      final picked = await showDatePicker(
+                        context: context,
+                        initialDate: _pastorSince ?? now,
+                        firstDate: DateTime(1900),
+                        lastDate: now,
+                      );
+                      if (picked != null && editorContext.mounted) {
+                        refresh(() => _pastorSince = picked);
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  AppTextField(
+                    controller: _aboutController,
+                    label: 'About the Church',
+                    hint: 'Share the church story, mission, or community focus',
+                    maxLines: 4,
+                  ),
+                  const SizedBox(height: 12),
+                  AppTextField(
+                    controller: _foundedYearController,
+                    label: 'Founded Year',
+                    keyboardType: TextInputType.number,
+                  ),
+                  const SizedBox(height: 12),
+                  AppTextField(
+                    controller: _contactEmailController,
+                    label: 'Church Contact Email',
+                    keyboardType: TextInputType.emailAddress,
+                  ),
+                  const SizedBox(height: 12),
+                  AppTextField(
+                    controller: _contactPhoneController,
+                    label: 'Church Contact Phone',
+                    keyboardType: TextInputType.phone,
+                  ),
+                  const SizedBox(height: 12),
+                  AppTextField(
+                    controller: _websiteController,
+                    label: 'Website',
+                    keyboardType: TextInputType.url,
+                  ),
+                  const SizedBox(height: 12),
+                  AppTextField(
+                    controller: _serviceTimesController,
+                    label: 'Service Times',
+                    hint: 'Sunday 10:00 AM, Wednesday Bible Study 7:00 PM',
+                    maxLines: 3,
+                  ),
+                ],
               ),
-              const SizedBox(height: 12),
-              AppTextField(controller: _nameController, label: 'Church Name'),
-              const SizedBox(height: 12),
-              AppTextField(controller: _addressController, label: 'Address'),
-              const SizedBox(height: 12),
-              AppTextField(
-                controller: _denominationController,
-                label: 'Denomination',
+            ),
+            actions: [
+              TextButton(
+                onPressed: _isSaving || _isUploadingLogo
+                    ? null
+                    : () => Navigator.pop(dialogContext),
+                child: const Text('Cancel'),
               ),
-              const SizedBox(height: 12),
-              AppTextField(controller: _timezoneController, label: 'Timezone'),
-              const SizedBox(height: 12),
-              AppTextField(
-                controller: _pastorNameController,
-                label: 'Managing pastor',
-              ),
-              const SizedBox(height: 12),
-              AppTextField(
-                controller: _pastorTitleController,
-                label: 'Title (e.g. Senior Pastor)',
-              ),
-              const SizedBox(height: 12),
-              // Leadership changes, so the profile records when this pastor
-              // took over rather than implying they always led it.
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.event_outlined),
-                title: const Text('Leading since'),
-                subtitle: Text(_pastorSince == null
-                    ? 'Not set'
-                    : '${_pastorSince!.year}-${_pastorSince!.month.toString().padLeft(2, '0')}'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () async {
-                  final now = DateTime.now();
-                  final picked = await showDatePicker(
-                    context: context,
-                    initialDate: _pastorSince ?? now,
-                    firstDate: DateTime(1900),
-                    lastDate: now,
-                  );
-                  if (picked != null) setState(() => _pastorSince = picked);
-                },
-              ),
-              const SizedBox(height: 12),
-              AppTextField(
-                controller: _aboutController,
-                label: 'About the Church',
-                hint: 'Share the church story, mission, or community focus',
-                maxLines: 4,
-              ),
-              const SizedBox(height: 12),
-              AppTextField(
-                controller: _foundedYearController,
-                label: 'Founded Year',
-                keyboardType: TextInputType.number,
-              ),
-              const SizedBox(height: 12),
-              AppTextField(
-                controller: _contactEmailController,
-                label: 'Church Contact Email',
-                keyboardType: TextInputType.emailAddress,
-              ),
-              const SizedBox(height: 12),
-              AppTextField(
-                controller: _contactPhoneController,
-                label: 'Church Contact Phone',
-                keyboardType: TextInputType.phone,
-              ),
-              const SizedBox(height: 12),
-              AppTextField(
-                controller: _websiteController,
-                label: 'Website',
-                keyboardType: TextInputType.url,
-              ),
-              const SizedBox(height: 12),
-              AppTextField(
-                controller: _serviceTimesController,
-                label: 'Service Times',
-                hint: 'Sunday 10:00 AM, Wednesday Bible Study 7:00 PM',
-                maxLines: 3,
+              FilledButton(
+                onPressed: _isSaving || _isUploadingLogo
+                    ? null
+                    : () => run(_saveChurchProfile),
+                child: const Text('Save'),
               ),
             ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: _isSaving ? null : () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: _isSaving ? null : _saveChurchProfile,
-            child: const Text('Save'),
-          ),
-        ],
+          );
+        },
       ),
     );
   }

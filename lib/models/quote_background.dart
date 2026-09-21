@@ -67,6 +67,7 @@ class QuoteBackgroundCatalogue {
   QuoteBackgroundCatalogue._();
 
   static List<QuoteBackground>? _cache;
+  static DateTime? _loadedAt;
 
   /// The public URL of a catalogue image, so the developer screen and the
   /// share card resolve the same object from the same one place.
@@ -75,16 +76,22 @@ class QuoteBackgroundCatalogue {
 
   /// Drops the cache so a developer's change shows on the next open rather
   /// than after an app restart.
-  static void invalidate() => _cache = null;
+  static void invalidate() {
+    _cache = null;
+    _loadedAt = null;
+  }
 
   static Future<List<QuoteBackground>> load() async {
     final cached = _cache;
-    if (cached != null) return cached;
+    if (cached != null &&
+        _loadedAt != null &&
+        DateTime.now().difference(_loadedAt!) < const Duration(minutes: 5)) {
+      return cached;
+    }
 
     // The catalogue is a table now, so a background added in the developer
-    // screen appears immediately. The manifest is still read when the table
-    // returns nothing, which keeps older installs and any environment whose
-    // table has not been seeded working exactly as before.
+    // screen appears on the next catalogue refresh. The legacy manifest is
+    // used only when this environment has not installed the catalogue table.
     try {
       final rows = await Supabase.instance.client
           .from('quote_backgrounds')
@@ -96,13 +103,14 @@ class QuoteBackgroundCatalogue {
           .cast<Map<String, dynamic>>()
           .map(QuoteBackground.fromRow)
           .toList(growable: false);
-      if (entries.isNotEmpty) {
-        _cache = entries;
-        return entries;
-      }
-    } catch (_) {
-      // Fall through to the manifest rather than leaving the customiser
-      // with nothing to show.
+      // An empty catalogue is intentional (all backgrounds may be disabled).
+      // Do not resurrect removed backgrounds from the legacy manifest.
+      _cache = entries;
+      _loadedAt = DateTime.now();
+      return entries;
+    } on PostgrestException catch (error) {
+      if (!{'42P01', 'PGRST205'}.contains(error.code)) rethrow;
+      // Compatibility only for deployments predating the catalogue table.
     }
 
     final response = await http
@@ -120,6 +128,7 @@ class QuoteBackgroundCatalogue {
         .map(QuoteBackground.fromManifestEntry)
         .toList(growable: false);
     _cache = entries;
+    _loadedAt = DateTime.now();
     return entries;
   }
 }

@@ -193,6 +193,7 @@ class _BibleBooksScreenState extends State<BibleBooksScreen> {
             .trim()
             .isNotEmpty;
     if (!hasChurch) scope = RankingScope.global;
+    var rankingFuture = BibleStreakService().fetchRanking(scope: scope);
 
     await showModalBottomSheet<void>(
       context: context,
@@ -201,7 +202,8 @@ class _BibleBooksScreenState extends State<BibleBooksScreen> {
         builder: (context, setSheetState) {
           final theme = Theme.of(context);
           return FutureBuilder<BibleStreakRanking>(
-            future: BibleStreakService().fetchRanking(scope: scope),
+            key: ValueKey(scope),
+            future: rankingFuture,
             builder: (context, snapshot) {
               final ranking = snapshot.data;
               return Padding(
@@ -241,8 +243,11 @@ class _BibleBooksScreenState extends State<BibleBooksScreen> {
                           ),
                         ],
                         selected: {scope},
-                        onSelectionChanged: (selection) =>
-                            setSheetState(() => scope = selection.first),
+                        onSelectionChanged: (selection) => setSheetState(() {
+                          scope = selection.first;
+                          rankingFuture =
+                              BibleStreakService().fetchRanking(scope: scope);
+                        }),
                       ),
                     ],
                     // Where the viewer stands overall, shown even when their
@@ -260,7 +265,7 @@ class _BibleBooksScreenState extends State<BibleBooksScreen> {
                         child: Text(
                           'You are #${ranking!.viewerRank}'
                           '${ranking.totalRanked != null ? ' of ${ranking.totalRanked}' : ''}'
-                          '${ranking.viewerStreak != null ? ' · ${ranking.viewerStreak} day streak' : ''}',
+                          '${ranking.viewerStreak != null ? ' · ${ranking.viewerStreak} day ${ranking.viewerIsCurrent ? 'streak' : 'previous streak'}' : ''}',
                           style: theme.textTheme.titleSmall?.copyWith(
                             fontWeight: FontWeight.w800,
                             color: theme.colorScheme.onPrimaryContainer,
@@ -327,6 +332,10 @@ class _BibleBooksScreenState extends State<BibleBooksScreen> {
                                   fontWeight: FontWeight.w800,
                                 ),
                               ),
+                              subtitle: entry.isCurrent
+                                  ? null
+                                  : const Text(
+                                      'Previous streak · read today to restart'),
                             );
                           },
                         ),
