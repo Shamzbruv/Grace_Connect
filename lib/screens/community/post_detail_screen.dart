@@ -7,6 +7,7 @@ import '../../utils/media_display_format.dart';
 import '../../widgets/ui/app_scaffold.dart';
 import '../../widgets/ui/app_text_field.dart';
 import '../../widgets/community_video_player.dart';
+import '../../widgets/share/content_share_sheet.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 
 class PostDetailScreen extends StatefulWidget {
@@ -167,6 +168,12 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   Widget build(BuildContext context) {
     return AppScaffold(
       title: 'Post Details',
+      actions: [
+        IconButton(
+            tooltip: 'Share post',
+            icon: const Icon(Icons.ios_share),
+            onPressed: () => showContentShareSheet(context, post: widget.post))
+      ],
       body: Column(
         children: [
           Expanded(

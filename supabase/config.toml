@@ -127,3 +127,7 @@ verify_jwt = false
 # verify. Its own HMAC signature is checked inside the function instead.
 [functions.fygaro-webhook]
 verify_jwt = false
+
+[functions.developer-platform-operations]
+# Interactive paths validate JWTs through Auth; the scheduled worker validates its cron secret.
+verify_jwt = false

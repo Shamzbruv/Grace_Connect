@@ -109,7 +109,7 @@ android {
         applicationId graceConnectApplicationId
         minSdkVersion 26
         targetSdkVersion 36
-        versionCode 39
+        versionCode 40
         versionName "1.1.1"
         multiDexEnabled true
         manifestPlaceholders = [
@@ -157,6 +157,9 @@ flutter {
 }
 
 dependencies {
+    // Match video_player_android's Media3 version to keep playback and export compatible.
+    implementation 'androidx.media3:media3-transformer:1.5.1'
+    implementation 'androidx.media3:media3-effect:1.5.1'
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'
     implementation 'androidx.multidex:multidex:2.0.1'
     implementation 'androidx.work:work-runtime-ktx:2.10.2'

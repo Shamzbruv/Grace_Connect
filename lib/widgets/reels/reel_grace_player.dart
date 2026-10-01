@@ -24,6 +24,9 @@ class ReelGracePlayer extends StatefulWidget {
     required this.muted,
     this.onPlaybackProgress,
     this.onCompleted,
+    this.onDoubleTap,
+    this.onLongPress,
+    this.controllerFactory,
   });
 
   final Reel reel;
@@ -38,6 +41,9 @@ class ReelGracePlayer extends StatefulWidget {
   final bool muted;
   final void Function(Duration position, Duration duration)? onPlaybackProgress;
   final VoidCallback? onCompleted;
+  final VoidCallback? onDoubleTap;
+  final VoidCallback? onLongPress;
+  final VideoPlayerController Function(Uri)? controllerFactory;
 
   @override
   State<ReelGracePlayer> createState() => _ReelGracePlayerState();
@@ -50,6 +56,8 @@ class _ReelGracePlayerState extends State<ReelGracePlayer> {
   bool _failed = false;
   bool _userPaused = false;
   bool _completedReported = false;
+  Duration _lastPosition = Duration.zero;
+  int _generation = 0;
 
   @override
   void initState() {
@@ -69,6 +77,7 @@ class _ReelGracePlayerState extends State<ReelGracePlayer> {
       return;
     }
     if (widget.isCurrent != oldWidget.isCurrent) {
+      if (widget.isCurrent) _userPaused = false;
       widget.isCurrent ? _play() : _pause();
     }
     if (widget.muted != oldWidget.muted) {
@@ -79,6 +88,8 @@ class _ReelGracePlayerState extends State<ReelGracePlayer> {
   Future<void> _prepare() async {
     if (_initializing || !mounted) return;
     _initializing = true;
+    final generation = _generation;
+    VideoPlayerController? pending;
     try {
       var media = widget.service.cachedMedia(widget.reel.id);
       // A URL that lapsed while this reel sat off screen is re-signed rather
@@ -92,25 +103,37 @@ class _ReelGracePlayerState extends State<ReelGracePlayer> {
         return;
       }
 
-      final controller = VideoPlayerController.networkUrl(Uri.parse(url));
+      final controller = widget.controllerFactory?.call(Uri.parse(url)) ??
+          VideoPlayerController.networkUrl(Uri.parse(url));
+      pending = controller;
       await controller.initialize().timeout(const Duration(seconds: 15));
-      if (!mounted || !widget.shouldInitialize) {
-        unawaited(controller.dispose());
+      if (!mounted || !widget.shouldInitialize || generation != _generation) {
         return;
       }
-      await controller.setLooping(false);
+      await controller.setLooping(true);
       await controller.setVolume(widget.muted ? 0 : 1);
+      if (!mounted || !widget.shouldInitialize || generation != _generation) {
+        return;
+      }
       controller.addListener(_onTick);
       setState(() {
         _controller = controller;
         _controllerUrl = url;
         _failed = false;
       });
+      pending = null;
       if (widget.isCurrent && !_userPaused) _play();
     } catch (_) {
       if (mounted) setState(() => _failed = true);
     } finally {
+      await pending?.dispose();
       _initializing = false;
+      if (mounted &&
+          widget.shouldInitialize &&
+          _controller == null &&
+          !_failed) {
+        unawaited(_prepare());
+      }
     }
   }
 
@@ -119,6 +142,9 @@ class _ReelGracePlayerState extends State<ReelGracePlayer> {
     if (controller == null || !controller.value.isInitialized) return;
     final position = controller.value.position;
     final duration = controller.value.duration;
+    if (!widget.isCurrent || !controller.value.isPlaying) return;
+    if (position < _lastPosition) _completedReported = false;
+    _lastPosition = position;
     widget.onPlaybackProgress?.call(position, duration);
     if (!_completedReported &&
         duration > Duration.zero &&
@@ -130,7 +156,12 @@ class _ReelGracePlayerState extends State<ReelGracePlayer> {
 
   void _play() {
     final controller = _controller;
-    if (controller == null || !controller.value.isInitialized) return;
+    if (controller == null ||
+        !controller.value.isInitialized ||
+        !widget.isCurrent ||
+        _userPaused) {
+      return;
+    }
     // Claim the floor so any feed video or other reel stops first.
     MediaPlaybackCoordinator.instance.claim(this, () {
       if (mounted) controller.pause();
@@ -144,6 +175,7 @@ class _ReelGracePlayerState extends State<ReelGracePlayer> {
   }
 
   void _releaseController() {
+    _generation++;
     final controller = _controller;
     if (controller == null) return;
     MediaPlaybackCoordinator.instance.release(this);
@@ -157,6 +189,7 @@ class _ReelGracePlayerState extends State<ReelGracePlayer> {
 
   @override
   void dispose() {
+    _generation++;
     final controller = _controller;
     MediaPlaybackCoordinator.instance.release(this);
     controller?.removeListener(_onTick);
@@ -188,64 +221,74 @@ class _ReelGracePlayerState extends State<ReelGracePlayer> {
       // Tap toggles playback. Owned here because this is where the
       // controller lives; reaching in from the page above was fragile.
       onTap: ready ? togglePlayPause : null,
+      onDoubleTap: widget.onDoubleTap,
+      onLongPress: widget.onLongPress,
       child: Stack(
-      fit: StackFit.expand,
-      children: [
-        // Poster underneath at all times: it is what the viewer sees on the
-        // first frame of a swipe, and what remains if playback fails.
-        if (media?.posterUrl != null)
-          CachedNetworkImage(
-            imageUrl: media!.posterUrl!,
-            fit: BoxFit.cover,
-            // Keyed by reel id so a re-signed URL does not re-download it.
-            cacheKey: 'reel_poster_${widget.reel.id}',
-            fadeInDuration: Duration.zero,
-            errorWidget: (_, __, ___) => const ColoredBox(color: Colors.black),
-          )
-        else
-          const ColoredBox(color: Colors.black),
-        if (ready)
-          FittedBox(
-            fit: BoxFit.cover,
-            child: SizedBox(
-              width: controller.value.size.width,
-              height: controller.value.size.height,
-              child: VideoPlayer(controller),
+        fit: StackFit.expand,
+        children: [
+          // Poster underneath at all times: it is what the viewer sees on the
+          // first frame of a swipe, and what remains if playback fails.
+          if (media?.posterUrl != null)
+            CachedNetworkImage(
+              imageUrl: media!.posterUrl!,
+              fit: BoxFit.cover,
+              // Keyed by reel id so a re-signed URL does not re-download it.
+              cacheKey: 'reel_poster_${widget.reel.id}',
+              fadeInDuration: Duration.zero,
+              errorWidget: (_, __, ___) =>
+                  const ColoredBox(color: Colors.black),
+            )
+          else
+            const ColoredBox(color: Colors.black),
+          if (ready)
+            FittedBox(
+              fit: BoxFit.cover,
+              child: SizedBox(
+                width: controller.value.size.width,
+                height: controller.value.size.height,
+                child: VideoPlayer(controller),
+              ),
             ),
-          ),
-        if (!ready && !_failed && widget.shouldInitialize)
-          const Center(
-            child: SizedBox(
-              width: 26,
-              height: 26,
-              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white70),
+          if (!ready && !_failed && widget.shouldInitialize)
+            const Center(
+              child: SizedBox(
+                width: 26,
+                height: 26,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: Colors.white70),
+              ),
             ),
-          ),
-        if (_failed)
-          Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.wifi_off_outlined, color: Colors.white70, size: 34),
-                const SizedBox(height: 10),
-                const Text('This reel could not play.',
-                    style: TextStyle(color: Colors.white70)),
-                const SizedBox(height: 8),
-                TextButton(
-                  onPressed: () {
-                    setState(() => _failed = false);
-                    unawaited(_prepare());
-                  },
-                  child: const Text('Retry'),
-                ),
-              ],
+          if (_failed)
+            Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.wifi_off_outlined,
+                      color: Colors.white70, size: 34),
+                  const SizedBox(height: 10),
+                  const Text('This reel could not play.',
+                      style: TextStyle(color: Colors.white70)),
+                  const SizedBox(height: 8),
+                  TextButton(
+                    onPressed: () {
+                      setState(() => _failed = false);
+                      unawaited(_prepare());
+                    },
+                    child: const Text('Retry'),
+                  ),
+                ],
+              ),
             ),
-          ),
-        if (ready && !controller.value.isPlaying && widget.isCurrent)
-          const Center(
-            child: Icon(Icons.play_arrow_rounded, size: 72, color: Colors.white70),
-          ),
-      ],
+          if (ready && widget.isCurrent)
+            ValueListenableBuilder<VideoPlayerValue>(
+                valueListenable: controller,
+                builder: (_, value, __) => value.isPlaying
+                    ? const SizedBox.shrink()
+                    : const IgnorePointer(
+                        child: Center(
+                            child: Icon(Icons.play_arrow_rounded,
+                                size: 72, color: Colors.white70)))),
+        ],
       ),
     );
   }

@@ -31,6 +31,7 @@ import '../../utils/community_video_inspection.dart';
 import '../../utils/media_display_format.dart';
 import '../../widgets/profile_photo_viewer.dart';
 import 'post_detail_screen.dart';
+import '../../widgets/share/content_share_sheet.dart';
 import '../messages/message_thread_screen.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -3320,6 +3321,11 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                     );
                   },
                 ),
+                IconButton(
+                    tooltip: 'Share post',
+                    icon: const Icon(Icons.ios_share, size: 20),
+                    onPressed: () =>
+                        showContentShareSheet(context, post: post)),
               ],
             ),
           ],

@@ -14,10 +14,20 @@ import io.flutter.plugin.common.MethodChannel
 import java.security.MessageDigest
 
 class MainActivity : FlutterActivity() {
+    private var videoExporter: GraceVideoExporter? = null
     private val configChannel = "love.graceconnect/config"
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        videoExporter = GraceVideoExporter(this)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "love.graceconnect/media_export")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "watermark" -> videoExporter!!.export(call.argument<String>("input"), result)
+                    "cancel" -> { videoExporter?.cancel(); result.success(null) }
+                    else -> result.notImplemented()
+                }
+            }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, configChannel)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
@@ -46,6 +56,11 @@ class MainActivity : FlutterActivity() {
         } else {
             window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
         }
+    }
+
+    override fun onDestroy() {
+        videoExporter?.cancel()
+        super.onDestroy()
     }
 
     @Suppress("DEPRECATION")

@@ -34,36 +34,34 @@ class _ReelCommentsSheet extends StatefulWidget {
 class _ReelCommentsSheetState extends State<_ReelCommentsSheet> {
   final SupabaseClient _client = Supabase.instance.client;
   final TextEditingController _input = TextEditingController();
-  final ScrollController _scroll = ScrollController();
 
   final List<Map<String, dynamic>> _comments = [];
   DateTime? _cursor;
+  String? _cursorId;
+  int _addedCount = 0;
   bool _loading = true;
   bool _sending = false;
   bool _exhausted = false;
+  bool _fetching = false;
+  String? _loadError;
   String? _replyToId;
   String? _replyToName;
 
   @override
   void initState() {
     super.initState();
-    _scroll.addListener(() {
-      if (_scroll.position.pixels > _scroll.position.maxScrollExtent - 300) {
-        _load();
-      }
-    });
     _load();
   }
 
   @override
   void dispose() {
     _input.dispose();
-    _scroll.dispose();
     super.dispose();
   }
 
   Future<void> _load() async {
-    if (_exhausted || _sending) return;
+    if (_exhausted || _fetching) return;
+    _fetching = true;
     try {
       var query = _client
           .from('reel_comments')
@@ -71,21 +69,36 @@ class _ReelCommentsSheetState extends State<_ReelCommentsSheet> {
           .eq('reel_id', widget.reel.id)
           .eq('status', 'active');
       if (_cursor != null) {
-        query = query.lt('created_at', _cursor!.toIso8601String());
+        final stamp = _cursor!.toUtc().toIso8601String();
+        query = query.or(
+            'created_at.lt.$stamp,and(created_at.eq.$stamp,id.lt.$_cursorId)');
       }
-      final rows = await query.order('created_at', ascending: false).limit(20);
+      final rows = await query
+          .order('created_at', ascending: false)
+          .order('id', ascending: false)
+          .limit(20);
       if (!mounted) return;
       final fetched = List<Map<String, dynamic>>.from(rows);
       setState(() {
-        _comments.addAll(fetched);
+        final known = _comments.map((comment) => comment['id']).toSet();
+        _comments.addAll(fetched.where((comment) => known.add(comment['id'])));
         _loading = false;
+        _loadError = null;
         _exhausted = fetched.length < 20;
         if (fetched.isNotEmpty) {
           _cursor = DateTime.tryParse(fetched.last['created_at'].toString());
+          _cursorId = fetched.last['id'].toString();
         }
       });
     } catch (_) {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _loadError = 'Comments could not load. Tap to retry.';
+        });
+      }
+    } finally {
+      _fetching = false;
     }
   }
 
@@ -98,6 +111,7 @@ class _ReelCommentsSheetState extends State<_ReelCommentsSheet> {
           .from('reel_comments')
           .insert({
             'reel_id': widget.reel.id,
+            'author_id': _client.auth.currentUser!.id,
             'body': body,
             if (_replyToId != null) 'parent_comment_id': _replyToId,
           })
@@ -106,6 +120,7 @@ class _ReelCommentsSheetState extends State<_ReelCommentsSheet> {
       if (!mounted) return;
       setState(() {
         _comments.insert(0, Map<String, dynamic>.from(inserted));
+        _addedCount++;
         _input.clear();
         _replyToId = null;
         _replyToName = null;
@@ -126,7 +141,8 @@ class _ReelCommentsSheetState extends State<_ReelCommentsSheet> {
     final viewerId = _client.auth.currentUser?.id;
 
     return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      padding:
+          EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
       child: DraggableScrollableSheet(
         initialChildSize: 0.75,
         minChildSize: 0.4,
@@ -146,8 +162,8 @@ class _ReelCommentsSheetState extends State<_ReelCommentsSheet> {
             Padding(
               padding: const EdgeInsets.all(14),
               child: Text(
-                widget.reel.commentCount > 0
-                    ? '${widget.reel.commentCount} comments'
+                widget.reel.commentCount + _addedCount > 0
+                    ? '${widget.reel.commentCount + _addedCount} comments'
                     : 'Comments',
                 style: theme.textTheme.titleMedium
                     ?.copyWith(fontWeight: FontWeight.w800),
@@ -156,70 +172,89 @@ class _ReelCommentsSheetState extends State<_ReelCommentsSheet> {
             Expanded(
               child: _loading
                   ? const Center(child: CircularProgressIndicator())
-                  : _comments.isEmpty
-                      ? Center(
-                          child: Padding(
-                            padding: const EdgeInsets.all(24),
-                            child: Text('No comments yet. Be the first.',
-                                style: theme.textTheme.bodyMedium),
-                          ),
-                        )
-                      : ListView.builder(
-                          controller: controller,
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          itemCount: _comments.length,
-                          itemBuilder: (context, index) {
-                            final comment = _comments[index];
-                            final isReply = comment['parent_comment_id'] != null;
-                            final mine = comment['author_id'] == viewerId;
-                            final created = DateTime.tryParse(
-                                comment['created_at']?.toString() ?? '');
-                            return Padding(
-                              padding: EdgeInsets.fromLTRB(
-                                  isReply ? 30 : 0, 6, 0, 6),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    children: [
-                                      Text(mine ? 'You' : 'Member',
-                                          style: const TextStyle(
-                                              fontWeight: FontWeight.w700)),
-                                      const SizedBox(width: 8),
-                                      if (created != null)
-                                        Text(timeago.format(created),
-                                            style: theme.textTheme.bodySmall),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(comment['body']?.toString() ?? ''),
-                                  if (!isReply)
-                                    TextButton(
-                                      style: TextButton.styleFrom(
-                                        padding: EdgeInsets.zero,
-                                        minimumSize: const Size(0, 28),
-                                        tapTargetSize:
-                                            MaterialTapTargetSize.shrinkWrap,
-                                      ),
-                                      onPressed: () => setState(() {
-                                        _replyToId = comment['id']?.toString();
-                                        _replyToName = mine ? 'your comment' : 'a comment';
-                                      }),
-                                      child: const Text('Reply'),
-                                    ),
-                                ],
+                  : _loadError != null
+                      ? TextButton(onPressed: _load, child: Text(_loadError!))
+                      : _comments.isEmpty
+                          ? Center(
+                              child: Padding(
+                                padding: const EdgeInsets.all(24),
+                                child: Text('No comments yet. Be the first.',
+                                    style: theme.textTheme.bodyMedium),
                               ),
-                            );
-                          },
-                        ),
+                            )
+                          : NotificationListener<ScrollNotification>(
+                              onNotification: (notification) {
+                                if (notification.metrics.extentAfter < 300) {
+                                  _load();
+                                }
+                                return false;
+                              },
+                              child: ListView.builder(
+                                controller: controller,
+                                padding:
+                                    const EdgeInsets.symmetric(horizontal: 16),
+                                itemCount: _comments.length,
+                                itemBuilder: (context, index) {
+                                  final comment = _comments[index];
+                                  final isReply =
+                                      comment['parent_comment_id'] != null;
+                                  final mine = comment['author_id'] == viewerId;
+                                  final created = DateTime.tryParse(
+                                      comment['created_at']?.toString() ?? '');
+                                  return Padding(
+                                    padding: EdgeInsets.fromLTRB(
+                                        isReply ? 30 : 0, 6, 0, 6),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            Text(mine ? 'You' : 'Member',
+                                                style: const TextStyle(
+                                                    fontWeight:
+                                                        FontWeight.w700)),
+                                            const SizedBox(width: 8),
+                                            if (created != null)
+                                              Text(timeago.format(created),
+                                                  style: theme
+                                                      .textTheme.bodySmall),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(comment['body']?.toString() ?? ''),
+                                        if (!isReply)
+                                          TextButton(
+                                            style: TextButton.styleFrom(
+                                              padding: EdgeInsets.zero,
+                                              minimumSize: const Size(0, 28),
+                                              tapTargetSize:
+                                                  MaterialTapTargetSize
+                                                      .shrinkWrap,
+                                            ),
+                                            onPressed: () => setState(() {
+                                              _replyToId =
+                                                  comment['id']?.toString();
+                                              _replyToName = mine
+                                                  ? 'your comment'
+                                                  : 'a comment';
+                                            }),
+                                            child: const Text('Reply'),
+                                          ),
+                                      ],
+                                    ),
+                                  );
+                                },
+                              )),
             ),
             if (_replyToName != null)
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Row(
                   children: [
-                    Expanded(child: Text('Replying to $_replyToName',
-                        style: theme.textTheme.bodySmall)),
+                    Expanded(
+                        child: Text('Replying to $_replyToName',
+                            style: theme.textTheme.bodySmall)),
                     TextButton(
                       onPressed: () => setState(() {
                         _replyToId = null;
@@ -258,7 +293,8 @@ class _ReelCommentsSheetState extends State<_ReelCommentsSheet> {
                       // near-black icon on the near-black primary background.
                       style: IconButton.styleFrom(
                         backgroundColor: Theme.of(context).colorScheme.primary,
-                        foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                        foregroundColor:
+                            Theme.of(context).colorScheme.onPrimary,
                       ),
                       onPressed: _sending ? null : _send,
                       icon: _sending

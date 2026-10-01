@@ -26,6 +26,11 @@ Deno.serve(async (request: Request) => {
         if (error) throw error;
         return data !== false; // Fail closed if the authorization check is ambiguous.
       },
+      approvedBackgroundRemoval: async (path) => {
+        const { data, error } = await client.rpc('quote_background_removal_pending', { target_path: path });
+        if (error) throw error;
+        return data === true;
+      },
       remove: async (bucket, path) => {
         const { error } = await client.storage.from(bucket).remove([path]);
         if (error) throw error;

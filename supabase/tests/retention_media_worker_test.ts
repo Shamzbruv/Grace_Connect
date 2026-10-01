@@ -84,3 +84,18 @@ test('empty queue is an idempotent success', async () => {
   assert.equal(result.ok, true);
   assert.equal(result.candidates, 0);
 });
+
+test('an explicitly removed background is cleaned through Storage after authorization', async () => {
+  const {deps,events}=fixture({list:async()=>[{...file,bucket_id:'quote-backgrounds',object_path:'quote_backgrounds/removed.png'}],
+    approvedBackgroundRemoval:async()=>{events.push('approved');return true;}});
+  const result=await cleanupMedia(deps);
+  assert.deepEqual(events,['approved','reference','remove','acknowledge']);
+  assert.equal(result.removed,1);
+});
+
+test('catalogue backgrounds stay protected when removal approval is absent or false', async () => {
+  const {deps,events}=fixture({list:async()=>[{...file,bucket_id:'quote-backgrounds'}],approvedBackgroundRemoval:async()=>false});
+  const result=await cleanupMedia(deps);
+  assert.deepEqual(events,[]);
+  assert.equal(result.protected,1);
+});

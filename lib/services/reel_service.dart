@@ -126,10 +126,34 @@ class ReelService {
 
   void clearMedia() => _media.clear();
 
+  Future<Reel?> fetchDetail(String id) async {
+    final data =
+        await _client.rpc('get_reel_grace_detail', params: {'p_reel_id': id});
+    return data is Map ? Reel.fromMap(Map<String, dynamic>.from(data)) : null;
+  }
+
+  Future<ReelPage> fetchProfile(String authorId,
+      {Map<String, dynamic>? cursor}) async {
+    final data = Map<String, dynamic>.from(await _client.rpc(
+        'get_reel_grace_profile',
+        params: {'p_author_id': authorId, 'p_cursor': cursor, 'p_limit': 12}));
+    return ReelPage(
+      reels: (data['reels'] as List)
+          .map((r) => Reel.fromMap(Map<String, dynamic>.from(r)))
+          .toList(),
+      nextCursor: data['next_cursor'] == null
+          ? null
+          : Map<String, dynamic>.from(data['next_cursor']),
+    );
+  }
+
   Future<bool> toggleLike(String reelId, {required bool liked}) async {
     try {
       if (liked) {
-        await _client.from('reel_likes').insert({'reel_id': reelId});
+        await _client.from('reel_likes').upsert({
+          'reel_id': reelId,
+          'user_id': _client.auth.currentUser!.id,
+        }, onConflict: 'reel_id,user_id', ignoreDuplicates: true);
       } else {
         await _client.from('reel_likes').delete().eq('reel_id', reelId);
       }
@@ -143,10 +167,11 @@ class ReelService {
   Future<bool> toggleSave(String reelId, {required bool saved}) async {
     try {
       if (saved) {
-        await _client.from('social_saved_items').insert({
+        await _client.from('social_saved_items').upsert({
+          'user_id': _client.auth.currentUser!.id,
           'entity_type': 'reel',
           'entity_id': reelId,
-        });
+        }, onConflict: 'user_id,entity_type,entity_id', ignoreDuplicates: true);
       } else {
         await _client
             .from('social_saved_items')
@@ -164,6 +189,7 @@ class ReelService {
   Future<void> markNotInterested(String reelId) async {
     try {
       await _client.from('reel_user_feedback').insert({
+        'user_id': _client.auth.currentUser!.id,
         'reel_id': reelId,
         'feedback_type': 'not_interested',
       });

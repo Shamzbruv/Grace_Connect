@@ -9,11 +9,13 @@ import '../../services/media_playback_coordinator.dart';
 import '../../services/reel_analytics_service.dart';
 import '../../services/moderation_service.dart';
 import '../../services/reel_service.dart';
+import '../../services/reel_playback_window.dart';
 import '../../widgets/reels/reel_action_rail.dart';
 import '../../widgets/reels/reel_comments_sheet.dart';
 import '../../widgets/reels/reel_grace_player.dart';
+import '../../widgets/reels/reel_mode_header.dart';
 import 'reel_create_screen.dart';
-import 'package:share_plus/share_plus.dart';
+import '../../widgets/share/content_share_sheet.dart';
 
 /// Full-screen vertical reel feed.
 ///
@@ -21,11 +23,12 @@ import 'package:share_plus/share_plus.dart';
 /// instantly. Everything else is poster-only. Under Data Saver only the
 /// current reel initializes at all, so nothing speculative is downloaded.
 class ReelGraceScreen extends StatefulWidget {
-  const ReelGraceScreen({super.key, required this.isActive});
+  const ReelGraceScreen({super.key, required this.isActive, this.reelId});
 
   /// Whether Reel Grace is the visible mode. When false, playback stops --
   /// the widget stays alive so the feed position survives a mode switch.
   final bool isActive;
+  final String? reelId;
 
   @override
   State<ReelGraceScreen> createState() => _ReelGraceScreenState();
@@ -34,7 +37,7 @@ class ReelGraceScreen extends StatefulWidget {
 class _ReelGraceScreenState extends State<ReelGraceScreen>
     with WidgetsBindingObserver {
   final ReelService _service = ReelService();
-  final PageController _pageController = PageController();
+  final PageController _pageController = PageController(keepPage: false);
   final List<Reel> _reels = [];
   final Set<String> _seenIds = {};
   final Map<String, DateTime> _impressionAt = {};
@@ -43,12 +46,20 @@ class _ReelGraceScreenState extends State<ReelGraceScreen>
   Map<String, dynamic>? _cursor;
   String _mode = 'discover';
   int _index = 0;
+  int? _warmPreviousIndex;
+  Timer? _warmPreviousTimer;
   bool _loading = true;
   bool _loadingMore = false;
   bool _muted = false;
   bool _dataSaver = false;
   bool _visible = false;
+  bool _foreground = true;
+  bool _overlayOpen = false;
+  bool _autoScroll = false;
+  final Set<String> _likeWrites = {};
+  final Set<String> _saveWrites = {};
   String? _error;
+  int _loadGeneration = 0;
 
   @override
   void initState() {
@@ -62,17 +73,20 @@ class _ReelGraceScreenState extends State<ReelGraceScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _pageController.dispose();
+    _warmPreviousTimer?.cancel();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    _foreground = state == AppLifecycleState.resumed;
     if (state != AppLifecycleState.resumed) {
       // Backgrounding must silence playback immediately, not on the next
       // frame after the app is already gone from view.
       MediaPlaybackCoordinator.instance.stopAll();
       if (mounted) setState(() {});
     }
+    if (_foreground && mounted) setState(() {});
   }
 
   @override
@@ -89,22 +103,30 @@ class _ReelGraceScreenState extends State<ReelGraceScreen>
     if (!mounted) return;
     setState(() {
       _dataSaver = prefs.getBool('data_saver') ?? false;
-      _muted = prefs.getBool('reel_grace_muted') ?? false;
+      // Each visit starts with sound. Muting remains available during viewing.
     });
   }
 
   Future<void> _load({bool refresh = false}) async {
-    if (refresh) {
-      _cursor = null;
-      _seenIds.clear();
-    }
+    final generation = ++_loadGeneration;
+    _cursor = null;
+    _loadingMore = false;
+    _warmPreviousTimer?.cancel();
+    _warmPreviousIndex = null;
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
-      final page = await _service.fetchFeed(mode: _mode, limit: 12);
-      if (!mounted) return;
+      final ReelPage page;
+      if (widget.reelId != null) {
+        final reel = await _service.fetchDetail(widget.reelId!);
+        page = ReelPage(reels: reel == null ? [] : [reel]);
+      } else {
+        page = await _service.fetchFeed(mode: _mode, limit: 12);
+      }
+      if (!mounted || generation != _loadGeneration) return;
+      _seenIds.clear();
       final fresh = page.reels.where((r) => _seenIds.add(r.id)).toList();
       setState(() {
         _reels
@@ -114,9 +136,10 @@ class _ReelGraceScreenState extends State<ReelGraceScreen>
         _loading = false;
         _index = 0;
       });
+      _recordImpression(0);
       await _ensureMediaAround(0);
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted || generation != _loadGeneration) return;
       setState(() {
         _loading = false;
         _error = '$error';
@@ -125,11 +148,13 @@ class _ReelGraceScreenState extends State<ReelGraceScreen>
   }
 
   Future<void> _loadMore() async {
-    if (_loadingMore || _cursor == null) return;
+    if (_loading || _loadingMore || _cursor == null) return;
+    final generation = _loadGeneration;
     _loadingMore = true;
     try {
-      final page = await _service.fetchFeed(mode: _mode, cursor: _cursor, limit: 12);
-      if (!mounted) return;
+      final page =
+          await _service.fetchFeed(mode: _mode, cursor: _cursor, limit: 12);
+      if (!mounted || generation != _loadGeneration) return;
       // Duplicate guard: a shifting ranking score can otherwise repeat a reel
       // across page boundaries.
       final fresh = page.reels.where((r) => _seenIds.add(r.id)).toList();
@@ -141,7 +166,7 @@ class _ReelGraceScreenState extends State<ReelGraceScreen>
     } catch (_) {
       // A failed page must not break the reels already on screen.
     } finally {
-      _loadingMore = false;
+      if (generation == _loadGeneration) _loadingMore = false;
     }
   }
 
@@ -159,8 +184,14 @@ class _ReelGraceScreenState extends State<ReelGraceScreen>
 
   void _onPageChanged(int index) {
     final previous = _index;
+    _warmPreviousTimer?.cancel();
+    _warmPreviousIndex = previous == index - 1 ? previous : null;
+    _warmPreviousTimer = Timer(const Duration(seconds: 8), () {
+      if (mounted) setState(() => _warmPreviousIndex = null);
+    });
     if (previous < _reels.length) {
-      ReelAnalytics.skip(_reels[previous], watched: _watchedFor(_reels[previous]));
+      ReelAnalytics.skip(_reels[previous],
+          watched: _watchedFor(_reels[previous]));
     }
     setState(() => _index = index);
     _recordImpression(index);
@@ -204,8 +235,12 @@ class _ReelGraceScreenState extends State<ReelGraceScreen>
   /// refused. Waiting on the network to animate a like is the difference
   /// between the feed feeling native and feeling remote.
   Future<void> _toggleLike(Reel reel) async {
+    if (!_likeWrites.add(reel.id)) return;
     final index = _reels.indexWhere((r) => r.id == reel.id);
-    if (index < 0) return;
+    if (index < 0) {
+      _likeWrites.remove(reel.id);
+      return;
+    }
     final liked = !reel.viewerLiked;
     setState(() => _reels[index] = reel.copyWith(
           viewerLiked: liked,
@@ -213,14 +248,25 @@ class _ReelGraceScreenState extends State<ReelGraceScreen>
         ));
     ReelAnalytics.like(reel, liked: liked);
     final ok = await _service.toggleLike(reel.id, liked: liked);
+    _likeWrites.remove(reel.id);
     if (!ok && mounted) {
-      setState(() => _reels[index] = reel);
+      final current = _reels.indexWhere((r) => r.id == reel.id);
+      if (current >= 0) {
+        setState(() => _reels[current] = _reels[current].copyWith(
+            viewerLiked: reel.viewerLiked, likeCount: reel.likeCount));
+      }
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Could not update your like. Please try again.')));
     }
   }
 
   Future<void> _toggleSave(Reel reel) async {
+    if (!_saveWrites.add(reel.id)) return;
     final index = _reels.indexWhere((r) => r.id == reel.id);
-    if (index < 0) return;
+    if (index < 0) {
+      _saveWrites.remove(reel.id);
+      return;
+    }
     final saved = !reel.viewerSaved;
     setState(() => _reels[index] = reel.copyWith(
           viewerSaved: saved,
@@ -228,18 +274,24 @@ class _ReelGraceScreenState extends State<ReelGraceScreen>
         ));
     ReelAnalytics.save(reel, saved: saved);
     final ok = await _service.toggleSave(reel.id, saved: saved);
-    if (!ok && mounted) setState(() => _reels[index] = reel);
+    _saveWrites.remove(reel.id);
+    if (!ok && mounted) {
+      final current = _reels.indexWhere((r) => r.id == reel.id);
+      if (current >= 0) {
+        setState(() => _reels[current] = _reels[current].copyWith(
+            viewerSaved: reel.viewerSaved, saveCount: reel.saveCount));
+      }
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content:
+              Text('Could not update your saved reels. Please try again.')));
+    }
   }
 
   Future<void> _share(Reel reel) async {
     ReelAnalytics.share(reel);
-    final caption = reel.caption.trim();
-    await SharePlus.instance.share(ShareParams(
-      text: caption.isEmpty
-          ? 'Watch this on Grace Connect.'
-          : '$caption\n\nShared from Grace Connect.',
-      subject: 'A reel from ${reel.authorName}',
-    ));
+    setState(() => _overlayOpen = true);
+    await showContentShareSheet(context, reel: reel);
+    if (mounted) setState(() => _overlayOpen = false);
   }
 
   void _removeFromFeed(String reelId) {
@@ -248,7 +300,9 @@ class _ReelGraceScreenState extends State<ReelGraceScreen>
     setState(() {
       _reels.removeAt(index);
       _service.forget(reelId);
-      if (_index >= _reels.length) _index = (_reels.length - 1).clamp(0, 1 << 30);
+      if (_index >= _reels.length) {
+        _index = (_reels.length - 1).clamp(0, 1 << 30);
+      }
     });
   }
 
@@ -328,25 +382,40 @@ class _ReelGraceScreenState extends State<ReelGraceScreen>
     if (!mounted) return;
     setState(() {
       _reels.removeWhere((r) => r.authorId == reel.authorId);
-      if (_index >= _reels.length) _index = (_reels.length - 1).clamp(0, 1 << 30);
+      if (_index >= _reels.length) {
+        _index = (_reels.length - 1).clamp(0, 1 << 30);
+      }
     });
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('${reel.authorName} is blocked.')),
     );
   }
 
-  void _openProfile(Reel reel) {
+  Future<void> _openProfile(Reel reel) async {
     ReelAnalytics.profileOpen(reel);
-    Navigator.of(context).pushNamed('/public_profile', arguments: reel.authorId);
+    setState(() => _overlayOpen = true);
+    await Navigator.of(context)
+        .pushNamed('/public_profile', arguments: reel.authorId);
+    if (mounted) setState(() => _overlayOpen = false);
   }
 
   Future<void> _showMore(Reel reel) async {
+    setState(() => _overlayOpen = true);
     final choice = await showModalBottomSheet<String>(
       context: context,
       builder: (context) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            ListTile(
+              leading:
+                  Icon(_autoScroll ? Icons.swipe_up : Icons.swipe_up_outlined),
+              title: Text(
+                  _autoScroll ? 'Turn off auto-scroll' : 'Turn on auto-scroll'),
+              subtitle:
+                  const Text('Move to the next reel when this one finishes'),
+              onTap: () => Navigator.pop(context, 'auto_scroll'),
+            ),
             ListTile(
               leading: const Icon(Icons.not_interested),
               title: const Text('Not interested'),
@@ -367,21 +436,51 @@ class _ReelGraceScreenState extends State<ReelGraceScreen>
         ),
       ),
     );
-    if (choice == null || !mounted) return;
-    switch (choice) {
-      case 'not_interested':
-        await _notInterested(reel);
-      case 'report':
-        await _report(reel);
-      case 'block':
-        await _blockCreator(reel);
+    if (!mounted) return;
+    try {
+      switch (choice) {
+        case 'auto_scroll':
+          setState(() => _autoScroll = !_autoScroll);
+        case 'not_interested':
+          await _notInterested(reel);
+        case 'report':
+          await _report(reel);
+        case 'block':
+          await _blockCreator(reel);
+      }
+    } finally {
+      if (mounted) setState(() => _overlayOpen = false);
     }
   }
 
   Future<void> _toggleMute() async {
     setState(() => _muted = !_muted);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('reel_grace_muted', _muted);
+  }
+
+  Future<void> _onCompleted(Reel reel) async {
+    ReelAnalytics.complete(reel);
+    if (!_autoScroll ||
+        !_foreground ||
+        _overlayOpen ||
+        !widget.isActive ||
+        !_visible) {
+      return;
+    }
+    final completedId = reel.id;
+    if (_index >= _reels.length - 1) await _loadMore();
+    if (!mounted ||
+        !_autoScroll ||
+        !_foreground ||
+        _overlayOpen ||
+        !widget.isActive ||
+        !_visible ||
+        !_pageController.hasClients ||
+        _index >= _reels.length - 1 ||
+        _reels[_index].id != completedId) {
+      return;
+    }
+    await _pageController.nextPage(
+        duration: const Duration(milliseconds: 300), curve: Curves.easeInOut);
   }
 
   Future<void> _switchMode(String mode) async {
@@ -393,7 +492,7 @@ class _ReelGraceScreenState extends State<ReelGraceScreen>
   @override
   Widget build(BuildContext context) {
     return VisibilityDetector(
-      key: const Key('reel-grace-screen'),
+      key: ObjectKey(this),
       onVisibilityChanged: (info) {
         final visible = info.visibleFraction > 0.5;
         if (visible == _visible) return;
@@ -410,7 +509,8 @@ class _ReelGraceScreenState extends State<ReelGraceScreen>
           child: Stack(
             children: [
               if (_loading)
-                const Center(child: CircularProgressIndicator(color: Colors.white70))
+                const Center(
+                    child: CircularProgressIndicator(color: Colors.white70))
               else if (_error != null)
                 _ReelMessage(
                   icon: Icons.error_outline,
@@ -435,25 +535,46 @@ class _ReelGraceScreenState extends State<ReelGraceScreen>
                   onPageChanged: _onPageChanged,
                   itemBuilder: (context, index) {
                     final reel = _reels[index];
-                    final isCurrent =
-                        index == _index && widget.isActive && _visible;
-                    final distance = (index - _index).abs();
+                    final isCurrent = index == _index &&
+                        widget.isActive &&
+                        _visible &&
+                        _foreground &&
+                        !_overlayOpen;
                     // Current always; next only when Data Saver is off.
-                    final shouldInitialize = widget.isActive &&
-                        (distance == 0 || (!_dataSaver && index == _index + 1));
+                    final shouldInitialize = shouldInitializeReel(
+                        index: index,
+                        current: _index,
+                        dataSaver: _dataSaver,
+                        isActive: widget.isActive && _foreground,
+                        warmPreviousIndex: _warmPreviousIndex);
                     return _ReelPage(
+                      key: ValueKey(reel.id),
                       reel: reel,
                       service: _service,
                       isCurrent: isCurrent,
                       shouldInitialize: shouldInitialize,
                       muted: _muted,
                       onProgress: (p, d) => _onProgress(reel, p, d),
-                      onCompleted: () => ReelAnalytics.complete(reel),
+                      onCompleted: () => _onCompleted(reel),
                       onToggleMute: _toggleMute,
                       onLike: () => _toggleLike(reel),
-                      onComment: () {
+                      onComment: () async {
+                        setState(() => _overlayOpen = true);
                         ReelAnalytics.commentOpen(reel);
-                        showReelComments(context, reel);
+                        await showReelComments(context, reel);
+                        if (mounted) setState(() => _overlayOpen = false);
+                        try {
+                          final latest = await _service.fetchDetail(reel.id);
+                          if (!mounted || latest == null) return;
+                          final current =
+                              _reels.indexWhere((r) => r.id == reel.id);
+                          if (current >= 0) {
+                            setState(() => _reels[current] = _reels[current]
+                                .copyWith(commentCount: latest.commentCount));
+                          }
+                        } catch (_) {
+                          /* Counts refresh on the next feed request. */
+                        }
                       },
                       onSave: () => _toggleSave(reel),
                       onShare: () => _share(reel),
@@ -462,37 +583,26 @@ class _ReelGraceScreenState extends State<ReelGraceScreen>
                     );
                   },
                 ),
-              Positioned(
-                top: 8,
-                left: 0,
-                right: 0,
-                child: Row(
-                  children: [
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _ModeSelector(
-                        mode: _mode,
-                        onChanged: _switchMode,
-                        muted: _muted,
-                        onToggleMute: _toggleMute,
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: 'New reel',
-                      onPressed: () async {
-                        final posted = await Navigator.of(context).push<bool>(
-                          MaterialPageRoute(
-                              builder: (_) => const ReelCreateScreen()),
-                        );
-                        if (posted == true) await _load(refresh: true);
-                      },
-                      icon: const Icon(Icons.add_box_outlined,
-                          color: Colors.white),
-                    ),
-                    const SizedBox(width: 4),
-                  ],
+              if (widget.reelId == null)
+                Positioned(
+                  top: 8,
+                  left: 0,
+                  right: 0,
+                  child: ReelModeHeader(
+                    mode: _mode,
+                    onModeChanged: _switchMode,
+                    onCreate: () async {
+                      setState(() => _overlayOpen = true);
+                      final posted = await Navigator.of(context).push<bool>(
+                        MaterialPageRoute(
+                            builder: (_) => const ReelCreateScreen()),
+                      );
+                      if (!mounted) return;
+                      setState(() => _overlayOpen = false);
+                      if (posted == true) await _load(refresh: true);
+                    },
+                  ),
                 ),
-              ),
             ],
           ),
         ),
@@ -503,6 +613,7 @@ class _ReelGraceScreenState extends State<ReelGraceScreen>
 
 class _ReelPage extends StatefulWidget {
   const _ReelPage({
+    super.key,
     required this.reel,
     required this.service,
     required this.isCurrent,
@@ -539,10 +650,22 @@ class _ReelPage extends StatefulWidget {
 }
 
 class _ReelPageState extends State<_ReelPage>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => widget.shouldInitialize;
+
+  @override
+  void didUpdateWidget(covariant _ReelPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.shouldInitialize != widget.shouldInitialize) {
+      updateKeepAlive();
+    }
+  }
+
   bool _captionExpanded = false;
   late final AnimationController _heart = AnimationController(
     vsync: this,
+    value: 1,
     duration: const Duration(milliseconds: 650),
   );
 
@@ -561,210 +684,179 @@ class _ReelPageState extends State<_ReelPage>
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final reel = widget.reel;
     final caption = reel.caption.trim();
     final isLong = caption.length > 90;
 
-    return GestureDetector(
-      onDoubleTap: _onDoubleTap,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          ReelGracePlayer(
-            reel: reel,
-            service: widget.service,
-            isCurrent: widget.isCurrent,
-            shouldInitialize: widget.shouldInitialize,
-            muted: widget.muted,
-            onPlaybackProgress: widget.onProgress,
-            onCompleted: widget.onCompleted,
-          ),
-          // Scrim so white text stays legible over a bright video.
-          const Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            height: 260,
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.bottomCenter,
-                  end: Alignment.topCenter,
-                  colors: [Color(0xB3000000), Color(0x00000000)],
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        ReelGracePlayer(
+          reel: reel,
+          service: widget.service,
+          isCurrent: widget.isCurrent,
+          shouldInitialize: widget.shouldInitialize,
+          muted: widget.muted,
+          onPlaybackProgress: widget.onProgress,
+          onCompleted: widget.onCompleted,
+          onDoubleTap: _onDoubleTap,
+          onLongPress: widget.onMore,
+        ),
+        // Scrim so white text stays legible over a bright video.
+        const Positioned(
+          left: 0,
+          right: 0,
+          bottom: 0,
+          height: 260,
+          child: IgnorePointer(
+              child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.bottomCenter,
+                end: Alignment.topCenter,
+                colors: [Color(0xB3000000), Color(0x00000000)],
+              ),
+            ),
+          )),
+        ),
+        IgnorePointer(
+          child: Center(
+            child: ScaleTransition(
+              scale: Tween<double>(begin: 0.6, end: 1.25).animate(
+                CurvedAnimation(parent: _heart, curve: Curves.easeOutBack),
+              ),
+              child: FadeTransition(
+                opacity: Tween<double>(begin: 1, end: 0).animate(
+                  CurvedAnimation(
+                      parent: _heart, curve: const Interval(0.5, 1)),
                 ),
+                child:
+                    const Icon(Icons.favorite, color: Colors.white, size: 96),
               ),
             ),
           ),
-          IgnorePointer(
-            child: Center(
-              child: ScaleTransition(
-                scale: Tween<double>(begin: 0.6, end: 1.25).animate(
-                  CurvedAnimation(parent: _heart, curve: Curves.easeOutBack),
-                ),
-                child: FadeTransition(
-                  opacity: Tween<double>(begin: 1, end: 0).animate(
-                    CurvedAnimation(parent: _heart, curve: const Interval(0.5, 1)),
-                  ),
-                  child: const Icon(Icons.favorite,
-                      color: Colors.white, size: 96),
-                ),
-              ),
-            ),
-          ),
-          Positioned(
-            left: 16,
-            right: 92,
-            bottom: 26,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                GestureDetector(
-                  onTap: widget.onProfile,
-                  child: Row(
-                    children: [
-                      Flexible(
-                        child: Text(
-                          reel.authorName,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w800,
-                            fontSize: 16,
-                            shadows: [Shadow(color: Colors.black54, blurRadius: 6)],
-                          ),
-                        ),
-                      ),
-                      if (reel.visibility != ReelVisibility.public) ...[
-                        const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: Colors.white24,
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Text(
-                            reel.visibility.label,
-                            style: const TextStyle(
-                                color: Colors.white, fontSize: 11),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-                if (caption.isNotEmpty) ...[
-                  const SizedBox(height: 6),
-                  GestureDetector(
-                    onTap: isLong
-                        ? () => setState(() => _captionExpanded = !_captionExpanded)
-                        : null,
-                    child: RichText(
-                      maxLines: _captionExpanded ? 8 : 2,
-                      overflow: TextOverflow.ellipsis,
-                      text: TextSpan(
+        ),
+        Positioned(
+          left: 16,
+          right: 92,
+          bottom: 26,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              GestureDetector(
+                onTap: widget.onProfile,
+                child: Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        reel.authorName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           color: Colors.white,
-                          shadows: [Shadow(color: Colors.black54, blurRadius: 6)],
+                          fontWeight: FontWeight.w800,
+                          fontSize: 16,
+                          shadows: [
+                            Shadow(color: Colors.black54, blurRadius: 6)
+                          ],
                         ),
-                        children: [
-                          TextSpan(text: caption),
-                          if (isLong && !_captionExpanded)
-                            const TextSpan(
-                              text: '  more',
-                              style: TextStyle(
-                                color: Colors.white70,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                        ],
                       ),
+                    ),
+                    if (reel.visibility != ReelVisibility.public) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.white24,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(
+                          reel.visibility.label,
+                          style: const TextStyle(
+                              color: Colors.white, fontSize: 11),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              if (caption.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                GestureDetector(
+                  onTap: isLong
+                      ? () =>
+                          setState(() => _captionExpanded = !_captionExpanded)
+                      : null,
+                  child: RichText(
+                    maxLines: _captionExpanded ? 8 : 2,
+                    overflow: TextOverflow.ellipsis,
+                    text: TextSpan(
+                      style: const TextStyle(
+                        color: Colors.white,
+                        shadows: [Shadow(color: Colors.black54, blurRadius: 6)],
+                      ),
+                      children: [
+                        TextSpan(text: caption),
+                        if (isLong && !_captionExpanded)
+                          const TextSpan(
+                            text: '  more',
+                            style: TextStyle(
+                              color: Colors.white70,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  const Icon(Icons.graphic_eq, color: Colors.white70, size: 14),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      reel.audioLabel,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style:
+                          const TextStyle(color: Colors.white70, fontSize: 12),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  GestureDetector(
+                    onTap: widget.onToggleMute,
+                    child: Icon(
+                      widget.muted
+                          ? Icons.volume_off_rounded
+                          : Icons.volume_up_rounded,
+                      color: Colors.white70,
+                      size: 18,
                     ),
                   ),
                 ],
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    const Icon(Icons.graphic_eq, color: Colors.white70, size: 14),
-                    const SizedBox(width: 6),
-                    Flexible(
-                      child: Text(
-                        reel.audioLabel,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: Colors.white70, fontSize: 12),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    GestureDetector(
-                      onTap: widget.onToggleMute,
-                      child: Icon(
-                        widget.muted
-                            ? Icons.volume_off_rounded
-                            : Icons.volume_up_rounded,
-                        color: Colors.white70,
-                        size: 18,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          Positioned(
-            right: 12,
-            bottom: 26,
-            child: ReelActionRail(
-              reel: reel,
-              onLike: widget.onLike,
-              onComment: widget.onComment,
-              onSave: widget.onSave,
-              onShare: widget.onShare,
-              onProfile: widget.onProfile,
-              onMore: widget.onMore,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ModeSelector extends StatelessWidget {
-  const _ModeSelector({
-    required this.mode,
-    required this.onChanged,
-    required this.muted,
-    required this.onToggleMute,
-  });
-
-  final String mode;
-  final ValueChanged<String> onChanged;
-  final bool muted;
-  final VoidCallback onToggleMute;
-
-  @override
-  Widget build(BuildContext context) {
-    Widget tab(String value, String label) {
-      final selected = mode == value;
-      return TextButton(
-        onPressed: () => onChanged(value),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: selected ? Colors.white : Colors.white60,
-            fontWeight: selected ? FontWeight.w800 : FontWeight.w500,
-            shadows: const [Shadow(color: Colors.black54, blurRadius: 6)],
+              ),
+            ],
           ),
         ),
-      );
-    }
-
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [tab('following', 'Following'), tab('discover', 'Discover')],
+        Positioned(
+          right: 12,
+          bottom: 26,
+          child: ReelActionRail(
+            reel: reel,
+            onLike: widget.onLike,
+            onComment: widget.onComment,
+            onSave: widget.onSave,
+            onShare: widget.onShare,
+            onProfile: widget.onProfile,
+            onMore: widget.onMore,
+          ),
+        ),
+      ],
     );
   }
 }

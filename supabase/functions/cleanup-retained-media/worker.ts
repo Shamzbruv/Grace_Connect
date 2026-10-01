@@ -2,6 +2,7 @@ export type Candidate = { bucket_id: string; object_path: string; bytes: number 
 export type CleanupDependencies = {
   list: () => Promise<Candidate[]>;
   referenced: (path: string) => Promise<boolean>;
+  approvedBackgroundRemoval?: (path: string) => Promise<boolean>;
   remove: (bucket: string, path: string) => Promise<void>;
   acknowledge: (candidate: Candidate) => Promise<void>;
   failed: (candidate: Candidate, reason: string) => Promise<void>;
@@ -11,11 +12,19 @@ export async function cleanupMedia(deps: CleanupDependencies, dryRun = false) {
   const candidates = await deps.list();
   let removed = 0, removedBytes = 0, protectedFiles = 0, failed = 0;
   for (const candidate of candidates) {
-    if (!['community_media', 'chat_media'].includes(candidate.bucket_id)) {
+    const background = candidate.bucket_id === 'quote-backgrounds';
+    if (!background && !['community_media', 'chat_media'].includes(candidate.bucket_id)) {
       protectedFiles++;
       continue;
     }
     try {
+      // Permanent catalogue assets are never eligible by age. Require a
+      // server-side removal request AND a fresh absence-of-reference check.
+      if (background && (!deps.approvedBackgroundRemoval ||
+          !await deps.approvedBackgroundRemoval(candidate.object_path))) {
+        protectedFiles++;
+        continue;
+      }
       // Check again immediately before deletion: content may have changed since
       // the candidate query. Keep shared media and moderation/support evidence.
       if (await deps.referenced(candidate.object_path)) {

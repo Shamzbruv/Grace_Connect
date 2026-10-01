@@ -83,12 +83,15 @@ export type PresignOptions = {
   /// different kind of object than the one that was authorized.
   contentType?: string;
   now?: Date;
+  /** Server-only bucket listing. Object signing callers never set this. */
+  listObjects?: boolean;
 };
 
 export async function presignR2Url(options: PresignOptions): Promise<string> {
   const { config, method, key, contentType } = options;
   const cleanKey = key.replace(/^\/+/, "");
-  if (!cleanKey) throw new Error("An object key is required");
+  if (!cleanKey && !(options.listObjects && method === "GET")) throw new Error("An object key is required");
+  if (options.listObjects && (cleanKey || method !== "GET")) throw new Error("Listing requires a bucket GET");
   const expires = Math.floor(options.expiresInSeconds);
   // AWS caps presigned URL lifetime at 7 days.
   if (!Number.isFinite(expires) || expires < 1 || expires > 604800) {
@@ -121,6 +124,7 @@ export async function presignR2Url(options: PresignOptions): Promise<string> {
     ["X-Amz-Date", amzDate],
     ["X-Amz-Expires", String(expires)],
     ["X-Amz-SignedHeaders", signedHeaders],
+    ...(options.listObjects ? [["list-type", "2"], ["max-keys", "50"], ["encoding-type", "url"]] as Array<[string,string]> : []),
   ];
   const canonicalQuery = query
     .map(([name, value]) => [rfc3986(name), rfc3986(value)] as const)

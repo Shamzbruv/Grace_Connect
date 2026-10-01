@@ -11,6 +11,7 @@ import '../../services/social_profile_service.dart';
 import '../../services/user_service.dart';
 import '../../widgets/message_request_composer.dart';
 import '../../widgets/profile/public_posts_grid.dart';
+import '../../widgets/profile/profile_reels_grid.dart';
 import '../../widgets/profile_photo_viewer.dart';
 import '../../widgets/ui/app_scaffold.dart';
 import '../messages/message_thread_screen.dart';
@@ -274,6 +275,15 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                 ),
                 const SizedBox(height: 12),
                 _PublicPostsSection(postsFuture: _postsFuture),
+                const SizedBox(height: 24),
+                Text('Reel Grace',
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleLarge
+                        ?.copyWith(fontWeight: FontWeight.w900)),
+                const SizedBox(height: 12),
+                ProfileReelsGrid(
+                    key: ObjectKey(_profileFuture), authorId: profile.userId),
               ],
             ),
           );

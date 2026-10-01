@@ -2,46 +2,68 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:grace_connect/models/reel.dart';
 import 'package:grace_connect/services/media_playback_coordinator.dart';
 
-/// The controller budget expressed as a pure function of index + settings,
-/// matching what ReelGraceScreen applies when building each page. Testing it
-/// directly is what makes "at most two controllers" checkable without a
-/// device: on a real phone an off-by-one here is a memory leak that only
-/// shows after a hundred swipes.
-bool shouldInitialize({
-  required int index,
-  required int current,
-  required bool dataSaver,
-  required bool isActive,
-}) {
-  if (!isActive) return false;
-  final distance = (index - current).abs();
-  return distance == 0 || (!dataSaver && index == current + 1);
-}
+import 'package:grace_connect/services/reel_playback_window.dart';
 
 void main() {
   group('controller budget', () {
     test('exactly the current and next reel initialize', () {
       final initialized = [
         for (var i = 0; i < 12; i++)
-          if (shouldInitialize(index: i, current: 5, dataSaver: false, isActive: true)) i
+          if (shouldInitializeReel(
+              index: i, current: 5, dataSaver: false, isActive: true))
+            i
       ];
       expect(initialized, [5, 6],
           reason: 'current plus one lookahead, never more');
       expect(initialized.length, lessThanOrEqualTo(2));
     });
 
-    test('the previous reel is released rather than kept warm', () {
+    test('a previous reel is released after the retention window', () {
       expect(
-        shouldInitialize(index: 4, current: 5, dataSaver: false, isActive: true),
+        shouldInitializeReel(
+            index: 4, current: 5, dataSaver: false, isActive: true),
         isFalse,
         reason: 'a reel behind the current one must not hold a controller',
       );
     });
 
+    test('only the reel just left is retained during the reverse-swipe window',
+        () {
+      final retained = [
+        for (var i = 0; i < 15; i++)
+          if (shouldInitializeReel(
+              index: i,
+              current: 7,
+              warmPreviousIndex: 6,
+              dataSaver: false,
+              isActive: true))
+            i
+      ];
+      expect(retained, [6, 7, 8]);
+      expect(
+          shouldInitializeReel(
+              index: 6,
+              current: 7,
+              warmPreviousIndex: 6,
+              dataSaver: true,
+              isActive: true),
+          isFalse);
+      expect(
+          shouldInitializeReel(
+              index: 6,
+              current: 9,
+              warmPreviousIndex: 6,
+              dataSaver: false,
+              isActive: true),
+          isFalse);
+    });
+
     test('Data Saver initializes only the current reel', () {
       final initialized = [
         for (var i = 0; i < 12; i++)
-          if (shouldInitialize(index: i, current: 5, dataSaver: true, isActive: true)) i
+          if (shouldInitializeReel(
+              index: i, current: 5, dataSaver: true, isActive: true))
+            i
       ];
       expect(initialized, [5],
           reason: 'nothing speculative is downloaded under Data Saver');
@@ -50,7 +72,9 @@ void main() {
     test('leaving Reel Grace initializes nothing at all', () {
       final initialized = [
         for (var i = 0; i < 12; i++)
-          if (shouldInitialize(index: i, current: 5, dataSaver: false, isActive: false)) i
+          if (shouldInitializeReel(
+              index: i, current: 5, dataSaver: false, isActive: false))
+            i
       ];
       expect(initialized, isEmpty);
     });
@@ -60,7 +84,9 @@ void main() {
       for (var current = 0; current < 60; current++) {
         final live = [
           for (var i = 0; i < 60; i++)
-            if (shouldInitialize(index: i, current: current, dataSaver: false, isActive: true)) i
+            if (shouldInitializeReel(
+                index: i, current: current, dataSaver: false, isActive: true))
+              i
         ];
         expect(live.length, lessThanOrEqualTo(2),
             reason: 'controller count must stay bounded at position $current');
@@ -91,7 +117,8 @@ void main() {
       for (final owner in older) {
         MediaPlaybackCoordinator.instance.claim(owner, () {});
       }
-      MediaPlaybackCoordinator.instance.claim(visible, () => visibleStopped = true);
+      MediaPlaybackCoordinator.instance
+          .claim(visible, () => visibleStopped = true);
 
       // PageView disposes the scrolled-past pages afterwards.
       for (final owner in older) {
@@ -118,7 +145,8 @@ void main() {
 
     test('media signed long ago is re-signed rather than used', () {
       final stale = ReelMedia(
-        videoUrl: 'v', posterUrl: 'p',
+        videoUrl: 'v',
+        posterUrl: 'p',
         expiresAt: DateTime.now().add(const Duration(minutes: 2)),
       );
       expect(stale.needsRefresh, isTrue);

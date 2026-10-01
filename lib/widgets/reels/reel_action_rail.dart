@@ -75,7 +75,9 @@ class ReelActionRail extends StatelessWidget {
   static String _count(int value) {
     if (value <= 0) return '';
     if (value < 1000) return '$value';
-    if (value < 1000000) return '${(value / 1000).toStringAsFixed(value < 10000 ? 1 : 0)}K';
+    if (value < 1000000) {
+      return '${(value / 1000).toStringAsFixed(value < 10000 ? 1 : 0)}K';
+    }
     return '${(value / 1000000).toStringAsFixed(1)}M';
   }
 }
@@ -102,8 +104,9 @@ class _RailAvatar extends StatelessWidget {
           child: CircleAvatar(
             radius: 22,
             backgroundColor: Colors.black38,
-            backgroundImage:
-                avatar != null && avatar.isNotEmpty ? NetworkImage(avatar) : null,
+            backgroundImage: avatar != null && avatar.isNotEmpty
+                ? NetworkImage(avatar)
+                : null,
             child: avatar != null && avatar.isNotEmpty
                 ? null
                 : const Icon(Icons.person, color: Colors.white),

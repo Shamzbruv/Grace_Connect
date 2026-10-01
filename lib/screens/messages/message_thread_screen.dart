@@ -5,6 +5,8 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import '../../widgets/share/shared_content_card.dart';
+import '../../widgets/community_video_player.dart';
 import 'package:intl/intl.dart';
 import 'package:record/record.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -1029,11 +1031,15 @@ class _MessageBubble extends StatelessWidget {
                   ),
                   const SizedBox(height: 8),
                 ],
+                if (message.sharedContent != null)
+                  SharedContentCard(
+                      key: ValueKey('share-${message.id}'),
+                      reference: message.sharedContent!),
                 if (message.hasMedia) ...[
                   _MessageMediaPreview(message: message, textColor: textColor),
                   if (message.text.isNotEmpty) const SizedBox(height: 8),
                 ],
-                if (message.text.isNotEmpty)
+                if (message.text.isNotEmpty && message.sharedContent == null)
                   Text(
                     message.text,
                     style: TextStyle(color: textColor, height: 1.35),
@@ -1181,26 +1187,62 @@ class _MessageMediaPreview extends StatelessWidget {
   Widget build(BuildContext context) {
     final type = message.mediaType;
 
-    if (type == 'image' && message.mediaUrl != null) {
+    if (type == 'video' && message.mediaUrl != null) {
       return ClipRRect(
-        borderRadius: BorderRadius.circular(12),
-        child: CachedNetworkImage(
-          imageUrl: message.mediaUrl!,
-          width: 220,
-          height: 180,
-          fit: BoxFit.cover,
-          placeholder: (_, __) => Container(
-            width: 220,
-            height: 180,
-            color: Colors.black12,
-            child: const Center(child: CircularProgressIndicator()),
+          borderRadius: BorderRadius.circular(14),
+          child: SizedBox(
+              width: 280,
+              height: 320,
+              child: CommunityVideoPlayer(
+                  mediaUrl: message.mediaUrl!, autoPlay: false)));
+    }
+
+    if (type == 'image' && message.mediaUrl != null) {
+      return InkWell(
+        onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+          builder: (context) => Scaffold(
+            backgroundColor: Colors.black,
+            appBar: AppBar(
+                backgroundColor: Colors.black,
+                foregroundColor: Colors.white,
+                title: const Text('Photo')),
+            body: Center(
+                child: InteractiveViewer(
+              minScale: 0.5,
+              maxScale: 5,
+              child: CachedNetworkImage(
+                  imageUrl: message.mediaUrl!,
+                  fit: BoxFit.contain,
+                  placeholder: (_, __) =>
+                      const Center(child: CircularProgressIndicator()),
+                  errorWidget: (_, __, ___) => const Icon(
+                      Icons.broken_image_outlined,
+                      color: Colors.white)),
+            )),
           ),
-          errorWidget: (_, __, ___) => const SizedBox(
-            width: 220,
-            height: 120,
-            child: Center(child: Icon(Icons.broken_image_outlined)),
-          ),
-        ),
+        )),
+        borderRadius: BorderRadius.circular(16),
+        child: ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: ConstrainedBox(
+                constraints:
+                    const BoxConstraints(maxWidth: 300, maxHeight: 420),
+                child: CachedNetworkImage(
+                  imageUrl: message.mediaUrl!,
+                  width: 300,
+                  fit: BoxFit.contain,
+                  placeholder: (_, __) => Container(
+                    width: 220,
+                    height: 180,
+                    color: Colors.black12,
+                    child: const Center(child: CircularProgressIndicator()),
+                  ),
+                  errorWidget: (_, __, ___) => const SizedBox(
+                    width: 220,
+                    height: 120,
+                    child: Center(child: Icon(Icons.broken_image_outlined)),
+                  ),
+                ))),
       );
     }
 

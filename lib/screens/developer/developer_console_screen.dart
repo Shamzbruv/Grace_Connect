@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../services/developer_service.dart';
 import 'developer_email_test_screen.dart';
@@ -323,6 +324,23 @@ class _DeveloperConsoleScreenState extends State<DeveloperConsoleScreen>
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        ListTile(
+          leading: const Icon(Icons.admin_panel_settings_outlined),
+          title: const Text('Platform operations and launch reset'),
+          subtitle: const Text(
+              'Open the secure developer portal for payment readiness, maintenance and the one-time reset.'),
+          trailing: const Icon(Icons.open_in_new),
+          onTap: () async {
+            final opened = await launchUrl(
+                Uri.parse('https://graceconnect.love/developer/'),
+                mode: LaunchMode.externalApplication);
+            if (!opened && context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                  content: Text('Could not open the developer portal.')));
+            }
+          },
+        ),
+        const Divider(),
         ListTile(
           leading: Icon(Icons.key, color: Colors.green),
           title: Text('Google Places API'),

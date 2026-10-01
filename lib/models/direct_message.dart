@@ -15,6 +15,7 @@ class DirectMessage {
     this.deletedFor = const [],
     this.expiresAt,
     this.replyContext = const {},
+    this.sharedContent,
   });
 
   final String id;
@@ -32,6 +33,7 @@ class DirectMessage {
   final List<String> deletedFor;
   final DateTime? expiresAt;
   final Map<String, dynamic> replyContext;
+  final Map<String, dynamic>? sharedContent;
 
   bool get hasMedia => mediaUrl?.isNotEmpty == true;
   bool get isDelivered => deliveredAt != null || isRead || readAt != null;
@@ -60,6 +62,9 @@ class DirectMessage {
       deletedFor: _parseStringList(data['deleted_for'] ?? data['deletedFor']),
       expiresAt: _nullableDate(data['expires_at'] ?? data['expiresAt']),
       replyContext: _parseMap(data['reply_context'] ?? data['replyContext']),
+      sharedContent: data['shared_content'] is Map
+          ? _parseMap(data['shared_content'])
+          : null,
     );
   }
 

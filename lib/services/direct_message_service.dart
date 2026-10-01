@@ -478,6 +478,7 @@ class DirectMessageService {
     int? durationSeconds,
     Map<String, dynamic>? replyContext,
     String? recipientUserId,
+    Map<String, dynamic>? sharedContent,
   }) async {
     final uid = _currentUid;
     final cleanText = text.trim();
@@ -501,6 +502,7 @@ class DirectMessageService {
       'media_type': mediaType,
       'duration_seconds': durationSeconds,
       'reply_context': cleanReplyContext,
+      if (sharedContent != null) 'shared_content': sharedContent,
       'created_at': now.toIso8601String(),
       'expires_at': expiresAt.toIso8601String(),
     };
@@ -508,7 +510,11 @@ class DirectMessageService {
     try {
       await _supabase.from('direct_messages').insert(payload);
     } on PostgrestException catch (error) {
-      if (!_isMissingColumnError(error) || cleanText.isEmpty) rethrow;
+      if (!_isMissingColumnError(error) ||
+          cleanText.isEmpty ||
+          sharedContent != null) {
+        rethrow;
+      }
       await _supabase.from('direct_messages').insert({
         'id': payload['id'],
         'conversation_id': conversationId,
