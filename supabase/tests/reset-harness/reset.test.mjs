@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 
 // In-memory Postgres only. This harness has no network client or production URL.
 const migration = (await readFile(new URL('../../migrations/20261001021711_developer_operations_and_one_time_reset.sql', import.meta.url), 'utf8')).split('-- Scheduling')[0];
+const guardCompletion = await readFile(new URL('../../migrations/20261001111928_platform_reset_write_guard_completion.sql', import.meta.url), 'utf8');
 const owner = '00000000-0000-4000-8000-000000000001';
 const member = '00000000-0000-4000-8000-000000000002';
 async function fixture() {
@@ -15,7 +16,7 @@ async function fixture() {
     create table auth.users(id uuid primary key,email text);
     create function auth.uid() returns uuid language sql as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
     create table public.users(id uuid primary key,uid text,email text,"fullName" text,"displayName" text,"isDeveloper" boolean,"accountState" text,roles text[],"defaultRole" text);
-    create table public.developer_accounts(id uuid primary key default gen_random_uuid(),user_id uuid,email text,developer_role text,status text,created_at timestamptz default now());
+    create table public.developer_accounts(id uuid primary key default gen_random_uuid(),user_id uuid,email text,developer_role text,status text,created_at timestamptz default now(),last_login_at timestamptz);
     create table public.churches(id int primary key);
     create table public.posts(id int primary key,church_id int references public.churches);
     create table public.bible_book_catalog(id int); create table public.denominations(id int);
@@ -45,12 +46,13 @@ async function fixture() {
     insert into public.daily_content_generation_settings values('${member}');
     insert into storage.objects values('images','old.jpg');
     grant usage on schema public,auth,storage to authenticated,anon,service_role;
-    grant insert,update,select on public.posts,public.churches to authenticated;
+    grant insert,update,select,delete on public.posts,public.churches,public.users,public.developer_accounts to authenticated;
     grant insert,select on auth.users,storage.objects to authenticated;
     grant usage on schema auth to supabase_auth_admin;
     grant delete,select on auth.users to supabase_auth_admin;
   `);
   await db.exec(migration);
+  await db.exec(guardCompletion);
   return db;
 }
 async function value(db, sql) { return Object.values((await db.query(sql)).rows[0])[0]; }
@@ -86,6 +88,10 @@ test('one-time reset freezes writes, resumes safely, preserves owner, and cannot
     await assert.rejects(rpc(`select public.platform_reset_begin('${owner}')`),/already been used/);
     await db.exec(`select set_config('request.jwt.claim.sub','${member}',false)`);
     await assert.rejects(asRole(db,'authenticated','insert into public.posts values(2,1) returning id'),/being reset/);
+    await assert.rejects(asRole(db,'authenticated',`delete from public.users where id='${owner}' returning id`),/being reset/);
+    await assert.rejects(asRole(db,'authenticated',`insert into public.developer_accounts(email) values('new@example.test') returning id`),/being reset/);
+    await assert.rejects(asRole(db,'authenticated',`update public.developer_accounts set developer_role='security_admin' where user_id='${owner}' returning id`),/being reset/);
+    await asRole(db,'authenticated',`update public.developer_accounts set last_login_at=now() where user_id='${owner}' returning id`);
     await assert.rejects(asRole(db,'authenticated',`insert into auth.users values(gen_random_uuid(),'new@example.test') returning id`),/being reset/);
     await assert.rejects(asRole(db,'authenticated',`insert into storage.objects values('images','new.jpg') returning name`),/being reset/);
     const job = await rpc("select public.platform_reset_worker('claim')");
