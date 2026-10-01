@@ -18,9 +18,11 @@ Public content can be shared outside the app as an actual image, video or text. 
 export embeds a Grace Connect watermark at bottom-left using Android Media3 or iOS
 AVFoundation. The private R2 bucket and signing credentials remain server-side.
 
-The supplied circular GC artwork is used for the home-screen app icon. The original
-opening/splash artwork and notification branding are preserved, following the owner's
-latest instruction. App icon assets are generated for Android, iOS and desktop/web.
+The supplied circular GC artwork is used for the home-screen app icon and notification
+branding. Android uses a monochrome GC/arrow mark in the status bar and the original
+full-color artwork as the large notification image; iOS uses the app icon. The original
+opening/splash artwork is preserved. App icon assets are generated for Android, iOS
+and desktop/web.
 
 The website developer portal provides sharing-background uploads and management,
 maintenance status, queue counts, payment readiness and a one-time launch reset.

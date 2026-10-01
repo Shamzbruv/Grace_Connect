@@ -1,4 +1,4 @@
-New home-screen app icon, plus centered Reel navigation.
+New app and notification icons, plus centered Reel navigation.
 Reel fixes: likes, comments, saves, looping with sound, tap to pause, optional auto-scroll and reels on profiles.
 Share reels and feed posts with rich message previews or as actual media outside the app. Videos include the Grace Connect watermark.
 Improved photo viewing, playback and privacy.
