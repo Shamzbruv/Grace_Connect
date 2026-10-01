@@ -17,7 +17,23 @@ GitHub sync, deployed backend and website. Do not execute the one-time reset.
 - [x] Developer operations/readiness tools and payment-to-entitlement audit.
 - [x] One-time reset UI/server job preserving only requesting developer account;
       durable consumed state, resumable cleanup, no production activation here.
-- [ ] Final signed AAB verification and delivery (checks and notes prepared).
+- [x] Final signed AAB verified: 1.1.1+40, 64,675,320 bytes, existing upload certificate.
+      Bundle, Play release notes and audit report are in `../releases/1.1.1+40/`.
+      SHA-256: `13b30c2cf38a54c6e516f39cdcb2c467c28568dd6daad67234f78ffb9c98eecc`.
+
+## Final checks
+
+214 Flutter tests and analysis pass. GitHub CI for app commit `d553c62` passes,
+including Android attendance scheduler, Edge Function, retention and isolated
+reset tests. Website commit `5bf0eeb` is deployed and matches the live portal.
+The final bundle includes the supplied GC app/notification artwork; the original
+splash artwork is unchanged. Bundle structure, upload signature, version, SDKs,
+packaged icons and 64-bit native segment alignment were verified.
+
+Production reset remains unused. Fygaro still needs credentials before live
+payments. Physical-device media/notification checks and a full iOS build remain
+external validation; the release audit records these limits and legacy backend
+advisory notices.
 
 ## Confirmed starting defects
 
