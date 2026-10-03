@@ -45,7 +45,9 @@ advisories are outside this feature change.
 
 The one-time destructive launch reset remains unused. Its table inventory includes
 the new account data; store configuration is preserved. Scheduled preparation pauses
-while a reset is running. No test performs the production reset.
+while a reset is running. Truncating the quiz content also clears its private
+preparation jobs and leases, so Prepare month can rebuild after reset. Ordinary
+retention never restarts completed preparation. No test performs the production reset.
 
 Local debug preview: `http://localhost:3000/#/tutorial-preview`. This component preview
 uses sample controls, local memory and no account records or analytics. Normal app
