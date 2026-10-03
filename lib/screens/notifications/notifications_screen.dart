@@ -1,3 +1,4 @@
+import 'package:grace_connect/tutorial/tutorial_anchor.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:timeago/timeago.dart' as timeago;
@@ -21,6 +22,8 @@ class NotificationsScreen extends StatelessWidget {
     final communityService = CommunityService();
 
     return AppScaffold(
+      tutorialId: 'notifications',
+      tutorialReady: user != null,
       title: 'Notifications',
       actions: [
         if (user != null)
@@ -33,62 +36,66 @@ class NotificationsScreen extends StatelessWidget {
           ? const Center(child: CircularProgressIndicator())
           : StreamBuilder<List<AppNotification>>(
               stream: service.watchNotifications(user.uid),
-              builder: (context, snapshot) {
-                if (snapshot.hasError) {
-                  return Center(
-                    child:
-                        Text('Could not load notifications: ${snapshot.error}'),
-                  );
-                }
-
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-
-                final notifications = snapshot.data ?? const [];
-                if (notifications.isEmpty) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.notifications_none_outlined,
-                          size: 64,
-                          color: Theme.of(context)
-                              .colorScheme
-                              .onSurface
-                              .withValues(alpha: 0.25),
-                        ),
-                        const SizedBox(height: 12),
-                        Text(
-                          'No notifications yet',
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                      ],
-                    ),
-                  );
-                }
-
-                return ListView.separated(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: notifications.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 10),
-                  itemBuilder: (context, index) {
-                    final notification = notifications[index];
-                    return _NotificationTile(
-                      notification: notification,
-                      onTap: () async {
-                        await _openNotification(
-                          context,
-                          service,
-                          communityService,
-                          notification,
-                        );
-                      },
+              builder: (context, snapshot) => TutorialReadiness(
+                ready: snapshot.connectionState != ConnectionState.waiting &&
+                    !snapshot.hasError,
+                child: Builder(builder: (context) {
+                  if (snapshot.hasError) {
+                    return Center(
+                      child: Text(
+                          'Could not load notifications: ${snapshot.error}'),
                     );
-                  },
-                );
-              },
+                  }
+
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+
+                  final notifications = snapshot.data ?? const [];
+                  if (notifications.isEmpty) {
+                    return Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.notifications_none_outlined,
+                            size: 64,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurface
+                                .withValues(alpha: 0.25),
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            'No notifications yet',
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                        ],
+                      ),
+                    );
+                  }
+
+                  return ListView.separated(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: notifications.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 10),
+                    itemBuilder: (context, index) {
+                      final notification = notifications[index];
+                      return _NotificationTile(
+                        notification: notification,
+                        onTap: () async {
+                          await _openNotification(
+                            context,
+                            service,
+                            communityService,
+                            notification,
+                          );
+                        },
+                      ).tutorial('notifications.tools', enabled: index == 0);
+                    },
+                  );
+                }),
+              ),
             ),
     );
   }

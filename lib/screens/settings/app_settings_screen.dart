@@ -9,6 +9,10 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../providers/theme_provider.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/ui/app_scaffold.dart';
+import '../../tutorial/tutorial_controller.dart';
+import '../../tutorial/tutorial_anchor.dart';
+import '../../experience/app_experience_controller.dart';
+import '../../experience/app_experience_host.dart';
 
 class AppSettingsScreen extends StatefulWidget {
   const AppSettingsScreen({super.key});
@@ -30,16 +34,27 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
   }
 
   Future<void> _loadSettings() async {
-    final prefs = await SharedPreferences.getInstance();
-    final packageInfo = await PackageInfo.fromPlatform();
-    if (!mounted) return;
-    setState(() {
-      _dataSaver = prefs.getBool('data_saver') ?? false;
-      _haptics = prefs.getBool('haptics_enabled') ?? true;
-      _versionLabel =
-          'Version ${packageInfo.version} (Build ${packageInfo.buildNumber})';
-      _isLoading = false;
-    });
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final packageInfo = await PackageInfo.fromPlatform();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _dataSaver = prefs.getBool('data_saver') ?? false;
+        _haptics = prefs.getBool('haptics_enabled') ?? true;
+        _versionLabel =
+            'Version ${packageInfo.version} (Build ${packageInfo.buildNumber})';
+        _isLoading = false;
+      });
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _versionLabel = 'Grace Connect';
+        });
+      }
+    }
   }
 
   Future<void> _saveBool(String key, bool value) async {
@@ -61,9 +76,13 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final themeProvider = Provider.of<ThemeProvider>(context);
+    final tutorials = context.watch<TutorialController?>();
+    final experience = context.watch<AppExperienceController?>();
 
     return AppScaffold(
       title: 'Devices & App',
+      tutorialId: 'devices_app',
+      tutorialReady: !_isLoading,
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : ListView(
@@ -136,6 +155,85 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
                     if (value) HapticService.success();
                   },
                 ),
+                if (experience?.initialized == true)
+                  ListTile(
+                    leading: const Icon(Icons.star_outline),
+                    title: const Text('Rate Grace Connect'),
+                    subtitle: Text(experience!.storeUrl == null
+                        ? 'Available when the store listing is published.'
+                        : 'Share honest feedback on ${experience.storeName}.'),
+                    onTap: experience.storeUrl == null
+                        ? null
+                        : () async {
+                            final opened =
+                                await openExperienceStore(experience);
+                            if (!opened && context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                      content: Text(
+                                          'The store could not be opened. Please try again.')));
+                            }
+                          },
+                  ),
+                if (tutorials != null) ...[
+                  const Padding(
+                      padding: EdgeInsets.fromLTRB(4, 20, 4, 8),
+                      child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text('GUIDANCE'))),
+                  SwitchListTile(
+                    secondary: const Icon(Icons.school_outlined),
+                    title: const Text('Guided Tutorials'),
+                    subtitle: const Text(
+                        'Show quick tips when you open a screen for the first time.'),
+                    value: tutorials.enabled,
+                    onChanged: !tutorials.initialized
+                        ? null
+                        : (value) async {
+                            await tutorials.setEnabled(value);
+                            if (value && context.mounted) {
+                              _showTutorialRestarted(context);
+                            }
+                          },
+                  ).tutorial('devices_app.tools'),
+                  ListTile(
+                    leading: const Icon(Icons.replay_outlined),
+                    title: const Text('Restart All Tutorials'),
+                    subtitle:
+                        const Text('Start fresh as you visit each screen.'),
+                    enabled: tutorials.initialized,
+                    onTap: !tutorials.initialized
+                        ? null
+                        : () async {
+                            final restart = await showDialog<bool>(
+                                context: context,
+                                builder: (context) => AlertDialog(
+                                      title:
+                                          const Text('Restart all tutorials?'),
+                                      content: const Text(
+                                          'Grace Connect will treat each tutorial-enabled screen as new the next time you visit it.'),
+                                      actions: [
+                                        TextButton(
+                                            onPressed: () =>
+                                                Navigator.pop(context, false),
+                                            child: const Text('Cancel')),
+                                        FilledButton(
+                                            onPressed: () =>
+                                                Navigator.pop(context, true),
+                                            child: const Text('Restart'))
+                                      ],
+                                    ));
+                            if (restart != true) {
+                              return;
+                            }
+                            await tutorials.restartAll();
+                            if (context.mounted) {
+                              _showTutorialRestarted(context);
+                            }
+                          },
+                  ),
+                  const SizedBox(height: 20),
+                ],
                 // "Is this even working?" is otherwise unanswerable: a
                 // selection buzz is 12ms and easy to miss, and Android
                 // silently drops haptics entirely when its own touch
@@ -159,7 +257,9 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
                       return;
                     }
                     await HapticService.test();
-                    if (!context.mounted) return;
+                    if (!context.mounted) {
+                      return;
+                    }
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
                         content: Text(
@@ -227,6 +327,11 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
       ),
     );
   }
+
+  void _showTutorialRestarted(BuildContext context) =>
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text(
+              'Tutorials restarted. You’ll see a short guide as you visit each screen.')));
 
   Widget _buildActionTile(
       BuildContext context, String title, IconData icon, VoidCallback onTap) {

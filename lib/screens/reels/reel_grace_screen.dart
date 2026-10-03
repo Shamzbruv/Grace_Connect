@@ -1,6 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../../tutorial/tutorial_controller.dart';
+import '../../tutorial/tutorial_anchor.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:visibility_detector/visibility_detector.dart';
 
@@ -36,6 +39,9 @@ class ReelGraceScreen extends StatefulWidget {
 
 class _ReelGraceScreenState extends State<ReelGraceScreen>
     with WidgetsBindingObserver {
+  bool get _tutorialPaused =>
+      mounted &&
+      (context.read<TutorialController?>()?.guiding('reel_grace') ?? false);
   final ReelService _service = ReelService();
   final PageController _pageController = PageController(keepPage: false);
   final List<Reel> _reels = [];
@@ -462,6 +468,7 @@ class _ReelGraceScreenState extends State<ReelGraceScreen>
     if (!_autoScroll ||
         !_foreground ||
         _overlayOpen ||
+        _tutorialPaused ||
         !widget.isActive ||
         !_visible) {
       return;
@@ -472,6 +479,7 @@ class _ReelGraceScreenState extends State<ReelGraceScreen>
         !_autoScroll ||
         !_foreground ||
         _overlayOpen ||
+        _tutorialPaused ||
         !widget.isActive ||
         !_visible ||
         !_pageController.hasClients ||
@@ -491,6 +499,8 @@ class _ReelGraceScreenState extends State<ReelGraceScreen>
 
   @override
   Widget build(BuildContext context) {
+    final tutorialPaused = context.select<TutorialController?, bool>(
+        (controller) => controller?.guiding('reel_grace') ?? false);
     return VisibilityDetector(
       key: ObjectKey(this),
       onVisibilityChanged: (info) {
@@ -539,7 +549,8 @@ class _ReelGraceScreenState extends State<ReelGraceScreen>
                         widget.isActive &&
                         _visible &&
                         _foreground &&
-                        !_overlayOpen;
+                        !_overlayOpen &&
+                        !tutorialPaused;
                     // Current always; next only when Data Saver is off.
                     final shouldInitialize = shouldInitializeReel(
                         index: index,
@@ -552,6 +563,7 @@ class _ReelGraceScreenState extends State<ReelGraceScreen>
                       reel: reel,
                       service: _service,
                       isCurrent: isCurrent,
+                      isTutorialTarget: index == _index,
                       shouldInitialize: shouldInitialize,
                       muted: _muted,
                       onProgress: (p, d) => _onProgress(reel, p, d),
@@ -607,7 +619,7 @@ class _ReelGraceScreenState extends State<ReelGraceScreen>
           ),
         ),
       ),
-    );
+    ).tutorialScreen('reel_grace', ready: !_loading && _error == null);
   }
 }
 
@@ -617,6 +629,7 @@ class _ReelPage extends StatefulWidget {
     required this.reel,
     required this.service,
     required this.isCurrent,
+    required this.isTutorialTarget,
     required this.shouldInitialize,
     required this.muted,
     required this.onProgress,
@@ -633,6 +646,7 @@ class _ReelPage extends StatefulWidget {
   final Reel reel;
   final ReelService service;
   final bool isCurrent;
+  final bool isTutorialTarget;
   final bool shouldInitialize;
   final bool muted;
   final void Function(Duration, Duration) onProgress;
@@ -702,7 +716,7 @@ class _ReelPageState extends State<_ReelPage>
           onCompleted: widget.onCompleted,
           onDoubleTap: _onDoubleTap,
           onLongPress: widget.onMore,
-        ),
+        ).tutorial('reels.playback', enabled: widget.isTutorialTarget),
         // Scrim so white text stays legible over a bright video.
         const Positioned(
           left: 0,
@@ -847,6 +861,7 @@ class _ReelPageState extends State<_ReelPage>
           right: 12,
           bottom: 26,
           child: ReelActionRail(
+            tutorialTarget: widget.isTutorialTarget,
             reel: reel,
             onLike: widget.onLike,
             onComment: widget.onComment,
@@ -854,7 +869,7 @@ class _ReelPageState extends State<_ReelPage>
             onShare: widget.onShare,
             onProfile: widget.onProfile,
             onMore: widget.onMore,
-          ),
+          ).tutorial('reels.actions', enabled: widget.isTutorialTarget),
         ),
       ],
     );

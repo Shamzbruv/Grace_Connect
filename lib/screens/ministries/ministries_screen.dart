@@ -1,3 +1,4 @@
+import 'package:grace_connect/tutorial/tutorial_anchor.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -180,6 +181,7 @@ class _MinistriesScreenState extends State<MinistriesScreen> {
     final churchId = user?.churchId ?? '';
 
     return AppScaffold(
+      tutorialId: 'ministries',
       title: 'Ministries',
       actions: [
         if (canManage)
@@ -202,49 +204,55 @@ class _MinistriesScreenState extends State<MinistriesScreen> {
               ? const Center(child: Text('Join a church to view ministries.'))
               : StreamBuilder<List<Ministry>>(
                   stream: _service.watchMinistries(churchId),
-                  builder: (context, snapshot) {
-                    if (snapshot.hasError) {
-                      return Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(24),
-                          child: Text(
-                            'Could not load ministries: ${snapshot.error}',
+                  builder: (context, snapshot) => TutorialReadiness(
+                    ready:
+                        snapshot.connectionState != ConnectionState.waiting &&
+                            !snapshot.hasError,
+                    child: Builder(builder: (context) {
+                      if (snapshot.hasError) {
+                        return Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(24),
+                            child: Text(
+                              'Could not load ministries: ${snapshot.error}',
+                            ),
                           ),
+                        );
+                      }
+
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
+
+                      final ministries = snapshot.data ?? const <Ministry>[];
+                      if (ministries.isEmpty) {
+                        return _EmptyMinistries(canManage: canManage);
+                      }
+
+                      return RefreshIndicator(
+                        onRefresh: () async {
+                          await _service.fetchMinistries(churchId);
+                        },
+                        child: ListView.separated(
+                          padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
+                          itemCount: ministries.length,
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(height: 12),
+                          itemBuilder: (context, index) {
+                            final ministry = ministries[index];
+                            return _MinistryCard(
+                              ministry: ministry,
+                              canManage: canManage,
+                              service: _service,
+                              onEdit: () =>
+                                  _showMinistrySheet(ministry: ministry),
+                              onManage: () => _showManagerSheet(ministry),
+                            );
+                          },
                         ),
                       );
-                    }
-
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      return const Center(child: CircularProgressIndicator());
-                    }
-
-                    final ministries = snapshot.data ?? const <Ministry>[];
-                    if (ministries.isEmpty) {
-                      return _EmptyMinistries(canManage: canManage);
-                    }
-
-                    return RefreshIndicator(
-                      onRefresh: () async {
-                        await _service.fetchMinistries(churchId);
-                      },
-                      child: ListView.separated(
-                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
-                        itemCount: ministries.length,
-                        separatorBuilder: (_, __) => const SizedBox(height: 12),
-                        itemBuilder: (context, index) {
-                          final ministry = ministries[index];
-                          return _MinistryCard(
-                            ministry: ministry,
-                            canManage: canManage,
-                            service: _service,
-                            onEdit: () =>
-                                _showMinistrySheet(ministry: ministry),
-                            onManage: () => _showManagerSheet(ministry),
-                          );
-                        },
-                      ),
-                    );
-                  },
+                    }),
+                  ),
                 ),
     );
   }

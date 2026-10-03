@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import '../../theme/app_colors.dart';
 import '../app_bottom_menu.dart';
 import '../main_tab_scope.dart';
+import '../../tutorial/tutorial_anchor.dart';
+import '../../tutorial/tutorial_screen_scope.dart';
 
 class AppScaffold extends StatelessWidget {
   final Widget body;
@@ -18,6 +20,8 @@ class AppScaffold extends StatelessWidget {
   final double? appBarHeight;
   final TextStyle? appBarTitleStyle;
   final bool bodySafeAreaTop;
+  final String? tutorialId;
+  final bool tutorialReady;
 
   const AppScaffold({
     super.key,
@@ -35,6 +39,8 @@ class AppScaffold extends StatelessWidget {
     this.appBarHeight,
     this.appBarTitleStyle,
     this.bodySafeAreaTop = true,
+    this.tutorialId,
+    this.tutorialReady = true,
   });
 
   @override
@@ -46,7 +52,7 @@ class AppScaffold extends StatelessWidget {
             ? const AppBottomMenu()
             : null);
 
-    return Scaffold(
+    final scaffold = Scaffold(
       backgroundColor: backgroundColor,
       extendBodyBehindAppBar:
           withBackground, // If we have a fancy background, extend body
@@ -54,7 +60,11 @@ class AppScaffold extends StatelessWidget {
       appBar: title != null
           ? AppBar(
               toolbarHeight: appBarHeight,
-              title: Text(title!, style: appBarTitleStyle),
+              title: tutorialId == null
+                  ? Text(title!, style: appBarTitleStyle)
+                  : TutorialAnchor(
+                      id: '$tutorialId.overview',
+                      child: Text(title!, style: appBarTitleStyle)),
               actions: actions,
               backgroundColor: withBackground ? Colors.transparent : null,
               elevation: withBackground ? 0 : null,
@@ -99,8 +109,15 @@ class AppScaffold extends StatelessWidget {
           ),
         ),
       ),
-      floatingActionButton: floatingActionButton,
+      floatingActionButton: floatingActionButton == null || tutorialId == null
+          ? floatingActionButton
+          : TutorialAnchor(
+              id: '$tutorialId.tools', child: floatingActionButton!),
       bottomNavigationBar: effectiveBottomNavigationBar,
     );
+    return tutorialId == null
+        ? scaffold
+        : TutorialScreenScope(
+            screenId: tutorialId!, ready: tutorialReady, child: scaffold);
   }
 }

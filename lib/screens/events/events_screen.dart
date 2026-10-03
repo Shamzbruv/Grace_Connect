@@ -1,3 +1,4 @@
+import 'package:grace_connect/tutorial/tutorial_anchor.dart';
 import 'dart:async';
 
 import 'package:grace_connect/widgets/ui/app_skeleton_list_item.dart';
@@ -882,6 +883,8 @@ class _EventsScreenState extends State<EventsScreen> {
 
     return AppScaffold(
       title: 'Events',
+      tutorialId: 'events',
+      tutorialReady: !_isLoading,
       showBottomMenu: widget.showBottomMenu,
       floatingActionButton: canAddEvent
           ? FloatingActionButton(
@@ -889,7 +892,7 @@ class _EventsScreenState extends State<EventsScreen> {
               onPressed: _showAddEventDialog,
               child: Icon(Icons.add,
                   color: Theme.of(context).colorScheme.onPrimary),
-            )
+            ).tutorial('events.create')
           : null,
       body: _isLoading
           ? const Center(child: AppLoader())
@@ -901,82 +904,88 @@ class _EventsScreenState extends State<EventsScreen> {
                   onChanged: (value) {
                     setState(() => _showSharedEvents = value);
                   },
-                ),
+                ).tutorial('events.scope'),
                 Expanded(
                   child: StreamBuilder<List<EventModel>>(
                     stream: eventsStream,
-                    builder: (context, snapshot) {
-                      if (snapshot.connectionState == ConnectionState.waiting) {
-                        return ListView.builder(
-                          padding: const EdgeInsets.all(16),
-                          itemCount: 3,
-                          itemBuilder: (_, __) => const AppSkeletonListItem(),
-                        );
-                      }
-
-                      if (snapshot.hasError) {
-                        return Center(
-                          child: Text('Error: ${snapshot.error}'),
-                        );
-                      }
-
-                      final events = snapshot.data ?? [];
-                      _queueChurchNameLoads(events);
-                      _queueCalendarRefresh(events);
-
-                      if (events.isEmpty) {
-                        return Center(
-                          child: Text(
-                            showDiscoverEvents
-                                ? 'No public upcoming events.'
-                                : 'No upcoming events.',
-                            style: TextStyle(color: Colors.grey[600]),
-                          ),
-                        );
-                      }
-
-                      return ListView.builder(
-                        padding: const EdgeInsets.all(16.0),
-                        itemCount: events.length,
-                        itemBuilder: (context, index) {
-                          final event = events[index];
-                          final isRsvped = _currentUser != null &&
-                              event.attendees.contains(_currentUser!.id);
-                          final canViewRsvps =
-                              _canViewRsvpDetails(event, roleProvider);
-                          final canManageEvent =
-                              _canManageEvent(event, roleProvider);
-
-                          return _EventCard(
-                            event: event,
-                            viewerChurchId: _churchId ?? '',
-                            churchName: _churchNamesById[event.churchId],
-                            isRsvped: isRsvped,
-                            canViewRsvps: canViewRsvps,
-                            canManageEvent: canManageEvent,
-                            isRsvpBusy: _rsvpEventIds.contains(event.id),
-                            isCalendarBusy:
-                                _calendarSyncEventIds.contains(event.id),
-                            onRsvp: () => _handleRSVP(event),
-                            onCalendar: isRsvped
-                                ? () => _syncEventCalendar(event)
-                                : null,
-                            onOpenLink: event.eventUrl == null
-                                ? null
-                                : () => _openEventLink(event.eventUrl!),
-                            onViewRsvps: canViewRsvps
-                                ? () => _showRsvpDetails(event)
-                                : null,
-                            onEdit: canManageEvent
-                                ? () => _showEditEventDialog(event)
-                                : null,
-                            onDelete: canManageEvent
-                                ? () => _deleteEvent(event)
-                                : null,
+                    builder: (context, snapshot) => TutorialReadiness(
+                      ready:
+                          snapshot.connectionState != ConnectionState.waiting &&
+                              !snapshot.hasError,
+                      child: Builder(builder: (context) {
+                        if (snapshot.connectionState ==
+                            ConnectionState.waiting) {
+                          return ListView.builder(
+                            padding: const EdgeInsets.all(16),
+                            itemCount: 3,
+                            itemBuilder: (_, __) => const AppSkeletonListItem(),
                           );
-                        },
-                      );
-                    },
+                        }
+
+                        if (snapshot.hasError) {
+                          return Center(
+                            child: Text('Error: ${snapshot.error}'),
+                          );
+                        }
+
+                        final events = snapshot.data ?? [];
+                        _queueChurchNameLoads(events);
+                        _queueCalendarRefresh(events);
+
+                        if (events.isEmpty) {
+                          return Center(
+                            child: Text(
+                              showDiscoverEvents
+                                  ? 'No public upcoming events.'
+                                  : 'No upcoming events.',
+                              style: TextStyle(color: Colors.grey[600]),
+                            ),
+                          );
+                        }
+
+                        return ListView.builder(
+                          padding: const EdgeInsets.all(16.0),
+                          itemCount: events.length,
+                          itemBuilder: (context, index) {
+                            final event = events[index];
+                            final isRsvped = _currentUser != null &&
+                                event.attendees.contains(_currentUser!.id);
+                            final canViewRsvps =
+                                _canViewRsvpDetails(event, roleProvider);
+                            final canManageEvent =
+                                _canManageEvent(event, roleProvider);
+
+                            return _EventCard(
+                              event: event,
+                              viewerChurchId: _churchId ?? '',
+                              churchName: _churchNamesById[event.churchId],
+                              isRsvped: isRsvped,
+                              canViewRsvps: canViewRsvps,
+                              canManageEvent: canManageEvent,
+                              isRsvpBusy: _rsvpEventIds.contains(event.id),
+                              isCalendarBusy:
+                                  _calendarSyncEventIds.contains(event.id),
+                              onRsvp: () => _handleRSVP(event),
+                              onCalendar: isRsvped
+                                  ? () => _syncEventCalendar(event)
+                                  : null,
+                              onOpenLink: event.eventUrl == null
+                                  ? null
+                                  : () => _openEventLink(event.eventUrl!),
+                              onViewRsvps: canViewRsvps
+                                  ? () => _showRsvpDetails(event)
+                                  : null,
+                              onEdit: canManageEvent
+                                  ? () => _showEditEventDialog(event)
+                                  : null,
+                              onDelete: canManageEvent
+                                  ? () => _deleteEvent(event)
+                                  : null,
+                            ).tutorial('events.card', enabled: index == 0);
+                          },
+                        );
+                      }),
+                    ),
                   ),
                 ),
               ],
@@ -1423,8 +1432,10 @@ class _EventCard extends StatelessWidget {
                   // IconButton as its foreground, which in light mode painted a
                   // near-black icon on the near-black primary background.
                   style: IconButton.styleFrom(
-                    backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
-                    foregroundColor: Theme.of(context).colorScheme.onSecondaryContainer,
+                    backgroundColor:
+                        Theme.of(context).colorScheme.secondaryContainer,
+                    foregroundColor:
+                        Theme.of(context).colorScheme.onSecondaryContainer,
                   ),
                   tooltip: 'Add or update device calendar',
                   onPressed: isCalendarBusy ? null : onCalendar,
@@ -1444,8 +1455,10 @@ class _EventCard extends StatelessWidget {
                   // IconButton as its foreground, which in light mode painted a
                   // near-black icon on the near-black primary background.
                   style: IconButton.styleFrom(
-                    backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
-                    foregroundColor: Theme.of(context).colorScheme.onSecondaryContainer,
+                    backgroundColor:
+                        Theme.of(context).colorScheme.secondaryContainer,
+                    foregroundColor:
+                        Theme.of(context).colorScheme.onSecondaryContainer,
                   ),
                   tooltip: 'View RSVPs',
                   onPressed: onViewRsvps,

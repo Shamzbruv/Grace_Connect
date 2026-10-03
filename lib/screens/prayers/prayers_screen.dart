@@ -1,3 +1,4 @@
+import 'package:grace_connect/tutorial/tutorial_anchor.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -105,6 +106,8 @@ class _PrayersScreenState extends State<PrayersScreen> {
     }
 
     return AppScaffold(
+      tutorialId: 'prayers',
+      tutorialReady: user != null,
       title: 'Prayer Requests',
       body: user == null
           ? const Center(child: CircularProgressIndicator())
@@ -128,7 +131,7 @@ class _PrayersScreenState extends State<PrayersScreen> {
                         hint:
                             'Share what you would like the church to pray for',
                         maxLines: 5,
-                      ),
+                      ).tutorial('prayers.tools'),
                       const SizedBox(height: 8),
                       SwitchListTile.adaptive(
                         contentPadding: EdgeInsets.zero,
@@ -166,34 +169,41 @@ class _PrayersScreenState extends State<PrayersScreen> {
                 const SizedBox(height: 10),
                 StreamBuilder<List<PrayerRequest>>(
                   stream: _service.getMyRequests(user.uid),
-                  builder: (context, snapshot) {
-                    if (snapshot.hasError) {
-                      return Text('Could not load requests: ${snapshot.error}');
-                    }
+                  builder: (context, snapshot) => TutorialReadiness(
+                    ready:
+                        snapshot.connectionState != ConnectionState.waiting &&
+                            !snapshot.hasError &&
+                            snapshot.hasData,
+                    child: Builder(builder: (context) {
+                      if (snapshot.hasError) {
+                        return Text(
+                            'Could not load requests: ${snapshot.error}');
+                      }
 
-                    if (!snapshot.hasData) {
-                      return const Center(child: CircularProgressIndicator());
-                    }
+                      if (!snapshot.hasData) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
 
-                    final requests = snapshot.data!;
-                    if (requests.isEmpty) {
-                      return const AppCard(
-                        child: Text('No prayer requests yet.'),
+                      final requests = snapshot.data!;
+                      if (requests.isEmpty) {
+                        return const AppCard(
+                          child: Text('No prayer requests yet.'),
+                        );
+                      }
+
+                      return Column(
+                        children: requests
+                            .map(
+                              (request) => _PrayerRequestCard(
+                                request: request,
+                                showActions: false,
+                                canDelete: true,
+                              ),
+                            )
+                            .toList(),
                       );
-                    }
-
-                    return Column(
-                      children: requests
-                          .map(
-                            (request) => _PrayerRequestCard(
-                              request: request,
-                              showActions: false,
-                              canDelete: true,
-                            ),
-                          )
-                          .toList(),
-                    );
-                  },
+                    }),
+                  ),
                 ),
               ],
             ),
@@ -233,44 +243,50 @@ class _PrayerAdminView extends StatelessWidget {
     }
 
     return AppScaffold(
+      tutorialId: 'prayers.staff',
       title: canManageAssignments ? 'Prayer Requests' : 'Assigned Prayers',
       body: StreamBuilder<List<PrayerRequest>>(
         stream: canManageAssignments
             ? service.getChurchRequests(effectiveChurchId)
             : service.getAssignedRequests(effectiveChurchId, effectiveUser.uid),
-        builder: (context, snapshot) {
-          if (snapshot.hasError) {
-            return Center(
-                child: Text('Could not load requests: ${snapshot.error}'));
-          }
+        builder: (context, snapshot) => TutorialReadiness(
+          ready: snapshot.connectionState != ConnectionState.waiting &&
+              !snapshot.hasError &&
+              snapshot.hasData,
+          child: Builder(builder: (context) {
+            if (snapshot.hasError) {
+              return Center(
+                  child: Text('Could not load requests: ${snapshot.error}'));
+            }
 
-          if (!snapshot.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
+            if (!snapshot.hasData) {
+              return const Center(child: CircularProgressIndicator());
+            }
 
-          final requests = snapshot.data!;
-          if (requests.isEmpty) {
-            return Center(
-              child: Text(
-                canManageAssignments
-                    ? 'No prayer requests yet.'
-                    : 'No prayer requests have been assigned to you yet.',
+            final requests = snapshot.data!;
+            if (requests.isEmpty) {
+              return Center(
+                child: Text(
+                  canManageAssignments
+                      ? 'No prayer requests yet.'
+                      : 'No prayer requests have been assigned to you yet.',
+                ),
+              );
+            }
+
+            return ListView.separated(
+              padding: const EdgeInsets.all(16),
+              itemCount: requests.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 12),
+              itemBuilder: (context, index) => _PrayerRequestCard(
+                request: requests[index],
+                showActions: true,
+                canDelete: canManageAssignments,
+                canManageAssignments: canManageAssignments,
               ),
             );
-          }
-
-          return ListView.separated(
-            padding: const EdgeInsets.all(16),
-            itemCount: requests.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 12),
-            itemBuilder: (context, index) => _PrayerRequestCard(
-              request: requests[index],
-              showActions: true,
-              canDelete: canManageAssignments,
-              canManageAssignments: canManageAssignments,
-            ),
-          );
-        },
+          }),
+        ),
       ),
     );
   }

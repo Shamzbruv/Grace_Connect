@@ -1,3 +1,4 @@
+import 'package:grace_connect/tutorial/tutorial_anchor.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -154,6 +155,8 @@ class _ScheduleManagementScreenState extends State<ScheduleManagementScreen> {
     }
 
     return AppScaffold(
+      tutorialId: 'schedule_management',
+      tutorialReady: !_isLoading && _currentUserPlaceId != null,
       title: 'Service Schedules',
       floatingActionButton: FloatingActionButton(
         onPressed: () => _showScheduleSheet(),
@@ -163,54 +166,59 @@ class _ScheduleManagementScreenState extends State<ScheduleManagementScreen> {
           ? const Center(child: AppLoader())
           : StreamBuilder<List<Map<String, dynamic>>>(
               stream: _scheduleStream(_currentUserPlaceId!),
-              builder: (context, snapshot) {
-                if (snapshot.hasError) {
-                  return Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(20),
-                      child:
-                          Text('Could not load schedules: ${snapshot.error}'),
-                    ),
+              builder: (context, snapshot) => TutorialReadiness(
+                ready: snapshot.connectionState != ConnectionState.waiting &&
+                    !snapshot.hasError,
+                child: Builder(builder: (context) {
+                  if (snapshot.hasError) {
+                    return Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(20),
+                        child:
+                            Text('Could not load schedules: ${snapshot.error}'),
+                      ),
+                    );
+                  }
+
+                  if (!snapshot.hasData) {
+                    return const Center(child: AppLoader());
+                  }
+
+                  final schedules =
+                      snapshot.data!.map(ServiceSchedule.fromMap).toList()
+                        ..sort((a, b) {
+                          final dayCompare = a.dayOfWeek.compareTo(b.dayOfWeek);
+                          if (dayCompare != 0) return dayCompare;
+                          return a.startTime.compareTo(b.startTime);
+                        });
+
+                  if (schedules.isEmpty) {
+                    return _EmptySchedules(onAdd: () => _showScheduleSheet());
+                  }
+
+                  return ListView(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
+                    children: [
+                      AppCard(
+                        color:
+                            Theme.of(context).colorScheme.surfaceContainerHigh,
+                        child: Text(
+                          'These service windows are used by auto-attendance. Members are only checked in when they are inside the church geofence during one of these times.',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      ...schedules.map(
+                        (schedule) => _ScheduleCard(
+                          schedule: schedule,
+                          onEdit: () => _showScheduleSheet(schedule: schedule),
+                          onDelete: () => _deleteSchedule(schedule),
+                        ),
+                      ),
+                    ],
                   );
-                }
-
-                if (!snapshot.hasData) {
-                  return const Center(child: AppLoader());
-                }
-
-                final schedules =
-                    snapshot.data!.map(ServiceSchedule.fromMap).toList()
-                      ..sort((a, b) {
-                        final dayCompare = a.dayOfWeek.compareTo(b.dayOfWeek);
-                        if (dayCompare != 0) return dayCompare;
-                        return a.startTime.compareTo(b.startTime);
-                      });
-
-                if (schedules.isEmpty) {
-                  return _EmptySchedules(onAdd: () => _showScheduleSheet());
-                }
-
-                return ListView(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
-                  children: [
-                    AppCard(
-                      color: Theme.of(context).colorScheme.surfaceContainerHigh,
-                      child: Text(
-                        'These service windows are used by auto-attendance. Members are only checked in when they are inside the church geofence during one of these times.',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    ...schedules.map(
-                      (schedule) => _ScheduleCard(
-                        schedule: schedule,
-                        onEdit: () => _showScheduleSheet(schedule: schedule),
-                        onDelete: () => _deleteSchedule(schedule),
-                      ),
-                    ),
-                  ],
-                );
-              },
+                }),
+              ),
             ),
     );
   }

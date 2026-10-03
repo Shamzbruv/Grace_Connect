@@ -1,3 +1,4 @@
+import 'package:grace_connect/tutorial/tutorial_anchor.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:timeago/timeago.dart' as timeago;
@@ -25,8 +26,9 @@ class _TestimoniesScreenState extends State<TestimoniesScreen> {
   // rather than on an empty church tab.
   TestimonyScope? _selectedScope;
 
-  TestimonyScope _scopeFor(String churchId) =>
-      churchId.trim().isEmpty ? TestimonyScope.global : (_selectedScope ?? TestimonyScope.church);
+  TestimonyScope _scopeFor(String churchId) => churchId.trim().isEmpty
+      ? TestimonyScope.global
+      : (_selectedScope ?? TestimonyScope.church);
 
   Future<void> _showAddDialog(UserProfile user, TestimonyScope scope) async {
     final controller = TextEditingController();
@@ -170,6 +172,8 @@ class _TestimoniesScreenState extends State<TestimoniesScreen> {
     final scope = _scopeFor(churchId);
 
     return AppScaffold(
+      tutorialId: 'testimonies',
+      tutorialReady: user != null,
       title: 'Testimonies',
       showBottomMenu: true,
       floatingActionButton: user == null
@@ -183,103 +187,113 @@ class _TestimoniesScreenState extends State<TestimoniesScreen> {
           // a normal state that shows the global feed.
           ? const Center(child: AppLoader())
           : Column(
-            children: [
-              if (hasChurch)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                  child: SegmentedButton<TestimonyScope>(
-                    segments: const [
-                      ButtonSegment(
-                        value: TestimonyScope.church,
-                        label: Text('My Church'),
-                        icon: Icon(Icons.church_outlined),
-                      ),
-                      ButtonSegment(
-                        value: TestimonyScope.global,
-                        label: Text('Global'),
-                        icon: Icon(Icons.public_outlined),
-                      ),
-                    ],
-                    selected: {scope},
-                    onSelectionChanged: (selection) =>
-                        setState(() => _selectedScope = selection.first),
+              children: [
+                if (hasChurch)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                    child: SegmentedButton<TestimonyScope>(
+                      segments: const [
+                        ButtonSegment(
+                          value: TestimonyScope.church,
+                          label: Text('My Church'),
+                          icon: Icon(Icons.church_outlined),
+                        ),
+                        ButtonSegment(
+                          value: TestimonyScope.global,
+                          label: Text('Global'),
+                          icon: Icon(Icons.public_outlined),
+                        ),
+                      ],
+                      selected: {scope},
+                      onSelectionChanged: (selection) =>
+                          setState(() => _selectedScope = selection.first),
+                    ),
+                  ),
+                Expanded(
+                  child: StreamBuilder<List<Testimony>>(
+                    key: ValueKey(scope),
+                    stream: _service.watchTestimonies(churchId, scope: scope),
+                    builder: (context, snapshot) => TutorialReadiness(
+                      ready:
+                          snapshot.connectionState != ConnectionState.waiting &&
+                              !snapshot.hasError &&
+                              snapshot.hasData,
+                      child: Builder(builder: (context) {
+                        if (snapshot.hasError) {
+                          return Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(24),
+                              child: Text(
+                                  'Could not load testimonies: ${snapshot.error}'),
+                            ),
+                          );
+                        }
+
+                        if (!snapshot.hasData) {
+                          return const Center(child: AppLoader());
+                        }
+
+                        final testimonies = snapshot.data!;
+                        if (testimonies.isEmpty) {
+                          return Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(24),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.auto_awesome_outlined,
+                                    size: 58,
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurfaceVariant,
+                                  ),
+                                  const SizedBox(height: 16),
+                                  Text(
+                                    scope == TestimonyScope.global
+                                        ? 'No global testimonies yet'
+                                        : 'No testimonies yet',
+                                    style:
+                                        Theme.of(context).textTheme.titleMedium,
+                                  ),
+                                  const SizedBox(height: 12),
+                                  FilledButton.icon(
+                                    onPressed: () =>
+                                        _showAddDialog(user, scope),
+                                    icon: const Icon(Icons.add),
+                                    label: const Text('Add Testimony'),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        }
+
+                        return ListView.builder(
+                          padding: const EdgeInsets.fromLTRB(16, 16, 16, 88),
+                          itemCount: testimonies.length,
+                          itemBuilder: (context, index) {
+                            return _TestimonyCard(
+                              testimony: testimonies[index],
+                              currentUserId: user.uid,
+                              canDelete:
+                                  testimonies[index].authorId == user.uid ||
+                                      user.isPastor ||
+                                      user.isAdmin,
+                              reactions: _reactionOptions,
+                              onReact: (emoji) => _service.toggleReaction(
+                                  testimonies[index].id, emoji),
+                              onDelete: () =>
+                                  _confirmDeleteTestimony(testimonies[index]),
+                            );
+                          },
+                        );
+                      }),
+                    ),
                   ),
                 ),
-              Expanded(
-                child: StreamBuilder<List<Testimony>>(
-              key: ValueKey(scope),
-              stream: _service.watchTestimonies(churchId, scope: scope),
-              builder: (context, snapshot) {
-                if (snapshot.hasError) {
-                  return Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(24),
-                      child:
-                          Text('Could not load testimonies: ${snapshot.error}'),
-                    ),
-                  );
-                }
-
-                if (!snapshot.hasData) {
-                  return const Center(child: AppLoader());
-                }
-
-                final testimonies = snapshot.data!;
-                if (testimonies.isEmpty) {
-                  return Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.auto_awesome_outlined,
-                            size: 58,
-                            color:
-                                Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
-                          const SizedBox(height: 16),
-                          Text(
-                            scope == TestimonyScope.global
-                                ? 'No global testimonies yet'
-                                : 'No testimonies yet',
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                          const SizedBox(height: 12),
-                          FilledButton.icon(
-                            onPressed: () => _showAddDialog(user, scope),
-                            icon: const Icon(Icons.add),
-                            label: const Text('Add Testimony'),
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                }
-
-                return ListView.builder(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 88),
-                  itemCount: testimonies.length,
-                  itemBuilder: (context, index) {
-                    return _TestimonyCard(
-                      testimony: testimonies[index],
-                      currentUserId: user.uid,
-                      canDelete: testimonies[index].authorId == user.uid ||
-                          user.isPastor ||
-                          user.isAdmin,
-                      reactions: _reactionOptions,
-                      onReact: (emoji) =>
-                          _service.toggleReaction(testimonies[index].id, emoji),
-                      onDelete: () =>
-                          _confirmDeleteTestimony(testimonies[index]),
-                    );
-                  },
-                );
-              },
-                ),
-              ),
-            ],
-          ),
+              ],
+            ),
     );
   }
 }

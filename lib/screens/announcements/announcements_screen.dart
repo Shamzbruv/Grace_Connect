@@ -1,3 +1,4 @@
+import 'package:grace_connect/tutorial/tutorial_anchor.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -447,6 +448,10 @@ class _AnnouncementsScreenState extends State<AnnouncementsScreen> {
         final canPublish = permissionSnapshot.data ?? _service.canPublish(user);
 
         return AppScaffold(
+          tutorialId: 'announcements',
+          tutorialReady:
+              permissionSnapshot.connectionState != ConnectionState.waiting &&
+                  !permissionSnapshot.hasError,
           title: 'Announcements',
           actions: [
             if (canPublish)
@@ -497,39 +502,43 @@ class _AnnouncementsList extends StatelessWidget {
 
     return StreamBuilder<List<Announcement>>(
       stream: service.watchAnnouncements(churchId),
-      builder: (context, snapshot) {
-        if (snapshot.hasError) {
-          return Center(
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Text('Could not load announcements: ${snapshot.error}'),
+      builder: (context, snapshot) => TutorialReadiness(
+        ready: snapshot.connectionState != ConnectionState.waiting &&
+            !snapshot.hasError,
+        child: Builder(builder: (context) {
+          if (snapshot.hasError) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text('Could not load announcements: ${snapshot.error}'),
+              ),
+            );
+          }
+
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          final announcements = snapshot.data ?? const [];
+          if (announcements.isEmpty) {
+            return const _EmptyAnnouncements();
+          }
+
+          return RefreshIndicator(
+            onRefresh: () async {
+              await service.fetchAnnouncements(churchId);
+            },
+            child: ListView.separated(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
+              itemCount: announcements.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 12),
+              itemBuilder: (context, index) {
+                return _AnnouncementCard(announcement: announcements[index]);
+              },
             ),
           );
-        }
-
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-
-        final announcements = snapshot.data ?? const [];
-        if (announcements.isEmpty) {
-          return const _EmptyAnnouncements();
-        }
-
-        return RefreshIndicator(
-          onRefresh: () async {
-            await service.fetchAnnouncements(churchId);
-          },
-          child: ListView.separated(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
-            itemCount: announcements.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 12),
-            itemBuilder: (context, index) {
-              return _AnnouncementCard(announcement: announcements[index]);
-            },
-          ),
-        );
-      },
+        }),
+      ),
     );
   }
 }

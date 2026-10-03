@@ -65,6 +65,10 @@ verify_jwt = false
 [functions.generate-daily-bible-quiz]
 verify_jwt = false
 
+# Private cron-secret authentication is enforced inside the worker.
+[functions.prepare-monthly-daily-content]
+verify_jwt = false
+
 [functions.cleanup-daily-bible-quiz-attempts]
 verify_jwt = false
 

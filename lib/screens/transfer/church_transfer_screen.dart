@@ -1,3 +1,4 @@
+import 'package:grace_connect/tutorial/tutorial_anchor.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:timeago/timeago.dart' as timeago;
@@ -361,6 +362,8 @@ class _ChurchTransferScreenState extends State<ChurchTransferScreen> {
     final canManage = _transferService.canManageTransfers(user);
 
     return AppScaffold(
+      tutorialId: 'church_transfer',
+      tutorialReady: user != null,
       title: 'Church Transfer',
       floatingActionButton: user == null
           ? null
@@ -429,81 +432,88 @@ class _TransferList extends StatelessWidget {
   Widget build(BuildContext context) {
     return StreamBuilder<List<ChurchTransferRequest>>(
       stream: stream,
-      builder: (context, snapshot) {
-        if (snapshot.hasError) {
-          return Center(
-              child: Text('Could not load requests: ${snapshot.error}'));
-        }
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        final requests = snapshot.data ?? const <ChurchTransferRequest>[];
-        if (requests.isEmpty) {
-          return Center(child: Text(emptyText));
-        }
-        return ListView.separated(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
-          itemCount: requests.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 12),
-          itemBuilder: (context, index) {
-            final request = requests[index];
-            final incoming = request.targetChurchId == currentChurchId;
-            return AppCard(
-              onTap: onTap == null ? null : () => onTap!(request),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(
-                        incoming
-                            ? Icons.call_received_outlined
-                            : Icons.call_made_outlined,
-                        color: Theme.of(context).colorScheme.primary,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          request.userName,
-                          style:
-                              Theme.of(context).textTheme.titleMedium?.copyWith(
-                                    fontWeight: FontWeight.w800,
-                                  ),
+      builder: (context, snapshot) => TutorialReadiness(
+        ready: snapshot.connectionState != ConnectionState.waiting &&
+            !snapshot.hasError,
+        child: Builder(builder: (context) {
+          if (snapshot.hasError) {
+            return Center(
+                child: Text('Could not load requests: ${snapshot.error}'));
+          }
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final requests = snapshot.data ?? const <ChurchTransferRequest>[];
+          if (requests.isEmpty) {
+            return Center(child: Text(emptyText));
+          }
+          return ListView.separated(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
+            itemCount: requests.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 12),
+            itemBuilder: (context, index) {
+              final request = requests[index];
+              final incoming = request.targetChurchId == currentChurchId;
+              return AppCard(
+                onTap: onTap == null ? null : () => onTap!(request),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          incoming
+                              ? Icons.call_received_outlined
+                              : Icons.call_made_outlined,
+                          color: Theme.of(context).colorScheme.primary,
                         ),
-                      ),
-                      Chip(label: Text(request.statusLabel)),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            request.userName,
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleMedium
+                                ?.copyWith(
+                                  fontWeight: FontWeight.w800,
+                                ),
+                          ),
+                        ),
+                        Chip(label: Text(request.statusLabel)),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                        '${request.currentChurchName} -> ${request.targetChurchName}'),
+                    const SizedBox(height: 6),
+                    Text(
+                      request.reason,
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    if (request.pastorNotes.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text('Pastor: ${request.pastorNotes}'),
                     ],
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                      '${request.currentChurchName} -> ${request.targetChurchName}'),
-                  const SizedBox(height: 6),
-                  Text(
-                    request.reason,
-                    maxLines: 3,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  if (request.pastorNotes.isNotEmpty) ...[
+                    if (request.targetPastorNotes.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text('Receiving pastor: ${request.targetPastorNotes}'),
+                    ],
                     const SizedBox(height: 8),
-                    Text('Pastor: ${request.pastorNotes}'),
+                    Text(
+                      timeago.format(request.updatedAt),
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color:
+                                Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                    ),
                   ],
-                  if (request.targetPastorNotes.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    Text('Receiving pastor: ${request.targetPastorNotes}'),
-                  ],
-                  const SizedBox(height: 8),
-                  Text(
-                    timeago.format(request.updatedAt),
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
+                ),
+              );
+            },
+          );
+        }),
+      ),
     );
   }
 }

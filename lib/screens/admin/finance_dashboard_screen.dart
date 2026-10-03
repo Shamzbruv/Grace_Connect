@@ -1,3 +1,4 @@
+import 'package:grace_connect/tutorial/tutorial_anchor.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
@@ -38,7 +39,8 @@ class _FinanceDashboardScreenState extends State<FinanceDashboardScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text('Church Finances',
-            style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+                style: GoogleFonts.poppins(fontWeight: FontWeight.bold))
+            .tutorial('finance.overview'),
         backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
       ),
       floatingActionButton: userProfile!.capabilities.canManageFinance
@@ -56,60 +58,64 @@ class _FinanceDashboardScreenState extends State<FinanceDashboardScreen> {
             // Month Summary
             FutureBuilder<Map<String, double>>(
               future: _financeService.getMonthlySummary(churchId),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const SizedBox(
-                      height: 150,
-                      child: Center(child: CircularProgressIndicator()));
-                }
+              builder: (context, snapshot) => TutorialReadiness(
+                ready: snapshot.connectionState != ConnectionState.waiting &&
+                    !snapshot.hasError,
+                child: Builder(builder: (context) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const SizedBox(
+                        height: 150,
+                        child: Center(child: CircularProgressIndicator()));
+                  }
 
-                final data = snapshot.data ??
-                    {'income': 0.0, 'expense': 0.0, 'net': 0.0};
-                final income = data['income']!;
-                final expense = data['expense']!;
-                final net = data['net']!;
+                  final data = snapshot.data ??
+                      {'income': 0.0, 'expense': 0.0, 'net': 0.0};
+                  final income = data['income']!;
+                  final expense = data['expense']!;
+                  final net = data['net']!;
 
-                return Column(
-                  children: [
-                    _buildFinanceCard(
-                      context,
-                      title: 'This Month Income',
-                      amount: currencyFormat.format(income),
-                      trend: 'Income',
-                      color: Colors.green,
-                      icon: Icons.arrow_upward,
-                    ),
-                    const SizedBox(height: 16),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _buildFinanceCard(
-                            context,
-                            title: 'Expenses',
-                            amount: currencyFormat.format(expense),
-                            trend: 'Outflow',
-                            color: Colors.redAccent,
-                            isSmall: true,
-                            icon: Icons.arrow_downward,
+                  return Column(
+                    children: [
+                      _buildFinanceCard(
+                        context,
+                        title: 'This Month Income',
+                        amount: currencyFormat.format(income),
+                        trend: 'Income',
+                        color: Colors.green,
+                        icon: Icons.arrow_upward,
+                      ).tutorial('finance.tools'),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _buildFinanceCard(
+                              context,
+                              title: 'Expenses',
+                              amount: currencyFormat.format(expense),
+                              trend: 'Outflow',
+                              color: Colors.redAccent,
+                              isSmall: true,
+                              icon: Icons.arrow_downward,
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: _buildFinanceCard(
-                            context,
-                            title: 'Net Total',
-                            amount: currencyFormat.format(net),
-                            trend: net >= 0 ? 'Surplus' : 'Deficit',
-                            color: net >= 0 ? Colors.blue : Colors.orange,
-                            isSmall: true,
-                            icon: Icons.account_balance_wallet,
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: _buildFinanceCard(
+                              context,
+                              title: 'Net Total',
+                              amount: currencyFormat.format(net),
+                              trend: net >= 0 ? 'Surplus' : 'Deficit',
+                              color: net >= 0 ? Colors.blue : Colors.orange,
+                              isSmall: true,
+                              icon: Icons.account_balance_wallet,
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
-                  ],
-                );
-              },
+                        ],
+                      ),
+                    ],
+                  );
+                }),
+              ),
             ),
             const SizedBox(height: 24),
 
@@ -175,7 +181,7 @@ class _FinanceDashboardScreenState extends State<FinanceDashboardScreen> {
           ],
         ),
       ),
-    );
+    ).tutorialScreen('finance', ready: true);
   }
 
   Widget _buildFinanceCard(

@@ -1,3 +1,4 @@
+import 'package:grace_connect/tutorial/tutorial_anchor.dart';
 import 'package:flutter/material.dart';
 
 import '../../../access/app_access_context.dart';
@@ -58,7 +59,7 @@ class UnconnectedDashboard extends StatelessWidget {
             onPrimary: () => Navigator.of(context).pushNamed(
               hasInactiveSubscription ? '/church_transfer' : '/find_church',
             ),
-          ),
+          ).tutorial('dashboard.welcome'),
           const SizedBox(height: 18),
           Text(
             'Available Now',
@@ -77,7 +78,7 @@ class UnconnectedDashboard extends StatelessWidget {
               _QuickAction('Grace Rooms', '/grace_rooms', Icons.forum_outlined),
               _QuickAction('Saved', '/saved', Icons.bookmarks_outlined),
             ],
-          ),
+          ).tutorial('dashboard.actions'),
           const SizedBox(height: 18),
           _InfoList(
             title: 'Church membership unlocks',
@@ -89,7 +90,7 @@ class UnconnectedDashboard extends StatelessWidget {
           ),
         ],
       ),
-    );
+    ).tutorialScreen('dashboard.unconnected');
   }
 }
 

@@ -1,3 +1,4 @@
+import 'package:grace_connect/tutorial/tutorial_anchor.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../../theme/app_colors.dart';
@@ -18,7 +19,7 @@ class MemberDashboard extends StatelessWidget {
     return DashboardScaffold(
       title: 'Welcome Home',
       children: [
-        _buildNextServiceCard(context, churchId),
+        _buildNextServiceCard(context, churchId).tutorial('dashboard.church'),
         const SizedBox(height: 24),
         Text('Quick Access', style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 12),
@@ -46,14 +47,14 @@ class MemberDashboard extends StatelessWidget {
                 Icons.checklist_rtl_outlined,
                 () => Navigator.pushNamed(context, '/attendance')),
           ],
-        ),
+        ).tutorial('dashboard.actions'),
         const SizedBox(height: 24),
         ActionCard(
           title: 'Daily Word',
           description: 'Start today with encouragement and Scripture',
           icon: Icons.wb_sunny_outlined,
           onTap: () => Navigator.pushNamed(context, '/daily_word'),
-        ),
+        ).tutorial('dashboard.word'),
       ],
     );
   }
@@ -105,47 +106,51 @@ class MemberDashboard extends StatelessWidget {
 
     return StreamBuilder<List<ServiceSchedule>>(
       stream: ChurchService().getSchedules(churchId),
-      builder: (context, snapshot) {
-        final schedules = snapshot.data ?? const <ServiceSchedule>[];
-        final next = _nextServiceFromSchedules(schedules);
+      builder: (context, snapshot) => TutorialReadiness(
+        ready: snapshot.connectionState != ConnectionState.waiting &&
+            !snapshot.hasError,
+        child: Builder(builder: (context) {
+          final schedules = snapshot.data ?? const <ServiceSchedule>[];
+          final next = _nextServiceFromSchedules(schedules);
 
-        if (snapshot.connectionState == ConnectionState.waiting &&
-            schedules.isEmpty) {
-          return const _NextServiceCard(
-            title: 'Loading next service...',
-            subtitle: 'Checking your church service schedule',
-            isLoading: true,
-          );
-        }
+          if (snapshot.connectionState == ConnectionState.waiting &&
+              schedules.isEmpty) {
+            return const _NextServiceCard(
+              title: 'Loading next service...',
+              subtitle: 'Checking your church service schedule',
+              isLoading: true,
+            );
+          }
 
-        if (snapshot.hasError && schedules.isEmpty) {
+          if (snapshot.hasError && schedules.isEmpty) {
+            return _NextServiceCard(
+              title: 'Next service unavailable',
+              subtitle: 'Could not load the church schedule right now.',
+              buttonLabel: 'View Events',
+              onPressed: () => Navigator.pushNamed(context, '/events'),
+            );
+          }
+
+          if (next == null) {
+            return _NextServiceCard(
+              title: 'No upcoming service',
+              subtitle: 'No recurring service schedule has been published yet.',
+              buttonLabel: 'View Events',
+              onPressed: () => Navigator.pushNamed(context, '/events'),
+            );
+          }
+
           return _NextServiceCard(
-            title: 'Next service unavailable',
-            subtitle: 'Could not load the church schedule right now.',
-            buttonLabel: 'View Events',
-            onPressed: () => Navigator.pushNamed(context, '/events'),
+            title: next.schedule.name.isEmpty
+                ? 'Church Service'
+                : next.schedule.name,
+            subtitle:
+                '${_formatServiceDate(next.startsAt)} • ${_formatServiceTimeRange(next.schedule)}',
+            buttonLabel: 'Watch Live',
+            onPressed: () => Navigator.pushNamed(context, '/live_streaming'),
           );
-        }
-
-        if (next == null) {
-          return _NextServiceCard(
-            title: 'No upcoming service',
-            subtitle: 'No recurring service schedule has been published yet.',
-            buttonLabel: 'View Events',
-            onPressed: () => Navigator.pushNamed(context, '/events'),
-          );
-        }
-
-        return _NextServiceCard(
-          title: next.schedule.name.isEmpty
-              ? 'Church Service'
-              : next.schedule.name,
-          subtitle:
-              '${_formatServiceDate(next.startsAt)} • ${_formatServiceTimeRange(next.schedule)}',
-          buttonLabel: 'Watch Live',
-          onPressed: () => Navigator.pushNamed(context, '/live_streaming'),
-        );
-      },
+        }),
+      ),
     );
   }
 

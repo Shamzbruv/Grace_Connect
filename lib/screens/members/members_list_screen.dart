@@ -1,3 +1,4 @@
+import 'package:grace_connect/tutorial/tutorial_anchor.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -1028,7 +1029,7 @@ class _MembersListScreenState extends State<MembersListScreen> {
                             color: Colors.white,
                             fontSize: 24,
                             fontWeight: FontWeight.bold),
-                      ),
+                      ).tutorial('members.overview'),
                     ),
                   ],
                 ),
@@ -1062,7 +1063,7 @@ class _MembersListScreenState extends State<MembersListScreen> {
                       },
                     ),
                   ),
-                ),
+                ).tutorial('members.tools'),
               ],
             ),
           ),
@@ -1292,6 +1293,6 @@ class _MembersListScreenState extends State<MembersListScreen> {
           ),
         ],
       ),
-    );
+    ).tutorialScreen('members', ready: !_isLoading);
   }
 }

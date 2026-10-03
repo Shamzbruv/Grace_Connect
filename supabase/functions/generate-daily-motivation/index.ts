@@ -197,7 +197,7 @@ Chapter: ${chapter.book} ${chapter.chapter}
 Chapter text:
 ${chapter.text}
 
-Write a warm, original 35-70 word reflection for a broad Christian audience. Accurately summarize or apply a distinct idea from this chapter in natural English suitable for a Jamaican church audience. Choose one accurate verse or verse range from this same chapter as scripture_reference. This is generation variation ${attempt}; use different imagery, structure, title, and application from prior content.
+Write a warm, original 35-70 word reflection for a worldwide Christian audience, including people who have not joined a church. Accurately summarize or apply a distinct idea from this chapter in clear, natural English without assuming a nationality or culture. The reflection is original encouragement inspired by Scripture, not a verbatim Bible quotation. Choose one accurate verse or verse range from this same chapter as scripture_reference. This is generation variation ${attempt}; use different imagery, structure, title, and application from prior content.
 Do not copy or closely paraphrase prior Daily Words below, and do not recycle generic encouragement wording:
 ${recentExamples || "No prior Daily Words."}
 Do not make medical, legal, financial, personal-prophecy, or prosperity claims. Do not quote a copyrighted translation.
@@ -287,6 +287,19 @@ Deno.serve(async (request) => {
 
   const today = jamaicaDateString();
   let publishDate = preparing ? dateOffset(today, 1) : today;
+  if (preparing && cronAuthorized && requestBody.publish_date != null) {
+    const date = String(requestBody.publish_date);
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(date) || date <= today ||
+      date > dateOffset(today, 62) || Number.isNaN(Date.parse(date)) ||
+      new Date(date).toISOString().slice(0, 10) !== date
+    ) {
+      return jsonResponse({
+        error: "Choose a valid future preparation date within 62 days.",
+      }, 400);
+    }
+    publishDate = date;
+  }
   let existingResult;
   if (regenerating) {
     const motivationId = String(requestBody.motivation_id ?? "").trim();

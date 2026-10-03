@@ -1,3 +1,4 @@
+import 'package:grace_connect/tutorial/tutorial_anchor.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -82,21 +83,21 @@ class _PastorDashboardState extends State<PastorDashboard> {
           description: 'Create and review church-wide announcements',
           icon: Icons.campaign_outlined,
           onTap: () => Navigator.pushNamed(context, '/announcements'),
-        ),
+        ).tutorial('dashboard.actions'),
         const SizedBox(height: 12),
         ActionCard(
           title: 'Prayer Requests',
           description: 'Review and respond to prayer needs',
           icon: Icons.volunteer_activism_outlined,
           onTap: () => Navigator.pushNamed(context, '/prayers'),
-        ),
+        ).tutorial('dashboard.care'),
         const SizedBox(height: 12),
         ActionCard(
           title: 'Service Schedules',
           description: 'Set recurring services for auto-attendance',
           icon: Icons.event_available_outlined,
           onTap: () => Navigator.pushNamed(context, '/schedule_management'),
-        ),
+        ).tutorial('dashboard.church'),
         const SizedBox(height: 12),
         ActionCard(
           title: 'Attendance Alerts',

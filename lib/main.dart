@@ -86,12 +86,23 @@ import 'screens/grace_rooms/grace_room_chat_screen.dart';
 import 'services/analytics_service.dart';
 import 'widgets/auth_required.dart';
 import 'widgets/live_mini_player_overlay.dart';
+import 'tutorial/tutorial_controller.dart';
+import 'tutorial/tutorial_runtime.dart';
+import 'tutorial/tutorial_service.dart';
+import 'tutorial/tutorial_host.dart';
+import 'tutorial/tutorial_session.dart';
+import 'tutorial/tutorial_preview.dart';
+import 'experience/app_experience_controller.dart';
+import 'experience/app_experience_service.dart';
+import 'experience/app_experience_host.dart';
 
 /// Resolved once. Rebuilding this list would make Navigator re-attach its
 /// observers on every frame that rebuilds MaterialApp.
 final List<NavigatorObserver> _navigatorObservers = [
   if (Analytics.observer != null) Analytics.observer!,
+  TutorialNavigationObserver(_tutorialRuntime),
 ];
+final TutorialRuntime _tutorialRuntime = TutorialRuntime();
 
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -146,6 +157,16 @@ Future<void> main() async {
       providers: [
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
         ChangeNotifierProvider(create: (_) => UserRoleProvider()),
+        ChangeNotifierProvider(
+            create: (_) => AppExperienceController(
+                backend: AppExperienceService(Supabase.instance.client),
+                platform: defaultTargetPlatform == TargetPlatform.iOS
+                    ? 'ios'
+                    : 'android')),
+        ChangeNotifierProvider(
+            create: (_) => TutorialController(
+                service: TutorialService(Supabase.instance.client))),
+        ChangeNotifierProvider<TutorialRuntime>.value(value: _tutorialRuntime),
       ],
       child: const MyApp(),
     ),
@@ -289,14 +310,19 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
             // tracking does not depend on remembering to instrument each
             // new screen by hand.
             navigatorObservers: _navigatorObservers,
-            builder: (context, child) => LiveMiniPlayerOverlay(
+            builder: (context, child) => TutorialSession(
+                child: TutorialHost(
+                    child: AppExperienceHost(
+                        child: LiveMiniPlayerOverlay(
               child: child ?? const SizedBox.shrink(),
-            ),
+            )))),
             theme: AppTheme.lightTheme,
             darkTheme: AppTheme.darkTheme,
             themeMode: themeProvider.themeMode,
             home: const AuthWrapper(),
             routes: {
+              if (kDebugMode)
+                '/tutorial-preview': (_) => const TutorialPreview(),
               '/login': (context) => const LoginScreen(),
               '/auth/callback': (context) => const AuthCallbackScreen(),
               '/forgot_password': (context) => const ForgotPasswordScreen(),

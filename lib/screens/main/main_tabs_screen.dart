@@ -16,6 +16,9 @@ import '../community/feed_hub_screen.dart';
 import '../dashboard/dashboard_screen.dart';
 import '../dashboard/variants/unconnected_dashboard.dart';
 import '../events/events_screen.dart';
+import '../../tutorial/tutorial_anchor.dart';
+import '../../tutorial/tutorial_controller.dart';
+import '../../tutorial/tutorial_screen_scope.dart';
 
 class MainTabsScreen extends StatefulWidget {
   const MainTabsScreen({
@@ -151,6 +154,7 @@ class _MainTabsScreenState extends State<MainTabsScreen> {
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
+        if (context.read<TutorialController?>()?.overlayVisible == true) return;
         if (didPop || _currentIndex == 0) return;
         _setTab(0);
       },
@@ -171,22 +175,34 @@ class _MainTabsScreenState extends State<MainTabsScreen> {
               _trackTab();
             },
             children: [
-              FeedHubScreen(
-                controller: _feedHub,
-                isActive: _currentIndex == 0,
-                showFindChurchAction: widget.showFindChurchAction,
-              ),
-              const EventsScreen(showBottomMenu: false),
-              access == null || access.hasActiveChurchSubscription
-                  ? const DashboardScreen()
-                  : UnconnectedDashboard(access: access),
-              BibleHomeScreen(
-                showBottomNavigation: false,
-                allowDailyQuiz: true,
-              ),
-              _MoreTabScreen(
-                access: access,
-              ),
+              TutorialVisibility(
+                  visible: _currentIndex == 0,
+                  child: FeedHubScreen(
+                    controller: _feedHub,
+                    isActive: _currentIndex == 0,
+                    showFindChurchAction: widget.showFindChurchAction,
+                  )),
+              TutorialVisibility(
+                  visible: _currentIndex == 1,
+                  child: const EventsScreen(showBottomMenu: false)),
+              TutorialVisibility(
+                  visible: _currentIndex == 2,
+                  child: access == null || access.hasActiveChurchSubscription
+                      ? const DashboardScreen()
+                      : UnconnectedDashboard(access: access)),
+              TutorialVisibility(
+                  visible: _currentIndex == 3,
+                  child: BibleHomeScreen(
+                    showBottomNavigation: false,
+                    allowDailyQuiz: true,
+                  )),
+              TutorialVisibility(
+                  visible: _currentIndex == 4,
+                  child: TutorialScreenScope(
+                      screenId: 'more',
+                      child: _MoreTabScreen(
+                        access: access,
+                      ))),
             ],
           ),
         ),
@@ -388,14 +404,16 @@ class _MoreTabScreen extends StatelessWidget {
             'More',
             style: theme.textTheme.headlineSmall
                 ?.copyWith(fontWeight: FontWeight.w800),
-          ),
+          ).tutorial('more.features'),
           const SizedBox(height: 16),
           for (final action in actions) ...[
             _MoreActionTile(
               action: action,
               locked: access != null && !access!.canUse(action.feature),
               lockedMessage: access?.unavailableMessageFor(action.feature),
-            ),
+            ).tutorial(action.route == '/settings'
+                ? 'more.settings'
+                : 'more.action.${action.route}'),
             const SizedBox(height: 8),
           ],
           const SizedBox(height: 20),
