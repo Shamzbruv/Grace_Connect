@@ -5,6 +5,7 @@ import {
   serviceClient,
 } from "../_shared/grace.ts";
 import { isChapterStudyDate } from "../_shared/bible_chapters.ts";
+import { contentBatchFailure } from "../_shared/content_batch_errors.ts";
 
 Deno.serve(async (request) => {
   const options = handleOptions(request);
@@ -43,7 +44,7 @@ Deno.serve(async (request) => {
     if (
       !response.ok || !result || result.error || result.failed_churches > 0 ||
       result.preparing
-    ) throw new Error(`${name} did not complete. Check its generation run.`);
+    ) throw new Error(contentBatchFailure(name, result?.error));
   };
   try {
     // Chapter-linked quizzes keep the reviewed Daily Word chapter contract.
@@ -71,6 +72,7 @@ Deno.serve(async (request) => {
     if (finished) throw new Error("Completion could not be recorded.");
     return jsonResponse({
       prepared: job.content_date,
+      stage: job.stage,
       chapter_study: isChapterStudyDate(job.content_date),
     });
   } catch (error) {

@@ -16,6 +16,7 @@ import {
   userProfile,
 } from "../_shared/grace.ts";
 import { fallbackQuizQuestions, QuizQuestion } from "../_shared/quiz_bank.ts";
+import { contentQuotaExhausted } from "../_shared/content_batch_errors.ts";
 import {
   canonicalQuizFactKeys,
   rotatingQuizFactExclusions,
@@ -1111,6 +1112,7 @@ Return valid JSON only in this shape:
             : ([] as QuizQuestion[]);
           let targetedError: unknown = initialError;
           for (let batch = 1; batch <= 3; batch++) {
+            if (contentQuotaExhausted(lastAiDiagnostic)) break;
             const targeted = await targetedAiResponse(blockedFactKeys, batch);
             if (Array.isArray((targeted as AiQuizResponse | null)?.questions)) {
               accumulated.push(

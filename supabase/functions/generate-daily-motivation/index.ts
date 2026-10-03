@@ -25,6 +25,7 @@ import {
   isChapterStudyDate,
   shuffledBibleChapters,
 } from "../_shared/bible_chapters.ts";
+import { contentQuotaExhausted } from "../_shared/content_batch_errors.ts";
 
 type DailyMotivationAiResponse = {
   title?: string;
@@ -220,6 +221,7 @@ async function generateFreshDailyWord(
         1000,
       );
       if (diagnostic) lastDiagnostic = diagnostic;
+      if (contentQuotaExhausted(diagnostic)) break;
       const validated = validateMotivation(value, chapter, history);
       if (validated) return validated;
     } catch (_) {

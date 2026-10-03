@@ -23,48 +23,63 @@ class TutorialTooltip extends StatelessWidget {
           shadowColor: Colors.black45,
           borderRadius: BorderRadius.circular(18),
           clipBehavior: Clip.antiAlias,
-          child: SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Expanded(
-                        child: Text(step.title,
-                            style: theme.textTheme.titleMedium
-                                ?.copyWith(fontWeight: FontWeight.w700))),
-                    IconButton(
-                        key: const ValueKey('tutorial-close'),
-                        onPressed: controller.showLeaveMenu,
-                        icon: const Icon(Icons.close,
-                            semanticLabel: 'Leave this guide'),
-                        visualDensity: VisualDensity.compact),
-                  ]),
-                  const SizedBox(height: 4),
-                  Text(step.message,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant)),
-                  const SizedBox(height: 14),
-                  Semantics(
-                      label: 'Step $counter',
-                      child: Text(counter, style: theme.textTheme.labelMedium)),
-                  const SizedBox(height: 8),
-                  Wrap(
-                      alignment: WrapAlignment.end,
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        if (controller.activeStepIndex > 0)
-                          TextButton(
-                              onPressed: controller.previous,
-                              child: const Text('Back')),
-                        FilledButton(
-                            onPressed: controller.next,
-                            child: Text(last ? 'Got it' : 'Next')),
-                      ]),
-                ],
-              )),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Flexible(
+              fit: FlexFit.loose,
+              child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                                child: Text(step.title,
+                                    style: theme.textTheme.titleMedium
+                                        ?.copyWith(
+                                            fontWeight: FontWeight.w700))),
+                            IconButton(
+                                key: const ValueKey('tutorial-close'),
+                                onPressed: controller.showLeaveMenu,
+                                icon: const Icon(Icons.close,
+                                    semanticLabel: 'Leave this guide'),
+                                visualDensity: VisualDensity.compact),
+                          ]),
+                      const SizedBox(height: 4),
+                      Text(step.message,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant)),
+                    ],
+                  )),
+            ),
+            Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Semantics(
+                          label: 'Step $counter',
+                          child: Text(counter,
+                              style: theme.textTheme.labelMedium)),
+                      const SizedBox(height: 8),
+                      Wrap(
+                          alignment: WrapAlignment.end,
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            if (controller.activeStepIndex > 0)
+                              TextButton(
+                                  onPressed: controller.previous,
+                                  child: const Text('Back')),
+                            FilledButton(
+                                onPressed: controller.next,
+                                child: Text(last ? 'Got it' : 'Next')),
+                          ]),
+                    ])),
+          ]),
         ));
   }
 }

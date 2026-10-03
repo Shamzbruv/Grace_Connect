@@ -28,7 +28,9 @@ quizzes keep the Daily Word's chapter; existing published quizzes and scores are
 rewritten. Member requests never spend AI capacity. A monthly queue prepares daily
 content ahead of time, and normal daily release publishes the prepared records.
 Next month is queued on the 25th. One stage runs per worker invocation; failures
-back off for six hours, stop after three attempts and can be retried from the portal.
+back off for six hours, stop after three content failures and can be retried from the
+portal. Provider quota exhaustion pauses all pending dates for 24 hours and does not
+consume a content retry. The worker resumes automatically after that cooldown.
 Provider availability and credits can delay preparation; the system does not claim
 to bypass external AI quotas. Daily Word wording now explicitly addresses a global
 audience and distinguishes original reflection from a Bible quotation.

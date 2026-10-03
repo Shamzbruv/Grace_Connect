@@ -34,12 +34,16 @@ class TutorialOverlay extends StatelessWidget {
               final above = cutout.top - safe.top - 12;
               final useBelow = below >= above;
               final room = math.max(below, above);
-              final fallback = room < 150;
+              final comfortableHeight =
+                  210 * media.textScaler.scale(1).clamp(1.0, 2.0);
+              final fallback = room < comfortableHeight;
               final width = math.min(340.0, safe.width);
               final left = (target.center.dx - width / 2)
                   .clamp(safe.left, safe.right - width);
-              final height =
-                  fallback ? safe.height * .58 : math.min(room, safe.height);
+              final height = fallback
+                  ? math.min(safe.height,
+                      math.max(safe.height * .65, comfortableHeight))
+                  : math.min(room, safe.height);
               final reducedMotion = media.disableAnimations;
               return Stack(children: [
                 // The cutout is visual, never a hole in pointer protection.

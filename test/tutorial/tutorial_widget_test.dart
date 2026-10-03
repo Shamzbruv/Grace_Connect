@@ -87,6 +87,35 @@ Widget navigationPage(String screen) => TutorialScreenScope(
                 TutorialRegistry.definitions[screen]!.steps.first.targetId))));
 
 void main() {
+  for (final size in [const Size(320, 568), const Size(568, 320)]) {
+    testWidgets('large-text guide controls stay visible at $size', (t) async {
+      t.view.physicalSize = size;
+      t.view.devicePixelRatio = 1;
+      addTearDown(t.view.resetPhysicalSize);
+      addTearDown(t.view.resetDevicePixelRatio);
+      final h = await mount(
+          t,
+          TutorialScreenScope(
+              screenId: 'community_feed',
+              child: Scaffold(
+                  body: Center(
+                      child: SizedBox(
+                          height: size.height * .65,
+                          width: 280,
+                          child: const Text('A large community control')
+                              .tutorial('community.scope'))))),
+          scale: 2);
+      final done = find.widgetWithText(FilledButton, 'Got it');
+      expect(done, findsOneWidget);
+      final rect = t.getRect(done);
+      expect(rect.top, greaterThanOrEqualTo(0));
+      expect(rect.bottom, lessThanOrEqualTo(size.height));
+      expect(t.takeException(), isNull);
+      await t.tap(done);
+      await settleGuide(t);
+      expect(h.c.isSeen('community_feed', 1), true);
+    });
+  }
   testWidgets('PageView and Feed/Reels modes learn independently', (t) async {
     final pager = PageController();
     final selected = ValueNotifier(0), mode = ValueNotifier(0);
