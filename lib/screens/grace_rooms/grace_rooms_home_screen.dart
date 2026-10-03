@@ -1,3 +1,4 @@
+import 'package:grace_connect/tutorial/tutorial_anchor.dart';
 import 'package:flutter/material.dart';
 
 import '../../services/grace_rooms_service.dart';
@@ -29,6 +30,7 @@ class _GraceRoomsHomeScreenState extends State<GraceRoomsHomeScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return AppScaffold(
+      tutorialId: 'grace_rooms',
       title: 'Grace Rooms',
       showBottomMenu: true,
       body: DecoratedBox(
@@ -46,40 +48,46 @@ class _GraceRoomsHomeScreenState extends State<GraceRoomsHomeScreen> {
         child: StreamBuilder<List<GraceRoom>>(
           stream: _roomsStream,
           initialData: GraceRoomsService.permanentRooms,
-          builder: (context, snapshot) {
-            final loading = snapshot.connectionState == ConnectionState.waiting;
-            final rooms = (snapshot.data?.isNotEmpty == true
-                    ? snapshot.data!
-                    : GraceRoomsService.permanentRooms)
-                .toList()
-              ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+          builder: (context, snapshot) => TutorialReadiness(
+            ready: snapshot.connectionState != ConnectionState.waiting &&
+                !snapshot.hasError,
+            child: Builder(builder: (context) {
+              final loading =
+                  snapshot.connectionState == ConnectionState.waiting;
+              final rooms = (snapshot.data?.isNotEmpty == true
+                      ? snapshot.data!
+                      : GraceRoomsService.permanentRooms)
+                  .toList()
+                ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
 
-            return RefreshIndicator(
-              onRefresh: () async {
-                _refresh();
-                await _service.fetchRooms();
-              },
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
-                children: [
-                  _GraceRoomsHeader(
-                    roomCount: rooms.length,
-                    loading: loading,
-                  ),
-                  const SizedBox(height: 16),
-                  for (final room in rooms) ...[
-                    _GraceRoomCard(
-                      room: room,
-                      onTap: () => Navigator.of(context).pushNamed(
-                        '/grace_rooms/room?id=${Uri.encodeComponent(room.id)}',
-                      ),
+              return RefreshIndicator(
+                onRefresh: () async {
+                  _refresh();
+                  await _service.fetchRooms();
+                },
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
+                  children: [
+                    _GraceRoomsHeader(
+                      roomCount: rooms.length,
+                      loading: loading,
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 16),
+                    for (final room in rooms) ...[
+                      _GraceRoomCard(
+                        room: room,
+                        onTap: () => Navigator.of(context).pushNamed(
+                          '/grace_rooms/room?id=${Uri.encodeComponent(room.id)}',
+                        ),
+                      ).tutorial('grace_rooms.tools',
+                          enabled: room.id == rooms.first.id),
+                      const SizedBox(height: 12),
+                    ],
                   ],
-                ],
-              ),
-            );
-          },
+                ),
+              );
+            }),
+          ),
         ),
       ),
     );

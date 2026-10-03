@@ -1,3 +1,4 @@
+import 'package:grace_connect/tutorial/tutorial_anchor.dart';
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
@@ -28,6 +29,8 @@ class SettingsHomeScreen extends StatelessWidget {
     final ministryAccessFuture = MinistryService().managesAnyMinistry();
 
     return AppScaffold(
+      tutorialId: 'settings',
+      tutorialReady: !roleProvider.isLoading,
       title: 'Settings',
       withBackground: true,
       body: SingleChildScrollView(
@@ -56,11 +59,12 @@ class SettingsHomeScreen extends StatelessWidget {
                       '/settings/notifications'),
                   const Divider(height: 1),
                   _buildSettingsTile(
-                      context,
-                      Icons.devices_other,
-                      'Devices & App',
-                      'Theme, Data usage',
-                      '/settings/app_config'),
+                          context,
+                          Icons.devices_other,
+                          'Devices & App',
+                          'Theme, Data usage',
+                          '/settings/app_config')
+                      .tutorial('settings.tools'),
                 ],
               ),
             ),
@@ -156,8 +160,11 @@ class SettingsHomeScreen extends StatelessWidget {
                   _buildSettingsTile(context, Icons.help_outline,
                       'Help & Support', 'Tickets, Contact', '/support'),
                   const Divider(height: 1),
-                  _buildSettingsTile(context, Icons.feedback_outlined,
-                      'Send Feedback', 'Report a problem or suggest an idea',
+                  _buildSettingsTile(
+                      context,
+                      Icons.feedback_outlined,
+                      'Send Feedback',
+                      'Report a problem or suggest an idea',
                       '/settings/feedback'),
                 ],
               ),

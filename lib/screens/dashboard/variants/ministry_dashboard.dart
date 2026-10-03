@@ -1,3 +1,4 @@
+import 'package:grace_connect/tutorial/tutorial_anchor.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../models/ministry.dart';
@@ -82,7 +83,7 @@ class MinistryDashboard extends StatelessWidget {
                   description: 'View ministries and manager assignments',
                   icon: Icons.groups_outlined,
                   onTap: () => Navigator.pushNamed(context, '/ministries'),
-                ),
+                ).tutorial('dashboard.actions'),
                 if (canPublishAnnouncement) ...[
                   const SizedBox(height: 12),
                   ActionCard(
@@ -109,7 +110,9 @@ class MinistryDashboard extends StatelessWidget {
                   onTap: () => Navigator.pushNamed(context, '/events'),
                 ),
               ],
-            );
+            ).tutorialReady(
+                snapshot.connectionState != ConnectionState.waiting &&
+                    !snapshot.hasError);
           },
         ),
       ],

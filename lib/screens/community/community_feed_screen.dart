@@ -1,3 +1,4 @@
+import 'package:grace_connect/tutorial/tutorial_anchor.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -128,7 +129,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state != AppLifecycleState.resumed || !mounted) return;
+    if (state != AppLifecycleState.resumed || !mounted) { return; }
 
     _communityService.cleanupExpiredStories();
     _communityService.cleanupVanishingContent();
@@ -141,7 +142,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
 
   Future<void> _loadCommunityPreferences() async {
     final prefs = await SharedPreferences.getInstance();
-    if (!mounted) return;
+    if (!mounted) { return; }
     final dataSaver = prefs.getBool('data_saver') ?? false;
     final uid = _auth.currentUser?.id ?? 'guest';
     final savedScope = prefs.getString('community_feed_scope_$uid');
@@ -207,7 +208,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
   }
 
   void _scrollToTop() {
-    if (!_feedScrollController.hasClients) return;
+    if (!_feedScrollController.hasClients) { return; }
     _feedScrollController.animateTo(
       0,
       duration: const Duration(milliseconds: 420),
@@ -226,7 +227,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
         });
       }
       _scrollIdleTimer = Timer(const Duration(milliseconds: 420), () {
-        if (!mounted) return;
+        if (!mounted) { return; }
         setState(() => _showFloatingCompose = true);
       });
     }
@@ -236,7 +237,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
   Future<void> _loadWatchedStories() async {
     final prefs = await SharedPreferences.getInstance();
     final uid = _auth.currentUser?.id ?? 'guest';
-    if (!mounted) return;
+    if (!mounted) { return; }
     setState(() {
       _watchedStoryIds =
           (prefs.getStringList('watched_status_ids_$uid') ?? const []).toSet();
@@ -246,7 +247,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
   Future<void> _loadBlockedUsers() async {
     try {
       final blockedUserIds = await _moderationService.blockedUserIds();
-      if (!mounted) return;
+      if (!mounted) { return; }
       setState(() => _blockedUserIds = blockedUserIds);
     } catch (_) {
       if (mounted) setState(() => _blockedUserIds = {});
@@ -254,13 +255,13 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
   }
 
   Future<void> _markStoryWatched(CommunityStory story) async {
-    if (story.id.isEmpty || _watchedStoryIds.contains(story.id)) return;
+    if (story.id.isEmpty || _watchedStoryIds.contains(story.id)) { return; }
 
     final uid = _auth.currentUser?.id ?? 'guest';
     final nextWatched = {..._watchedStoryIds, story.id};
     final prefs = await SharedPreferences.getInstance();
     await prefs.setStringList('watched_status_ids_$uid', nextWatched.toList());
-    if (!mounted) return;
+    if (!mounted) { return; }
     setState(() => _watchedStoryIds = nextWatched);
   }
 
@@ -280,7 +281,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
       final previewBytes = await image.readAsBytes();
       final aspectRatio = await imageAspectRatioFromBytes(previewBytes);
       final recommendation = recommendMediaDisplayFormat(aspectRatio);
-      if (!mounted) return;
+      if (!mounted) { return; }
       setState(() {
         _selectedMedia = image;
         _selectedImagePreviewBytes = previewBytes;
@@ -318,7 +319,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
           return;
         }
 
-        if (!mounted) return;
+        if (!mounted) { return; }
         setState(() {
           _selectedMedia = video;
           _selectedImagePreviewBytes = null;
@@ -370,11 +371,11 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
               maxHeight: 2160,
               imageQuality: 88,
             );
-            if (image == null) return;
+            if (image == null) { return; }
             final bytes = await image.readAsBytes();
             final aspectRatio = await imageAspectRatioFromBytes(bytes);
             final recommendation = recommendMediaDisplayFormat(aspectRatio);
-            if (!sheetContext.mounted) return;
+            if (!sheetContext.mounted) { return; }
             setSheetState(() {
               selectedStoryMedia = image;
               selectedStoryPreviewBytes = bytes;
@@ -389,7 +390,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
           Future<void> pickStoryVideo() async {
             final picker = ImagePicker();
             final video = await picker.pickVideo(source: ImageSource.gallery);
-            if (video == null) return;
+            if (video == null) { return; }
 
             if (sheetContext.mounted) {
               setSheetState(() => isInspectingStoryMedia = true);
@@ -410,7 +411,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                 return;
               }
 
-              if (!sheetContext.mounted) return;
+              if (!sheetContext.mounted) { return; }
               setSheetState(() {
                 selectedStoryMedia = video;
                 selectedStoryPreviewBytes = null;
@@ -634,9 +635,9 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
     required Uint8List? videoThumbnailBytes,
     required bool visibleToAllChurches,
   }) async {
-    if (_isPostingStory) return false;
+    if (_isPostingStory) { return false; }
     final cleanCaption = caption.trim();
-    if (cleanCaption.isEmpty && media == null) return false;
+    if (cleanCaption.isEmpty && media == null) { return false; }
 
     setState(() => _isPostingStory = true);
     String? pendingMediaPath;
@@ -646,7 +647,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
       final authUser = _auth.currentUser;
       final profile = context.read<UserRoleProvider>().userProfile;
       final churchId = profile?.placeId ?? '';
-      if (authUser == null || churchId.isEmpty) return false;
+      if (authUser == null || churchId.isEmpty) { return false; }
 
       String? mediaUrl;
       String? mediaPath;
@@ -726,7 +727,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
   }
 
   Future<bool> _handlePost({VoidCallback? onProgressChanged}) async {
-    if (_isPosting) return false;
+    if (_isPosting) { return false; }
     if (_postController.text.trim().isEmpty && _selectedMedia == null) {
       return false;
     }
@@ -754,8 +755,8 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
           ],
         ),
       );
-      if (confirmed != true) return false;
-      if (!mounted) return false;
+      if (confirmed != true) { return false; }
+      if (!mounted) { return false; }
     }
 
     setState(() {
@@ -771,7 +772,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
     var committed = false;
     try {
       final user = _auth.currentUser;
-      if (user == null) return false;
+      if (user == null) { return false; }
 
       final userProvider =
           Provider.of<UserRoleProvider>(context, listen: false);
@@ -925,7 +926,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
     final name = file.name.trim();
     if (name.contains('.')) {
       final extension = name.split('.').last.toLowerCase();
-      if (extension.length <= 5) return extension;
+      if (extension.length <= 5) { return extension; }
     }
 
     return switch (mimeType) {
@@ -945,7 +946,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
 
   String _contentTypeFor(XFile file, String? mediaType) {
     final explicitMime = file.mimeType?.trim();
-    if (explicitMime?.isNotEmpty == true) return explicitMime!;
+    if (explicitMime?.isNotEmpty == true) { return explicitMime!; }
 
     final extension = file.name.split('.').last.toLowerCase();
     return switch (extension) {
@@ -965,7 +966,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
 
   String _profileInitialFor(String name) {
     final trimmed = name.trim();
-    if (trimmed.isEmpty) return '?';
+    if (trimmed.isEmpty) { return '?'; }
     return trimmed.characters.first.toUpperCase();
   }
 
@@ -997,18 +998,18 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
       ),
     );
 
-    if (confirmed != true || !mounted) return;
+    if (confirmed != true || !mounted) { return; }
 
     try {
       await _communityService.deletePost(post);
-      if (!mounted) return;
+      if (!mounted) { return; }
       AppFeedback.show(
         context,
         'Post deleted.',
         type: AppFeedbackType.success,
       );
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted) { return; }
       AppFeedback.show(
         context,
         'Could not delete post: $e',
@@ -1020,7 +1021,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
   Future<void> _messagePostAuthor(Post post) async {
     final currentUser = context.read<UserRoleProvider>().userProfile;
     final currentAuthUser = _auth.currentUser;
-    if (currentUser == null || currentAuthUser == null) return;
+    if (currentUser == null || currentAuthUser == null) { return; }
 
     if (post.authorId == currentAuthUser.id) {
       Navigator.pushNamed(context, '/profile');
@@ -1036,7 +1037,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
       final otherUser = await _messageService.getConversationPeer(
               conversation, currentAuthUser.id) ??
           _profileFromPostAuthor(post);
-      if (!mounted) return;
+      if (!mounted) { return; }
       await Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => MessageThreadScreen(
@@ -1046,7 +1047,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
         ),
       );
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted) { return; }
       final fallbackAuthor = _profileFromPostAuthor(post);
       if (_messageService.isMessageRequestRequiredError(error)) {
         await showMessageRequestComposer(
@@ -1066,7 +1067,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
 
   void _openPublicProfile(String userId) {
     final cleanUserId = userId.trim();
-    if (cleanUserId.isEmpty) return;
+    if (cleanUserId.isEmpty) { return; }
     Navigator.of(context).pushNamed(
       '/public_profile?id=${Uri.encodeComponent(cleanUserId)}',
     );
@@ -1082,12 +1083,12 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
         mediaUrl: post.mediaUrl?.trim() ?? '',
         mediaType: post.mediaType?.trim() ?? '',
       );
-      if (!mounted) return;
+      if (!mounted) { return; }
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Saved post.')),
       );
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted) { return; }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Could not save post: $error')),
       );
@@ -1145,7 +1146,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
     final rawUrl = post.mediaUrl?.trim() ?? '';
     final uri = Uri.tryParse(rawUrl);
     if (rawUrl.isEmpty || uri == null) {
-      if (!mounted) return;
+      if (!mounted) { return; }
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('This post has no downloadable media.')),
       );
@@ -1162,9 +1163,9 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
 
   Future<void> _copyPostText(Post post) async {
     final text = post.content.trim();
-    if (text.isEmpty) return;
+    if (text.isEmpty) { return; }
     await Clipboard.setData(ClipboardData(text: text));
-    if (!mounted) return;
+    if (!mounted) { return; }
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Post text copied.')),
     );
@@ -1173,7 +1174,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
   Future<void> _openPostAuthorProfile(Post post) async {
     final currentUser = context.read<UserRoleProvider>().userProfile;
     final currentAuthUser = _auth.currentUser;
-    if (currentUser == null || currentAuthUser == null) return;
+    if (currentUser == null || currentAuthUser == null) { return; }
 
     if (post.authorId == currentAuthUser.id) {
       Navigator.pushNamed(context, '/profile');
@@ -1181,7 +1182,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
     }
 
     final loadedProfile = await _userService.getUserProfile(post.authorId);
-    if (!mounted) return;
+    if (!mounted) { return; }
     final profile = loadedProfile ?? _profileFromPostAuthor(post);
     final isSameChurch = profile.placeId == currentUser.placeId;
     final showContact =
@@ -1465,7 +1466,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
     );
 
     descriptionController.dispose();
-    if (!mounted || submitted != true) return;
+    if (!mounted || submitted != true) { return; }
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text('Thank you. This report has been submitted for review.'),
@@ -1498,13 +1499,13 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
       ),
     );
 
-    if (confirmed != true || !mounted) return;
+    if (confirmed != true || !mounted) { return; }
     await _moderationService.blockUser(
       churchId: churchId,
       blockedUserId: userId,
       reason: 'Blocked from feed post options',
     );
-    if (!mounted) return;
+    if (!mounted) { return; }
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('$displayName has been blocked.')),
     );
@@ -1541,6 +1542,9 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
 
     return AppScaffold(
       title: 'Community Feed',
+      tutorialId: 'community_feed',
+      tutorialReady:
+          !userProvider.isLoading && userProvider.userProfile != null,
       leading: IconButton(
         tooltip: 'Search feed',
         icon: const Icon(Icons.search),
@@ -1678,7 +1682,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                     },
                   ),
                 ),
-              );
+              ).tutorialReady(!isWaiting && !hasLoadIssue);
             },
           ),
           if (!browseOnly) _buildFloatingComposeMenu(context),
@@ -1695,10 +1699,10 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
         .take(4)
         .where(_prefetchedVideoPosterUrls.add)
         .toList(growable: false);
-    if (urls.isEmpty) return;
+    if (urls.isEmpty) { return; }
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
+      if (!mounted) { return; }
       for (final url in urls) {
         unawaited(
           precacheImage(CachedNetworkImageProvider(url), context).catchError(
@@ -1739,13 +1743,15 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
   }) {
     var itemIndex = index;
     if (hasAccessNotice) {
-      if (itemIndex == 0) return _buildLimitedAccessNotice(context);
+      if (itemIndex == 0) { return _buildLimitedAccessNotice(context); }
       itemIndex--;
     }
 
-    if (itemIndex == 0) return _buildStoriesSection(context, churchId);
-    if (itemIndex == 1) return _buildFeedScopeSummary(context, churchId);
-    if (itemIndex == 2) return const Divider(height: 1);
+    if (itemIndex == 0) { return _buildStoriesSection(context, churchId)
+          .tutorial('community.stories'); }
+    if (itemIndex == 1) { return _buildFeedScopeSummary(context, churchId)
+          .tutorial('community.scope'); }
+    if (itemIndex == 2) { return const Divider(height: 1); }
 
     var contentIndex = itemIndex - 3;
     if (hasConnectionNotice) {
@@ -1762,7 +1768,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
       );
     }
 
-    if (posts.isEmpty) return _buildEmptyFeedState(context);
+    if (posts.isEmpty) { return _buildEmptyFeedState(context); }
 
     final post = posts[contentIndex];
     final isLast = contentIndex == posts.length - 1;
@@ -1780,16 +1786,16 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
   }
 
   List<String>? _feedChurchIds(String ownChurchId) {
-    if (ownChurchId.trim().isEmpty) return null;
-    if (_feedScope == 'all' || _feedScope == 'discover') return null;
-    if (_feedScope == 'following') return null;
-    if (_feedScope == 'custom') return _selectedFeedChurchIds;
+    if (ownChurchId.trim().isEmpty) { return null; }
+    if (_feedScope == 'all' || _feedScope == 'discover') { return null; }
+    if (_feedScope == 'following') { return null; }
+    if (_feedScope == 'custom') { return _selectedFeedChurchIds; }
     return [ownChurchId];
   }
 
   String _effectiveFeedScope(String churchId) {
     final scope = _feedScope == 'all' ? 'discover' : _feedScope;
-    if (churchId.trim().isEmpty && scope == 'church') return 'discover';
+    if (churchId.trim().isEmpty && scope == 'church') { return 'discover'; }
     return scope;
   }
 
@@ -2344,7 +2350,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
 
   void _applyChurchFilter(Church church, String ownChurchId) {
     final id = church.placeId.isNotEmpty ? church.placeId : church.id;
-    if (id.trim().isEmpty) return;
+    if (id.trim().isEmpty) { return; }
     setState(() {
       _feedScope = id == ownChurchId ? 'church' : 'custom';
       _selectedFeedChurchIds = [id];
@@ -2356,20 +2362,20 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
 
   Future<void> _requestVisitForChurch(Church church) async {
     final id = church.placeId.trim().isNotEmpty ? church.placeId : church.id;
-    if (id.trim().isEmpty) return;
+    if (id.trim().isEmpty) { return; }
     try {
       await MembershipService().requestMembership(
         churchId: id.trim(),
         message: 'Visit request from Grace Connect church discovery.',
       );
-      if (!mounted) return;
+      if (!mounted) { return; }
       AppFeedback.show(
         context,
         'Visit request sent to ${church.name}.',
         type: AppFeedbackType.success,
       );
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted) { return; }
       AppFeedback.show(
         context,
         'Could not send visit request: $error',
@@ -2491,7 +2497,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
           ? church.placeId.trim()
           : church.id.trim();
       final name = church.name.trim();
-      if (id.isEmpty && name.isEmpty) return;
+      if (id.isEmpty && name.isEmpty) { return; }
       final key = id.isNotEmpty ? id : name.toLowerCase();
       byKey.putIfAbsent(key, () => church);
     }
@@ -2534,7 +2540,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
 
   Future<void> _sendBibleNudge(UserProfile recipient) async {
     final sender = context.read<UserRoleProvider>().userProfile;
-    if (sender == null) return;
+    if (sender == null) { return; }
 
     final senderChurch = sender.churchId.trim();
     final recipientChurch = recipient.churchId.trim();
@@ -2591,14 +2597,14 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
         recipient: recipient,
         message: messageController.text,
       );
-      if (!mounted) return;
+      if (!mounted) { return; }
       AppFeedback.show(
         context,
         'Bible Nudge sent to $displayName.',
         type: AppFeedbackType.success,
       );
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted) { return; }
       AppFeedback.show(
         context,
         'Could not send Bible Nudge: $error',
@@ -2612,7 +2618,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
   Future<void> _openMessageWithUserProfile(UserProfile otherUser) async {
     final currentUser = context.read<UserRoleProvider>().userProfile;
     final currentAuthUser = _auth.currentUser;
-    if (currentUser == null || currentAuthUser == null) return;
+    if (currentUser == null || currentAuthUser == null) { return; }
     if (otherUser.uid == currentAuthUser.id) {
       Navigator.pushNamed(context, '/profile');
       return;
@@ -2623,7 +2629,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
         currentUser: currentUser,
         otherUser: otherUser,
       );
-      if (!mounted) return;
+      if (!mounted) { return; }
       await Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => MessageThreadScreen(
@@ -2633,7 +2639,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
         ),
       );
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted) { return; }
       if (_messageService.isMessageRequestRequiredError(error)) {
         await showMessageRequestComposer(
           context,
@@ -2721,7 +2727,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                                 onPressed: () async {
                                   setState(() => _composeActionsOpen = false);
                                   await _pickVideo();
-                                  if (mounted) _showPostComposerSheet();
+                                  if (mounted) { _showPostComposerSheet(); }
                                 },
                               ),
                               _ComposeActionButton(
@@ -2730,7 +2736,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                                 onPressed: () async {
                                   setState(() => _composeActionsOpen = false);
                                   await _pickImage();
-                                  if (mounted) _showPostComposerSheet();
+                                  if (mounted) { _showPostComposerSheet(); }
                                 },
                               ),
                               _ComposeActionButton(
@@ -2753,7 +2759,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                   () => _composeActionsOpen = !_composeActionsOpen,
                 ),
                 child: Icon(_composeActionsOpen ? Icons.close : Icons.add),
-              ),
+              ).tutorial('community.create'),
             ],
           ),
         ),
@@ -2908,7 +2914,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
       _loadingChurchNameIds.add(postChurchId);
       unawaited(() async {
         final church = await _churchService.getChurch(postChurchId);
-        if (!mounted) return;
+        if (!mounted) { return; }
         setState(() {
           _churchNamesById[postChurchId] =
               church?.name.trim().isNotEmpty == true
@@ -2922,7 +2928,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
 
   String _compactChurchLabel(String churchName) {
     final clean = _prettifyChurchIdentifier(churchName);
-    if (clean.length <= 24) return clean;
+    if (clean.length <= 24) { return clean; }
     final words = clean
         .replaceAll(RegExp(r'[^A-Za-z0-9 ]+'), ' ')
         .split(RegExp(r'\s+'))
@@ -2938,17 +2944,17 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
 
   String _prettifyChurchIdentifier(String value) {
     var clean = value.trim();
-    if (clean.isEmpty) return 'Church';
+    if (clean.isEmpty) { return 'Church'; }
     clean = clean.replaceFirst(RegExp(r'^(local|manual)_'), '');
     clean = clean.replaceAll(RegExp(r'[_-]+'), ' ');
     clean = clean.replaceAll(RegExp(r'\s+'), ' ').trim();
-    if (clean.startsWith('church ') || clean.length > 48) return 'Other Church';
+    if (clean.startsWith('church ') || clean.length > 48) { return 'Other Church'; }
 
     final uppercaseWords = {'ntcog', 'cog', 'cogop', 'ja', 'jm'};
     return clean.split(' ').map((word) {
       final lower = word.toLowerCase();
-      if (uppercaseWords.contains(lower)) return lower.toUpperCase();
-      if (word.length <= 2) return lower;
+      if (uppercaseWords.contains(lower)) { return lower.toUpperCase(); }
+      if (word.length <= 2) { return lower; }
       return '${word[0].toUpperCase()}${word.substring(1).toLowerCase()}';
     }).join(' ');
   }
@@ -2977,7 +2983,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
     }
 
     final uid = _auth.currentUser?.id ?? '';
-    if (uid.isEmpty) return;
+    if (uid.isEmpty) { return; }
 
     final originalLikes = _effectivePostLikes(post);
     final nextLikes = [...originalLikes];
@@ -2991,12 +2997,12 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
 
     try {
       final updatedPost = await _communityService.toggleLike(post.id, uid);
-      if (!mounted) return;
+      if (!mounted) { return; }
       if (updatedPost != null) {
         setState(() => _postLikeOverrides[post.id] = updatedPost.likes);
       }
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted) { return; }
       setState(() => _postLikeOverrides[post.id] = originalLikes);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Could not save like: $error')),
@@ -3134,9 +3140,9 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
                   tooltip: 'Post options',
                   icon: const Icon(Icons.more_horiz),
                   onSelected: (value) {
-                    if (value == 'delete') _confirmDeletePost(post);
-                    if (value == 'save') _showSavePostOptions(post);
-                    if (value == 'profile') _openPublicProfile(post.authorId);
+                    if (value == 'delete') { _confirmDeletePost(post); }
+                    if (value == 'save') { _showSavePostOptions(post); }
+                    if (value == 'profile') { _openPublicProfile(post.authorId); }
                     if (value == 'member_profile') {
                       _openPostAuthorProfile(post);
                     }
@@ -3340,7 +3346,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
       future: _churchService.fetchLiveChurches(viewerChurchId: churchId),
       builder: (context, snapshot) {
         final churches = snapshot.data ?? const <Church>[];
-        if (churches.isEmpty) return const SizedBox.shrink();
+        if (churches.isEmpty) { return const SizedBox.shrink(); }
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -3532,7 +3538,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
 
   String _shortStoryName(String name) {
     final trimmed = name.trim();
-    if (trimmed.isEmpty) return 'Member';
+    if (trimmed.isEmpty) { return 'Member'; }
     return trimmed.split(RegExp(r'\s+')).first;
   }
 
@@ -3544,7 +3550,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
       final nextWatched =
           _watchedStoryIds.where((id) => validStoryIds.contains(id)).toSet();
       WidgetsBinding.instance.addPostFrameCallback((_) async {
-        if (!mounted) return;
+        if (!mounted) { return; }
         final uid = _auth.currentUser?.id ?? 'guest';
         final prefs = await SharedPreferences.getInstance();
         await prefs.setStringList(
@@ -3572,7 +3578,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
     groups.sort((a, b) {
       final aUnwatched = a.hasUnwatched(_watchedStoryIds);
       final bUnwatched = b.hasUnwatched(_watchedStoryIds);
-      if (aUnwatched != bUnwatched) return aUnwatched ? -1 : 1;
+      if (aUnwatched != bUnwatched) { return aUnwatched ? -1 : 1; }
       return b.latestCreatedAt.compareTo(a.latestCreatedAt);
     });
 
@@ -3855,7 +3861,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
       if (mounted) setState(() => _storiesRefreshToken++);
       return updated;
     } catch (error) {
-      if (!mounted) return null;
+      if (!mounted) { return null; }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Could not like status: $error')),
       );
@@ -3865,11 +3871,11 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
 
   Future<void> _replyToStory(CommunityStory story, String text) async {
     final cleanText = text.trim();
-    if (cleanText.isEmpty) return;
+    if (cleanText.isEmpty) { return; }
 
     final currentUser = context.read<UserRoleProvider>().userProfile;
     final currentAuthUser = _auth.currentUser;
-    if (currentUser == null || currentAuthUser == null) return;
+    if (currentUser == null || currentAuthUser == null) { return; }
 
     if (story.authorId == currentAuthUser.id) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -3901,12 +3907,12 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
           'created_at': story.createdAt.toUtc().toIso8601String(),
         },
       );
-      if (!mounted) return;
+      if (!mounted) { return; }
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Status reply sent securely.')),
       );
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted) { return; }
       if (_messageService.isMessageRequestRequiredError(error)) {
         final recipient = await UserService().getUserProfile(story.authorId) ??
             UserProfile(
@@ -3921,7 +3927,7 @@ class _CommunityFeedScreenState extends State<CommunityFeedScreen>
               photoUrl: story.authorPhoto ?? '',
               allowMessages: true,
             );
-        if (!mounted) return;
+        if (!mounted) { return; }
         await showMessageRequestComposer(
           context,
           recipient: recipient,
@@ -4034,12 +4040,12 @@ class _StatusViewerDialogState extends State<_StatusViewerDialog> {
   }
 
   void _markCurrentViewed() {
-    if (!mounted || _stories.isEmpty) return;
+    if (!mounted || _stories.isEmpty) { return; }
     widget.onViewed(_currentStory);
   }
 
   void _goTo(int nextIndex) {
-    if (nextIndex < 0) return;
+    if (nextIndex < 0) { return; }
     if (nextIndex >= _stories.length) {
       Navigator.pop(context);
       return;
@@ -4063,10 +4069,10 @@ class _StatusViewerDialogState extends State<_StatusViewerDialog> {
 
   Future<void> _toggleLike() async {
     HapticService.light();
-    if (widget.readOnly) return;
+    if (widget.readOnly) { return; }
 
     final uid = widget.currentUserId;
-    if (uid.isEmpty) return;
+    if (uid.isEmpty) { return; }
 
     final story = _currentStory;
     final likes = [...story.likes];
@@ -4082,17 +4088,17 @@ class _StatusViewerDialogState extends State<_StatusViewerDialog> {
     });
 
     final updated = await widget.onToggleLike(story);
-    if (!mounted || updated == null) return;
+    if (!mounted || updated == null) { return; }
     setState(() {
       _stories[_index] = updated;
     });
   }
 
   Future<void> _sendReply() async {
-    if (widget.readOnly) return;
+    if (widget.readOnly) { return; }
 
     final text = _replyController.text.trim();
-    if (text.isEmpty || _isReplying) return;
+    if (text.isEmpty || _isReplying) { return; }
 
     setState(() => _isReplying = true);
     try {
@@ -4104,10 +4110,10 @@ class _StatusViewerDialogState extends State<_StatusViewerDialog> {
   }
 
   Future<void> _confirmDeleteCurrentStory() async {
-    if (widget.readOnly || _isDeleting || _stories.isEmpty) return;
+    if (widget.readOnly || _isDeleting || _stories.isEmpty) { return; }
 
     final story = _currentStory;
-    if (story.authorId != widget.currentUserId) return;
+    if (story.authorId != widget.currentUserId) { return; }
 
     final shouldDelete = await showDialog<bool>(
       context: context,
@@ -4131,18 +4137,18 @@ class _StatusViewerDialogState extends State<_StatusViewerDialog> {
         ],
       ),
     );
-    if (shouldDelete != true) return;
+    if (shouldDelete != true) { return; }
 
     setState(() => _isDeleting = true);
     try {
       await widget.onDelete(story);
-      if (!mounted) return;
+      if (!mounted) { return; }
       setState(() {
         _stories.removeWhere((item) => item.id == story.id);
-        if (_stories.isEmpty) return;
+        if (_stories.isEmpty) { return; }
         _index = _index.clamp(0, _stories.length - 1);
       });
-      if (!mounted) return;
+      if (!mounted) { return; }
       if (_stories.isEmpty) {
         Navigator.pop(context);
       } else {
@@ -4150,7 +4156,7 @@ class _StatusViewerDialogState extends State<_StatusViewerDialog> {
         _markCurrentViewed();
       }
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted) { return; }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Could not delete status: $error')),
       );
@@ -4513,7 +4519,7 @@ class _StatusViewerDialogState extends State<_StatusViewerDialog> {
 
   String _initialFor(String name) {
     final trimmed = name.trim();
-    if (trimmed.isEmpty) return '?';
+    if (trimmed.isEmpty) { return '?'; }
     return trimmed.characters.first.toUpperCase();
   }
 }

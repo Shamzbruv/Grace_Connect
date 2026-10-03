@@ -1,3 +1,5 @@
+import 'package:grace_connect/tutorial/tutorial_controller.dart';
+import 'package:grace_connect/tutorial/tutorial_anchor.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -98,8 +100,12 @@ class _AttendanceScreenState extends State<AttendanceScreen>
         );
         return;
       }
-      final granted =
-          await _attendanceService.requestAutoAttendancePermissions();
+      if (!mounted) return;
+      final tutorials = context.read<TutorialController?>();
+      final granted = await (tutorials == null
+          ? _attendanceService.requestAutoAttendancePermissions()
+          : tutorials
+              .during(_attendanceService.requestAutoAttendancePermissions));
       if (!granted) {
         if (!mounted) return;
         setState(() => _autoCheckIn = false);
@@ -370,7 +376,7 @@ class _AttendanceScreenState extends State<AttendanceScreen>
         title: Text(
           'Attendance History',
           style: GoogleFonts.poppins(fontWeight: FontWeight.bold),
-        ),
+        ).tutorial('attendance.overview'),
         backgroundColor: Colors.transparent,
         elevation: 0,
         actions: [
@@ -399,110 +405,120 @@ class _AttendanceScreenState extends State<AttendanceScreen>
       ),
       body: StreamBuilder<List<AttendanceRecord>>(
         stream: _historyStream(user.uid),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const AppLoader();
-          }
+        builder: (context, snapshot) => TutorialReadiness(
+          ready: snapshot.connectionState != ConnectionState.waiting &&
+              !snapshot.hasError,
+          child: Builder(builder: (context) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const AppLoader();
+            }
 
-          if (snapshot.hasError) {
-            return _buildAttendanceLoadError(context, user.churchId);
-          }
+            if (snapshot.hasError) {
+              return _buildAttendanceLoadError(context, user.churchId);
+            }
 
-          final records = snapshot.data ?? [];
-          final filteredRecords = _filterRecords(records);
-          final stats = _calculateStats(filteredRecords);
+            final records = snapshot.data ?? [];
+            final filteredRecords = _filterRecords(records);
+            final stats = _calculateStats(filteredRecords);
 
-          return RefreshIndicator(
-            onRefresh: () async {
-              await _refreshSetupStatus(user.churchId);
-              await _refreshCheckInPrompt(user.churchId);
-            },
-            child: ListView(
-              padding: const EdgeInsets.all(16.0),
-              children: [
-                _buildActiveServiceCard(context, user),
-                const SizedBox(height: 16),
-                _buildGpsStatusCard(context, user),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Expanded(
-                        child: _buildStatCard(context, 'Present',
-                            stats['present']!, Colors.green)),
-                    const SizedBox(width: 12),
-                    Expanded(
-                        child: _buildStatCard(
-                            context, 'Late', stats['late']!, Colors.orange)),
-                    const SizedBox(width: 12),
-                    Expanded(
-                        child: _buildStatCard(
-                            context, 'Absent', stats['absent']!, Colors.red)),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                _buildAttendanceAnalysis(context, filteredRecords, stats),
-                const SizedBox(height: 16),
-                _buildAttendanceCalendar(context, filteredRecords),
-                const SizedBox(height: 20),
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: ['All', 'This Week', 'This Month', 'This Year']
-                        .map((filter) {
-                      final isSelected = _filter == filter;
-                      return Padding(
-                        padding: const EdgeInsets.only(right: 8.0),
-                        child: ChoiceChip(
-                          label: Text(filter),
-                          selected: isSelected,
-                          onSelected: (selected) {
-                            if (selected) setState(() => _filter = filter);
-                          },
-                          backgroundColor: Theme.of(context).cardColor,
-                          selectedColor: Theme.of(context).colorScheme.primary,
-                          labelStyle: TextStyle(
-                            color: isSelected
-                                ? Theme.of(context).colorScheme.onPrimary
-                                : Theme.of(context).textTheme.bodyMedium?.color,
-                            fontWeight: isSelected
-                                ? FontWeight.bold
-                                : FontWeight.normal,
+            return RefreshIndicator(
+              onRefresh: () async {
+                await _refreshSetupStatus(user.churchId);
+                await _refreshCheckInPrompt(user.churchId);
+              },
+              child: ListView(
+                padding: const EdgeInsets.all(16.0),
+                children: [
+                  _buildActiveServiceCard(context, user),
+                  const SizedBox(height: 16),
+                  _buildGpsStatusCard(context, user)
+                      .tutorial('attendance.tools'),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                          child: _buildStatCard(context, 'Present',
+                              stats['present']!, Colors.green)),
+                      const SizedBox(width: 12),
+                      Expanded(
+                          child: _buildStatCard(
+                              context, 'Late', stats['late']!, Colors.orange)),
+                      const SizedBox(width: 12),
+                      Expanded(
+                          child: _buildStatCard(
+                              context, 'Absent', stats['absent']!, Colors.red)),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  _buildAttendanceAnalysis(context, filteredRecords, stats),
+                  const SizedBox(height: 16),
+                  _buildAttendanceCalendar(context, filteredRecords),
+                  const SizedBox(height: 20),
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: ['All', 'This Week', 'This Month', 'This Year']
+                          .map((filter) {
+                        final isSelected = _filter == filter;
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 8.0),
+                          child: ChoiceChip(
+                            label: Text(filter),
+                            selected: isSelected,
+                            onSelected: (selected) {
+                              if (selected) setState(() => _filter = filter);
+                            },
+                            backgroundColor: Theme.of(context).cardColor,
+                            selectedColor:
+                                Theme.of(context).colorScheme.primary,
+                            labelStyle: TextStyle(
+                              color: isSelected
+                                  ? Theme.of(context).colorScheme.onPrimary
+                                  : Theme.of(context)
+                                      .textTheme
+                                      .bodyMedium
+                                      ?.color,
+                              fontWeight: isSelected
+                                  ? FontWeight.bold
+                                  : FontWeight.normal,
+                            ),
                           ),
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                if (filteredRecords.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 48),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.history_toggle_off,
-                            size: 48,
-                            color: Theme.of(context)
-                                .colorScheme
-                                .onSurface
-                                .withValues(alpha: 0.2)),
-                        const SizedBox(height: 16),
-                        Text('No attendance records found.',
-                            style: Theme.of(context).textTheme.bodyMedium),
-                      ],
+                        );
+                      }).toList(),
                     ),
-                  )
-                else
-                  ...filteredRecords.map(
-                    (record) => _buildRecordCard(context, record),
                   ),
-                const SizedBox(height: 32),
-              ],
-            ),
-          );
-        },
+                  const SizedBox(height: 16),
+                  if (filteredRecords.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 48),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.history_toggle_off,
+                              size: 48,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurface
+                                  .withValues(alpha: 0.2)),
+                          const SizedBox(height: 16),
+                          Text('No attendance records found.',
+                              style: Theme.of(context).textTheme.bodyMedium),
+                        ],
+                      ),
+                    )
+                  else
+                    ...filteredRecords.map(
+                      (record) => _buildRecordCard(context, record),
+                    ),
+                  const SizedBox(height: 32),
+                ],
+              ),
+            );
+          }),
+        ),
       ),
-    );
+    ).tutorialScreen('attendance',
+        ready: !_isSetupLoading && !_isPromptLoading);
   }
 
   Widget _buildAttendanceLoadError(BuildContext context, String churchId) {

@@ -1,3 +1,4 @@
+import 'package:grace_connect/tutorial/tutorial_anchor.dart';
 import 'package:flutter/material.dart';
 import 'package:grace_connect/screens/bible/bible_books_screen.dart';
 import 'package:grace_connect/screens/bible/bible_quiz_screen.dart';
@@ -64,6 +65,6 @@ class _BibleHomeScreenState extends State<BibleHomeScreen> {
               ],
             )
           : null,
-    );
+    ).tutorialScreen('bible.home');
   }
 }

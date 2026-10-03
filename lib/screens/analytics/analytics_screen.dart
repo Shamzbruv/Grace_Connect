@@ -1,3 +1,4 @@
+import 'package:grace_connect/tutorial/tutorial_anchor.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -155,67 +156,74 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     }
 
     return AppScaffold(
+      tutorialId: 'analytics',
       title: 'Analytics',
       body: FutureBuilder<_AnalyticsData>(
         future: _future,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
+        builder: (context, snapshot) => TutorialReadiness(
+          ready: snapshot.connectionState != ConnectionState.waiting &&
+              !snapshot.hasError,
+          child: Builder(builder: (context) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator());
+            }
 
-          if (snapshot.hasError) {
-            return Center(
-                child: Text('Could not load analytics: ${snapshot.error}'));
-          }
+            if (snapshot.hasError) {
+              return Center(
+                  child: Text('Could not load analytics: ${snapshot.error}'));
+            }
 
-          final data = snapshot.data!;
-          final currency = NumberFormat.simpleCurrency(name: 'JMD');
+            final data = snapshot.data!;
+            final currency = NumberFormat.simpleCurrency(name: 'JMD');
 
-          return RefreshIndicator(
-            onRefresh: () async {
-              setState(() {
-                _future = _loadAnalytics(churchId, canViewFinance);
-              });
-              await _future;
-            },
-            child: ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                _buildStatGrid(context, data),
-                if (data.finance != null) ...[
-                  const SizedBox(height: 16),
-                  AppCard(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'This Month Finance',
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleMedium
-                              ?.copyWith(fontWeight: FontWeight.w700),
-                        ),
-                        const SizedBox(height: 12),
-                        _FinanceRow(
-                          label: 'Income',
-                          value: currency.format(data.finance!['income'] ?? 0),
-                        ),
-                        _FinanceRow(
-                          label: 'Expenses',
-                          value: currency.format(data.finance!['expense'] ?? 0),
-                        ),
-                        _FinanceRow(
-                          label: 'Net',
-                          value: currency.format(data.finance!['net'] ?? 0),
-                        ),
-                      ],
+            return RefreshIndicator(
+              onRefresh: () async {
+                setState(() {
+                  _future = _loadAnalytics(churchId, canViewFinance);
+                });
+                await _future;
+              },
+              child: ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  _buildStatGrid(context, data).tutorial('analytics.tools'),
+                  if (data.finance != null) ...[
+                    const SizedBox(height: 16),
+                    AppCard(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'This Month Finance',
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleMedium
+                                ?.copyWith(fontWeight: FontWeight.w700),
+                          ),
+                          const SizedBox(height: 12),
+                          _FinanceRow(
+                            label: 'Income',
+                            value:
+                                currency.format(data.finance!['income'] ?? 0),
+                          ),
+                          _FinanceRow(
+                            label: 'Expenses',
+                            value:
+                                currency.format(data.finance!['expense'] ?? 0),
+                          ),
+                          _FinanceRow(
+                            label: 'Net',
+                            value: currency.format(data.finance!['net'] ?? 0),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
+                  ],
                 ],
-              ],
-            ),
-          );
-        },
+              ),
+            );
+          }),
+        ),
       ),
     );
   }

@@ -1,3 +1,4 @@
+import 'package:grace_connect/tutorial/tutorial_anchor.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../../theme/app_colors.dart';
@@ -92,7 +93,7 @@ class AdminDashboard extends StatelessWidget {
               context,
               MaterialPageRoute(
                   builder: (_) => const MemberManagementScreen())),
-        ),
+        ).tutorial('dashboard.actions'),
         const SizedBox(height: 12),
         if (userProfile.canManageRoles)
           ActionCard(
@@ -128,7 +129,7 @@ class AdminDashboard extends StatelessWidget {
           description: 'Review, edit, and publish daily encouragement',
           icon: Icons.wb_sunny_outlined,
           onTap: () => Navigator.pushNamed(context, '/admin/daily_word'),
-        ),
+        ).tutorial('dashboard.word'),
         const SizedBox(height: 12),
         ActionCard(
           title: 'Daily Bible Quiz',

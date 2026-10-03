@@ -1,3 +1,4 @@
+import 'package:grace_connect/tutorial/tutorial_anchor.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../services/haptic_service.dart';
@@ -404,6 +405,7 @@ class _ChurchAdminSettingsScreenState extends State<ChurchAdminSettingsScreen> {
     }
 
     return AppScaffold(
+      tutorialId: 'church_administration',
       title: 'Church Settings',
       body: ListView(
         children: [
@@ -428,7 +430,7 @@ class _ChurchAdminSettingsScreenState extends State<ChurchAdminSettingsScreen> {
                   MaterialPageRoute(
                       builder: (context) => const RoleManagementScreen()));
             },
-          ),
+          ).tutorial('church_administration.tools'),
           if (isOwner)
             ListTile(
               leading: const Icon(Icons.admin_panel_settings),

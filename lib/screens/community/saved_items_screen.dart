@@ -1,3 +1,4 @@
+import 'package:grace_connect/tutorial/tutorial_anchor.dart';
 import 'package:flutter/material.dart';
 
 import '../../services/saved_items_service.dart';
@@ -53,96 +54,102 @@ class _SavedItemsScreenState extends State<SavedItemsScreen> {
   @override
   Widget build(BuildContext context) {
     return AppScaffold(
+      tutorialId: 'saved_items',
       title: 'Saved',
       showBottomMenu: true,
       body: FutureBuilder<List<SavedItem>>(
         future: _savedFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
+        builder: (context, snapshot) => TutorialReadiness(
+          ready: snapshot.connectionState != ConnectionState.waiting &&
+              !snapshot.hasError,
+          child: Builder(builder: (context) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator());
+            }
 
-          final items = snapshot.data ?? const [];
-          if (items.isEmpty) {
+            final items = snapshot.data ?? const [];
+            if (items.isEmpty) {
+              return RefreshIndicator(
+                onRefresh: () async => _refresh(),
+                child: ListView(
+                  padding: const EdgeInsets.all(32),
+                  children: const [
+                    SizedBox(height: 100),
+                    Icon(Icons.bookmarks_outlined, size: 56),
+                    SizedBox(height: 12),
+                    Center(child: Text('Saved posts and events appear here.')),
+                  ],
+                ),
+              );
+            }
+
             return RefreshIndicator(
               onRefresh: () async => _refresh(),
-              child: ListView(
-                padding: const EdgeInsets.all(32),
-                children: const [
-                  SizedBox(height: 100),
-                  Icon(Icons.bookmarks_outlined, size: 56),
-                  SizedBox(height: 12),
-                  Center(child: Text('Saved posts and events appear here.')),
-                ],
+              child: ListView.separated(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 120),
+                itemCount: items.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 8),
+                itemBuilder: (context, index) {
+                  final item = items[index];
+                  return Dismissible(
+                    key: ValueKey('${item.entityType}:${item.entityId}'),
+                    direction: DismissDirection.endToStart,
+                    onDismissed: (_) => _removeSavedItem(item),
+                    background: const ColoredBox(
+                      color: Colors.red,
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        child: Padding(
+                          padding: EdgeInsets.only(right: 18),
+                          child:
+                              Icon(Icons.delete_outline, color: Colors.white),
+                        ),
+                      ),
+                    ),
+                    child: ListTile(
+                      leading: _SavedItemPreview(
+                        item: item,
+                        fallbackIcon: _iconFor(item.entityType),
+                      ),
+                      title: Text(
+                        item.title.trim().isEmpty ? 'Saved item' : item.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      subtitle: Text(
+                        item.subtitle.trim().isEmpty
+                            ? item.entityType.replaceAll('_', ' ')
+                            : item.subtitle,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            tooltip: 'Remove from Saved',
+                            icon: const Icon(Icons.bookmark_remove_outlined),
+                            onPressed: () => _removeSavedItem(item),
+                          ),
+                          const Icon(Icons.chevron_right),
+                        ],
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        side: BorderSide(
+                          color: Theme.of(context)
+                              .dividerColor
+                              .withValues(alpha: 0.2),
+                        ),
+                      ),
+                      onTap: () => _openSavedItem(item),
+                    ).tutorial('saved_items.tools', enabled: index == 0),
+                  );
+                },
               ),
             );
-          }
-
-          return RefreshIndicator(
-            onRefresh: () async => _refresh(),
-            child: ListView.separated(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 120),
-              itemCount: items.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 8),
-              itemBuilder: (context, index) {
-                final item = items[index];
-                return Dismissible(
-                  key: ValueKey('${item.entityType}:${item.entityId}'),
-                  direction: DismissDirection.endToStart,
-                  onDismissed: (_) => _removeSavedItem(item),
-                  background: const ColoredBox(
-                    color: Colors.red,
-                    child: Align(
-                      alignment: Alignment.centerRight,
-                      child: Padding(
-                        padding: EdgeInsets.only(right: 18),
-                        child: Icon(Icons.delete_outline, color: Colors.white),
-                      ),
-                    ),
-                  ),
-                  child: ListTile(
-                    leading: _SavedItemPreview(
-                      item: item,
-                      fallbackIcon: _iconFor(item.entityType),
-                    ),
-                    title: Text(
-                      item.title.trim().isEmpty ? 'Saved item' : item.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    subtitle: Text(
-                      item.subtitle.trim().isEmpty
-                          ? item.entityType.replaceAll('_', ' ')
-                          : item.subtitle,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          tooltip: 'Remove from Saved',
-                          icon: const Icon(Icons.bookmark_remove_outlined),
-                          onPressed: () => _removeSavedItem(item),
-                        ),
-                        const Icon(Icons.chevron_right),
-                      ],
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      side: BorderSide(
-                        color: Theme.of(context)
-                            .dividerColor
-                            .withValues(alpha: 0.2),
-                      ),
-                    ),
-                    onTap: () => _openSavedItem(item),
-                  ),
-                );
-              },
-            ),
-          );
-        },
+          }),
+        ),
       ),
     );
   }

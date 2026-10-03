@@ -1,3 +1,4 @@
+import 'package:grace_connect/tutorial/tutorial_anchor.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -41,44 +42,50 @@ class CounselingRequestsScreen extends StatelessWidget {
         : CounselingService().getAssignedRequests(churchId, userProfile!.uid);
 
     return AppScaffold(
+      tutorialId: 'counseling.staff',
       title: canManageAllCases ? 'Counseling Requests' : 'Assigned Counseling',
       body: StreamBuilder<List<CounselingRequest>>(
         stream: requestStream,
-        builder: (context, snapshot) {
-          if (snapshot.hasError) {
-            return Center(
-                child: Text('Could not load requests: ${snapshot.error}'));
-          }
+        builder: (context, snapshot) => TutorialReadiness(
+          ready: snapshot.connectionState != ConnectionState.waiting &&
+              !snapshot.hasError &&
+              snapshot.hasData,
+          child: Builder(builder: (context) {
+            if (snapshot.hasError) {
+              return Center(
+                  child: Text('Could not load requests: ${snapshot.error}'));
+            }
 
-          if (!snapshot.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
+            if (!snapshot.hasData) {
+              return const Center(child: CircularProgressIndicator());
+            }
 
-          final requests = snapshot.data!;
-          if (requests.isEmpty) {
-            return Center(
-              child: Text(
-                canManageAllCases
-                    ? 'No counseling requests yet.'
-                    : 'No counseling cases have been assigned to you yet.',
-              ),
-            );
-          }
-
-          return ListView.separated(
-            padding: const EdgeInsets.all(16),
-            itemCount: requests.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 12),
-            itemBuilder: (context, index) {
-              return _CounselingRequestCard(
-                request: requests[index],
-                canManageAssignments: canManageAllCases,
-                canUpdateStatus: canManageAllCases || canViewAssignedCases,
-                canDelete: canManageAllCases,
+            final requests = snapshot.data!;
+            if (requests.isEmpty) {
+              return Center(
+                child: Text(
+                  canManageAllCases
+                      ? 'No counseling requests yet.'
+                      : 'No counseling cases have been assigned to you yet.',
+                ),
               );
-            },
-          );
-        },
+            }
+
+            return ListView.separated(
+              padding: const EdgeInsets.all(16),
+              itemCount: requests.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 12),
+              itemBuilder: (context, index) {
+                return _CounselingRequestCard(
+                  request: requests[index],
+                  canManageAssignments: canManageAllCases,
+                  canUpdateStatus: canManageAllCases || canViewAssignedCases,
+                  canDelete: canManageAllCases,
+                ).tutorial('counseling.staff.tools', enabled: index == 0);
+              },
+            );
+          }),
+        ),
       ),
     );
   }
