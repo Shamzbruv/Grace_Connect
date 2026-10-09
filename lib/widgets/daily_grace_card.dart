@@ -104,6 +104,25 @@ class DailyGraceWidgetSettings extends StatelessWidget {
                         ? 'Confirm Add in your phone’s home-screen prompt.'
                         : 'Touch and hold a blank area of your home screen, choose Widgets, then Grace Connect → Daily Grace.')));
               }),
+          const SizedBox(height: 20),
+          const Text('Daily Word with likes',
+              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 17)),
+          const SizedBox(height: 6),
+          const Text(
+              'A second home-screen widget shows the published daily reflection and its like count. Tap its heart to like it in Grace Connect. Offline, it keeps the last reflection with its date.'),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+              icon: const Icon(Icons.favorite_border),
+              label: const Text('Add Daily Word widget'),
+              onPressed: () async {
+                final shown =
+                    await DailyGraceService.requestPin(dailyWord: true);
+                if (!context.mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(shown
+                        ? 'Confirm Add in your phone’s home-screen prompt.'
+                        : 'Touch and hold your home screen, choose Widgets, then Grace Connect → Daily Word.')));
+              }),
         ]),
       );
 }

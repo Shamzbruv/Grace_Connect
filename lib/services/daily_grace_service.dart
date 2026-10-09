@@ -10,6 +10,8 @@ class DailyScripture {
   final String text;
 }
 
+enum DailyQuoteWidgetAction { like }
+
 class DailyGraceService {
   static const channel = MethodChannel('love.graceconnect/home_widget');
   static Future<List<DailyScripture>>? _catalogue;
@@ -43,10 +45,12 @@ class DailyGraceService {
     return verses[indexForDay(now ?? DateTime.now(), verses.length)];
   }
 
-  static Future<bool> requestPin() async {
+  static Future<bool> requestPin({bool dailyWord = false}) async {
     if (!supportsPin) return false;
     try {
-      return await channel.invokeMethod<bool>('requestPin') ?? false;
+      return await channel.invokeMethod<bool>(
+              dailyWord ? 'requestQuotePin' : 'requestPin') ??
+          false;
     } on PlatformException {
       return false;
     } on MissingPluginException {
@@ -54,13 +58,54 @@ class DailyGraceService {
     }
   }
 
-  static Future<void> initialize(GlobalKey<NavigatorState> navigatorKey) async {
+  static Future<void> syncQuoteViewer(String viewerId) async {
+    if (!supportsPin) return;
+    try {
+      await channel.invokeMethod<void>('quoteViewer', {'viewerId': viewerId});
+    } on PlatformException {
+      /* The in-app reaction remains authoritative. */
+    } on MissingPluginException {/* Older native hosts. */}
+  }
+
+  static Future<void> syncQuoteEngagement(
+      String id, int count, bool liked) async {
+    if (!supportsPin) return;
+    try {
+      await channel.invokeMethod<void>(
+          'quoteEngagement', {'id': id, 'count': count, 'liked': liked});
+    } on PlatformException {
+      /* Keep the server reaction even if a launcher fails. */
+    } on MissingPluginException {/* Older native hosts. */}
+  }
+
+  static Future<void> initialize(GlobalKey<NavigatorState> navigatorKey,
+      {String? quoteApiUrl, String? quoteApiKey, String viewerId = ''}) async {
     if (!supportsPin) return;
     void open(dynamic value) {
       if (value is! Map) return;
       final destination = value['destination'];
-      if (destination != 'scripture' && destination != 'community') return;
+      if (destination != 'scripture' &&
+          destination != 'community' &&
+          destination != 'quote') {
+        return;
+      }
       WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (destination == 'quote') {
+          final id =
+              value['reference'] is String ? value['reference'] as String : '';
+          if (id.isNotEmpty &&
+              !RegExp(r'^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$')
+                  .hasMatch(id)) {
+            return;
+          }
+          navigatorKey.currentState?.pushNamed(
+              Uri(
+                  path: '/daily_word',
+                  queryParameters: {if (id.isNotEmpty) 'id': id}).toString(),
+              arguments:
+                  value['like'] == 'true' ? DailyQuoteWidgetAction.like : null);
+          return;
+        }
         navigatorKey.currentState?.pushNamed(
           destination == 'scripture' ? '/daily_grace' : '/community',
           arguments: value['reference'] is String ? value['reference'] : null,
@@ -73,6 +118,13 @@ class DailyGraceService {
       if (call.method == 'open') open(call.arguments);
     });
     try {
+      if (quoteApiUrl != null && quoteApiKey != null) {
+        await channel.invokeMethod<void>('configureQuoteWidget', {
+          'apiUrl': quoteApiUrl,
+          'apiKey': quoteApiKey,
+          'viewerId': viewerId
+        });
+      }
       open(await channel.invokeMethod<dynamic>('initialDestination'));
     } on PlatformException {
       // Older native hosts can still use the in-app Scripture card.

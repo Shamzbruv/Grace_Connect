@@ -25,7 +25,7 @@ Deno.serve(async (request) => {
     });
     if (rankingError) throw rankingError;
     // The RPC validates the input and selects the current month using the
-    // ranking's calendar (UTC globally, the existing church quiz calendar locally).
+    // shared quiz calendar, including the final day's overnight play window.
     const monthKey = `${ranking.month}-01`;
     const month = parseJamaicaMonthKey(monthKey);
     const entries = (ranking.entries ?? []).map((row: Record<string, unknown>) => ({

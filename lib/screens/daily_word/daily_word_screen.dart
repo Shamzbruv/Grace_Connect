@@ -16,12 +16,15 @@ import '../../theme/app_colors.dart';
 import '../../widgets/share/share_card_customizer_sheet.dart';
 import '../../widgets/ui/app_feedback.dart';
 import '../../widgets/ui/app_loader.dart';
+import '../../widgets/daily_word_like_button.dart';
 import '../bible/bible_reader_screen.dart';
 
 class DailyWordScreen extends StatefulWidget {
-  const DailyWordScreen({super.key, this.motivationId});
+  const DailyWordScreen(
+      {super.key, this.motivationId, this.likeOnOpen = false});
 
   final String? motivationId;
+  final bool likeOnOpen;
 
   @override
   State<DailyWordScreen> createState() => _DailyWordScreenState();
@@ -31,6 +34,18 @@ class _DailyWordScreenState extends State<DailyWordScreen> {
   final _service = DailyMotivationService();
   final _dailyWordShareKey = GlobalKey();
   late Future<_DailyWordData> _future;
+  bool _widgetLikeConsumed = false;
+
+  Widget _likeButton(DailyMotivation motivation) {
+    final likeOnOpen = !_widgetLikeConsumed &&
+        widget.likeOnOpen &&
+        widget.motivationId == motivation.id;
+    if (likeOnOpen) _widgetLikeConsumed = true;
+    return DailyWordLikeButton(
+        key: ValueKey(motivation.id),
+        motivationId: motivation.id,
+        likeOnOpen: likeOnOpen);
+  }
 
   @override
   void initState() {
@@ -252,6 +267,8 @@ class _DailyWordScreenState extends State<DailyWordScreen> {
                   key: _dailyWordShareKey,
                   child: _DailyWordHero(motivation: data!.selected!),
                 ),
+                const SizedBox(height: 12),
+                _likeButton(data.selected!),
                 const SizedBox(height: 12),
                 if (data.selected!.hasStudyQuiz) ...[
                   _QuizStudyNotice(

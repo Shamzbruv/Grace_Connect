@@ -1,7 +1,6 @@
 import {
   authenticatedUser,
   handleOptions,
-  jamaicaDateString,
   jsonResponse,
   nextJamaicaRefresh,
   profileQuizChurchId,
@@ -9,6 +8,7 @@ import {
   serviceClient,
   userProfile,
 } from "../_shared/grace.ts";
+import { quizDateForPlay } from "../_shared/quiz_window.ts";
 
 function sanitizeQuestion(row: Record<string, unknown>) {
   return {
@@ -37,15 +37,18 @@ Deno.serve(async (request) => {
     const profile = await userProfile(client, user.id);
     const churchId = profileQuizChurchId(profile);
     const leaderboardScope = profileQuizScope(profile);
+    const requestTime = new Date();
 
     const { data: quiz } = await client
       .from("daily_bible_quizzes")
       .select("id, expires_at")
       .eq("church_id", churchId)
-      .eq("quiz_date", jamaicaDateString())
+      .eq("quiz_date", quizDateForPlay(requestTime))
       .eq("status", "published")
+      .lte("available_at", requestTime.toISOString())
+      .gt("expires_at", requestTime.toISOString())
       .maybeSingle();
-    if (!quiz) return jsonResponse({ error: "Daily Quiz is not available yet." }, 404);
+    if (!quiz) return jsonResponse({ error: "No daily quiz is open right now. Check the next release time." }, 404);
 
     const { count: questionCount, error: questionCountError } = await client
       .from("daily_bible_quiz_questions")
@@ -68,6 +71,7 @@ Deno.serve(async (request) => {
         return jsonResponse({
           ok: true,
           completed: true,
+          window_closes_at: quiz.expires_at,
           quiz_id: quiz.id,
           attempt: existing,
           leaderboard_scope: leaderboardScope,
@@ -105,6 +109,7 @@ Deno.serve(async (request) => {
       return jsonResponse({
         ok: true,
         resumed: true,
+        window_closes_at: quiz.expires_at,
         quiz_id: quiz.id,
         attempt: resumedAttempt,
         question: sanitizeQuestion(resumedQuestion),
@@ -153,6 +158,7 @@ Deno.serve(async (request) => {
       ok: true,
       quiz_id: quiz.id,
       attempt,
+      window_closes_at: quiz.expires_at,
       question: sanitizeQuestion(question),
       question_time_limit_seconds: 30,
       question_deadline_at: questionDeadline(attempt.question_started_at),

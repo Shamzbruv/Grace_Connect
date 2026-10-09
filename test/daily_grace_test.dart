@@ -107,4 +107,53 @@ void main() {
     debugDefaultTargetPlatformOverride = null;
     DailyGraceService.channel.setMethodCallHandler(null);
   });
+
+  testWidgets(
+      'quote widget opens its exact quote and only requests an explicit like',
+      (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    const codec = StandardMethodCodec();
+    const id = 'c9613e90-b45b-4c53-a145-7e2d12c8c932';
+    messenger.setMockMethodCallHandler(
+        DailyGraceService.channel,
+        (call) async => call.method == 'initialDestination'
+            ? {'destination': 'quote', 'reference': id, 'like': 'true'}
+            : null);
+    addTearDown(() {
+      messenger.setMockMethodCallHandler(DailyGraceService.channel, null);
+      DailyGraceService.channel.setMethodCallHandler(null);
+    });
+    final routes = <RouteSettings>[];
+    final key = GlobalKey<NavigatorState>();
+    await tester.pumpWidget(MaterialApp(
+        navigatorKey: key,
+        home: const Text('Home'),
+        onGenerateRoute: (settings) {
+          routes.add(settings);
+          return MaterialPageRoute<void>(builder: (_) => const Text('Quote'));
+        }));
+    await DailyGraceService.initialize(key);
+    await tester.pumpAndSettle();
+    expect(routes.single.name, '/daily_word?id=$id');
+    expect(routes.single.arguments, DailyQuoteWidgetAction.like);
+    Future<void> send(Map<String, String> value) async {
+      await messenger.handlePlatformMessage('love.graceconnect/home_widget',
+          codec.encodeMethodCall(MethodCall('open', value)), (_) {});
+      await tester.pumpAndSettle();
+    }
+
+    await send({
+      'destination': 'quote',
+      'reference': '../../developer',
+      'like': 'true'
+    });
+    expect(routes.length, 1);
+    await send({'destination': 'quote', 'reference': id, 'like': 'false'});
+    expect(routes.last.arguments, isNull);
+    expect(routes.length, 2);
+    debugDefaultTargetPlatformOverride = null;
+  });
 }

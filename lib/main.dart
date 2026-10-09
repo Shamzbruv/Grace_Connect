@@ -121,6 +121,10 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await NotificationService().showDataOnlyBackgroundMessage(message);
 }
 
+const _supabaseUrl = 'https://nimgsgnkcvddomrgkawb.supabase.co';
+const _supabasePublishableKey =
+    'sb_publishable_-lsEclVqaNPAlO4h7z3vtw_Q8xZY3cN';
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -142,8 +146,8 @@ Future<void> main() async {
   await HapticService.load();
 
   await Supabase.initialize(
-    url: 'https://nimgsgnkcvddomrgkawb.supabase.co',
-    anonKey: 'sb_publishable_-lsEclVqaNPAlO4h7z3vtw_Q8xZY3cN',
+    url: _supabaseUrl,
+    anonKey: _supabasePublishableKey,
     authOptions: const FlutterAuthClientOptions(
       authFlowType: AuthFlowType.pkce,
       detectSessionInUri: true,
@@ -233,6 +237,7 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
+  StreamSubscription<AuthState>? _widgetAuthSubscription;
   Widget _protected(
     Widget child, {
     AppFeature feature = AppFeature.appShell,
@@ -243,11 +248,28 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    unawaited(DailyGraceService.initialize(NotificationService.navigatorKey));
+    SupabaseClient? widgetClient;
+    if (DailyGraceService.supportsPin) {
+      try {
+        widgetClient = Supabase.instance.client;
+      } catch (_) {
+        // Offline previews can show bundled Scripture without an Auth client.
+      }
+    }
+    unawaited(DailyGraceService.initialize(NotificationService.navigatorKey,
+        quoteApiUrl: _supabaseUrl,
+        quoteApiKey: _supabasePublishableKey,
+        viewerId: widgetClient?.auth.currentUser?.id ?? ''));
+    if (widgetClient != null) {
+      _widgetAuthSubscription = widgetClient.auth.onAuthStateChange.listen(
+          (event) => unawaited(
+              DailyGraceService.syncQuoteViewer(event.session?.user.id ?? '')));
+    }
   }
 
   @override
   void dispose() {
+    unawaited(_widgetAuthSubscription?.cancel());
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -549,6 +571,8 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
                   builder: (_) => _protected(
                     DailyWordScreen(
                       motivationId: uri?.queryParameters['id'],
+                      likeOnOpen:
+                          settings.arguments == DailyQuoteWidgetAction.like,
                     ),
                     feature: AppFeature.dailyWord,
                   ),

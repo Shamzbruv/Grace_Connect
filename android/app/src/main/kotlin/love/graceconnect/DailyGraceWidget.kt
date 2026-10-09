@@ -84,9 +84,16 @@ class DailyGraceWidget : AppWidgetProvider() {
             }
             // Keep the destinations distinct without Intent.data: Flutter treats
             // every data URI as a route even for this private widget action.
-            val requestCode = id * 2 + if (destination == "community") 1 else 0
+            val requestCode = DailyWidgetIntent.requestCode(id, if (destination == "community") 1 else 0)
             return PendingIntent.getActivity(context, requestCode, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         }
+    }
+}
+
+object DailyWidgetIntent {
+    fun requestCode(widgetId: Int, action: Int): Int {
+        require(action in 0..3)
+        return widgetId * 4 + action
     }
 }
 

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:intl/intl.dart';
 import '../../services/haptic_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -49,6 +50,7 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
           .isNotEmpty;
   String? _selectedQuizMonth;
   DateTime? _nextRefreshAt;
+  DateTime? _quizExpiresAt;
   DateTime? _questionDeadlineAt;
   Timer? _questionTimer;
   Timer? _heartbeatTimer;
@@ -123,7 +125,7 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
       _pendingCompletion = null;
       _completion = null;
       _questionDeadlineAt = null;
-      _lastCountdownAutoRefreshAt = null;
+      _quizExpiresAt = null;
       _statusFuture = _service.status(generateIfMissing: true);
     });
   }
@@ -136,8 +138,9 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
           'You have 30 seconds for every question.\n'
           'Each correct answer earns 20 points, up to 100 points.\n'
           'If the app or connection is interrupted, you can resume the same question.\n'
-          'Your church leaderboard updates after you finish.\n'
-          'A new quiz becomes available every day at 7:00 AM.',
+          'The leaderboards update after you finish.\n'
+          '${_closingText()}\n'
+          'The next quiz opens ${_localTime(_nextRefreshAt)}.',
       confirmLabel: 'Start Quiz',
       icon: Icons.quiz_outlined,
     );
@@ -162,6 +165,8 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
       final quizId = data['quiz_id']?.toString();
       setState(() {
         _activeQuizId = quizId ?? _activeQuizId;
+        _quizExpiresAt =
+            DateTime.tryParse(data['window_closes_at']?.toString() ?? '');
         _attempt = Map<String, dynamic>.from(data['attempt'] as Map);
         _question = Map<String, dynamic>.from(data['question'] as Map);
         _nextRefreshAt =
@@ -211,9 +216,18 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
     _heartbeatTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       final attemptId = _attempt?['id']?.toString();
       if (_active && attemptId != null) {
-        unawaited(_service.heartbeat(attemptId));
+        unawaited(_sendHeartbeat(attemptId));
       }
     });
+  }
+
+  Future<void> _sendHeartbeat(String attemptId) async {
+    try {
+      final response = await _service.heartbeat(attemptId);
+      if (mounted && _active && response['closed'] == true) _loadStatus();
+    } catch (_) {
+      // A status/start request restores the attempt after connectivity returns.
+    }
   }
 
   Future<void> _submitAnswer(int selectedIndex) async {
@@ -258,10 +272,16 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
       if (mounted) {
         AppFeedback.show(
           context,
-          'Connection interrupted. Restoring the same quiz question…',
+          error is QuizClosedException
+              ? error.toString()
+              : 'Connection interrupted. Restoring the same quiz question…',
           type: AppFeedbackType.warning,
         );
-        await _resumeActiveQuiz();
+        if (error is QuizClosedException) {
+          _loadStatus();
+        } else {
+          await _resumeActiveQuiz();
+        }
       }
     } finally {
       if (mounted) setState(() => _submitting = false);
@@ -306,6 +326,8 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
       }
       setState(() {
         _activeQuizId = data['quiz_id']?.toString() ?? _activeQuizId;
+        _quizExpiresAt =
+            DateTime.tryParse(data['window_closes_at']?.toString() ?? '');
         _attempt = Map<String, dynamic>.from(data['attempt'] as Map);
         _question = Map<String, dynamic>.from(data['question'] as Map);
         _questionDeadlineAt =
@@ -376,17 +398,26 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
     return '${hours}h ${minutes}m ${seconds}s';
   }
 
+  String _localTime(DateTime? value) => value == null
+      ? 'at the next scheduled release'
+      : '${DateFormat.yMMMd().add_jm().format(value.toLocal())} (your time)';
+
+  String _closingText() => _quizExpiresAt == null
+      ? 'The closing time is shown before you start.'
+      : 'Closes ${_localTime(_quizExpiresAt)}. Finish all five questions before then.';
+
   void _refreshWhenCountdownExpires() {
+    if (!mounted || _submitting) return;
+    final now = DateTime.now();
+    final closed = _quizExpiresAt != null && !now.isBefore(_quizExpiresAt!);
     final target = _nextRefreshAt;
-    if (!mounted ||
-        _active ||
-        target == null ||
-        DateTime.now().isBefore(target)) {
-      return;
-    }
+    final nextReady = !_active && target != null && !now.isBefore(target);
+    if (!closed && !nextReady) return;
     final last = _lastCountdownAutoRefreshAt;
-    if (last != null && DateTime.now().difference(last).inMinutes < 1) return;
-    _lastCountdownAutoRefreshAt = DateTime.now();
+    // Preserve this throttle across status reloads. Offline/clock-skew cases
+    // must not request a new status every second after a boundary passes.
+    if (last != null && now.difference(last).inMinutes < 1) return;
+    _lastCountdownAutoRefreshAt = now;
     _loadStatus();
   }
 
@@ -439,9 +470,8 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
         leaderboardData: _leaderboardData,
         leaderboardLoading: _leaderboardLoading,
         onMonthChanged: (month) => _loadLeaderboard(quizMonth: month),
-        onLeaderboardScopeChanged: _hasChurch
-            ? (scope) => _loadLeaderboard(scope: scope)
-            : null,
+        onLeaderboardScopeChanged:
+            _hasChurch ? (scope) => _loadLeaderboard(scope: scope) : null,
         countdown: _countdownText(),
       );
     }
@@ -461,9 +491,8 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
             leaderboardData: _leaderboardData,
             leaderboardLoading: _leaderboardLoading,
             onMonthChanged: (month) => _loadLeaderboard(quizMonth: month),
-            onLeaderboardScopeChanged: _hasChurch
-                ? (scope) => _loadLeaderboard(scope: scope)
-                : null,
+            onLeaderboardScopeChanged:
+                _hasChurch ? (scope) => _loadLeaderboard(scope: scope) : null,
           );
         }
         final data = snapshot.data ?? const {};
@@ -500,6 +529,9 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
         }
         _nextRefreshAt =
             DateTime.tryParse(data['next_refresh_at']?.toString() ?? '');
+        _quizExpiresAt = DateTime.tryParse(
+            data['window_closes_at']?.toString() ??
+                (quiz is Map ? quiz['expires_at']?.toString() ?? '' : ''));
         final attempt = data['attempt'];
         if (attempt is Map && attempt.isNotEmpty) {
           return _AttemptStatusView(
@@ -508,19 +540,17 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
             leaderboardData: _leaderboardData,
             leaderboardLoading: _leaderboardLoading,
             onMonthChanged: (month) => _loadLeaderboard(quizMonth: month),
-            onLeaderboardScopeChanged: _hasChurch
-                ? (scope) => _loadLeaderboard(scope: scope)
-                : null,
+            onLeaderboardScopeChanged:
+                _hasChurch ? (scope) => _loadLeaderboard(scope: scope) : null,
             countdown: _countdownText(),
           );
         }
         return _QuizLanding(
-          title: data['available'] == true
-              ? 'Today’s quiz is ready'
-              : 'No quiz yet',
+          title:
+              data['available'] == true ? 'Daily quiz is ready' : 'No quiz yet',
           message: data['available'] == true
-              ? 'Five questions. Up to 100 points. Church leaderboard only.'
-              : 'The next Daily Bible Quiz refreshes at 7:00 AM.',
+              ? 'Five questions. Up to 100 points.\n${_closingText()}'
+              : 'The next Daily Bible Quiz opens ${_localTime(_nextRefreshAt)}.',
           countdown: _countdownText(),
           canStart: data['can_start'] == true,
           onStart: needsReading
@@ -536,9 +566,8 @@ class _BibleQuizScreenState extends State<BibleQuizScreen>
           leaderboardData: _leaderboardData,
           leaderboardLoading: _leaderboardLoading,
           onMonthChanged: (month) => _loadLeaderboard(quizMonth: month),
-          onLeaderboardScopeChanged: _hasChurch
-              ? (scope) => _loadLeaderboard(scope: scope)
-              : null,
+          onLeaderboardScopeChanged:
+              _hasChurch ? (scope) => _loadLeaderboard(scope: scope) : null,
         );
       },
     );
@@ -667,8 +696,7 @@ class _QuizLanding extends StatelessWidget {
                 icon: Icon(needsReading
                     ? Icons.menu_book_outlined
                     : Icons.play_arrow_rounded),
-                label: Text(
-                    needsReading ? 'Read Chapter First' : 'Start Today’s Quiz'),
+                label: Text(needsReading ? 'Read Chapter First' : 'Start Quiz'),
               ),
             ],
           ),

@@ -5,6 +5,7 @@ import {
   nextJamaicaRefresh,
   serviceClient,
 } from "../_shared/grace.ts";
+import { isQuizPlayable } from "../_shared/quiz_window.ts";
 
 function sanitizeQuestion(row: Record<string, unknown> | null) {
   if (!row) return null;
@@ -170,6 +171,15 @@ Deno.serve(async (request) => {
 
     if (attempt.status !== "active") {
       return jsonResponse({ error: "This quiz attempt is not active." }, 409);
+    }
+    const { data: quiz, error: quizError } = await client
+      .from("daily_bible_quizzes")
+      .select("status, available_at, expires_at")
+      .eq("id", attempt.quiz_id)
+      .maybeSingle();
+    if (quizError) throw quizError;
+    if (!isQuizPlayable(quiz)) {
+      return jsonResponse({ error: "This daily quiz has closed. Your saved answers are kept.", code: "quiz_closed" }, 410);
     }
     if (Number(question.question_order) !== Number(attempt.current_question_order)) {
       return jsonResponse({ error: "Question is no longer active." }, 409);

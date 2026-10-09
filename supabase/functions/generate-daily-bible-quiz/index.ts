@@ -16,6 +16,7 @@ import {
   userProfile,
 } from "../_shared/grace.ts";
 import { fallbackQuizQuestions, QuizQuestion } from "../_shared/quiz_bank.ts";
+import { quizClosesAt } from "../_shared/quiz_window.ts";
 import { contentQuotaExhausted } from "../_shared/content_batch_errors.ts";
 import {
   canonicalQuizFactKeys,
@@ -779,7 +780,7 @@ Deno.serve(async (request) => {
       return jsonResponse({ error: message }, 503);
     }
     const availableAt = quizReleaseAt(quizDate);
-    const expiresAt = quizReleaseAt(dateOffset(quizDate, 1));
+    const expiresAt = quizClosesAt(quizDate);
     const chapterStudy = isChapterStudyDate(quizDate);
     let studyContext: DailyWordStudyContext | null = null;
     if (chapterStudy) {
