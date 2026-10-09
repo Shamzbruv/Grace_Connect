@@ -78,3 +78,4 @@ build_log.txt
 
 # Local Flutter plugin Gradle state
 **/.gradle/
+android/.kotlin/

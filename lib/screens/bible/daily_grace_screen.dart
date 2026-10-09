@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../access/app_feature.dart';
 import '../../models/bible_passage_reference.dart';
@@ -21,7 +22,11 @@ class _DailyGraceScreenState extends State<DailyGraceScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('Daily Grace')),
+        appBar: AppBar(
+            title: const Text('Daily Grace'),
+            systemOverlayStyle: Theme.of(context).brightness == Brightness.dark
+                ? SystemUiOverlayStyle.light
+                : SystemUiOverlayStyle.dark),
         body: FutureBuilder<DailyScripture>(
             future: _scripture,
             builder: (context, snapshot) {
