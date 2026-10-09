@@ -10,8 +10,31 @@ import '../../theme/app_colors.dart';
 import '../../widgets/ui/app_scaffold.dart';
 import '../../widgets/ui/app_card.dart';
 
-class SettingsHomeScreen extends StatelessWidget {
+class SettingsHomeScreen extends StatefulWidget {
   const SettingsHomeScreen({super.key});
+
+  @override
+  State<SettingsHomeScreen> createState() => _SettingsHomeScreenState();
+}
+
+class _SettingsHomeScreenState extends State<SettingsHomeScreen> {
+  String? _accessIdentity;
+  Future<bool> _developerAccess = Future.value(false);
+  Future<bool> _ministryAccess = Future.value(false);
+  late final Future<PackageInfo> _packageInfo = PackageInfo.fromPlatform();
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final profile = context.read<UserRoleProvider>().userProfile;
+    final identity =
+        '${profile?.uid}:${profile?.churchId}:${profile?.roles.join(',')}';
+    if (_accessIdentity != identity) {
+      _accessIdentity = identity;
+      _developerAccess = DeveloperService().hasDeveloperAccess();
+      _ministryAccess = MinistryService().managesAnyMinistry();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -25,8 +48,6 @@ class SettingsHomeScreen extends StatelessWidget {
         roles.map(_normalizeRole).any({'pastor', 'senior_pastor'}.contains);
     final canManageSubscription =
         ChurchSubscriptionService.canManageForProfile(roleProvider.userProfile);
-    final developerAccessFuture = DeveloperService().hasDeveloperAccess();
-    final ministryAccessFuture = MinistryService().managesAnyMinistry();
 
     return AppScaffold(
       tutorialId: 'settings',
@@ -94,7 +115,7 @@ class SettingsHomeScreen extends StatelessWidget {
             ),
             const SizedBox(height: 24),
             FutureBuilder<bool>(
-              future: ministryAccessFuture,
+              future: _ministryAccess,
               builder: (context, snapshot) {
                 final hasMinistryAccess = snapshot.data ?? false;
                 if (!isStaff && !hasMinistryAccess) {
@@ -170,7 +191,7 @@ class SettingsHomeScreen extends StatelessWidget {
               ),
             ),
             FutureBuilder<bool>(
-              future: developerAccessFuture,
+              future: _developerAccess,
               builder: (context, snapshot) {
                 final isDeveloper = snapshot.data == true;
                 if (!isDeveloper) return const SizedBox.shrink();
@@ -201,7 +222,7 @@ class SettingsHomeScreen extends StatelessWidget {
             // Was hardcoded to 1.0.15-beta and had drifted several releases
             // behind the real build, which makes a support report useless.
             FutureBuilder<PackageInfo>(
-              future: PackageInfo.fromPlatform(),
+              future: _packageInfo,
               builder: (context, snapshot) {
                 final info = snapshot.data;
                 final label = info == null

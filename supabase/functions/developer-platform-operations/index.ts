@@ -1,6 +1,6 @@
 import { anonClient, authenticatedUser, handleOptions, jsonResponse,
   requireCronSecret, serviceClient } from "../_shared/grace.ts";
-import { fygaroPaymentConfigFromEnv } from "../_shared/fygaro.ts";
+import { requireFygaroCheckout } from "../_shared/fygaro_configuration.ts";
 import { r2ConfigFromEnv } from "../_shared/r2.ts";
 import { deleteR2Object } from "../_shared/reel_media.ts";
 import { listResetObjects, validateResetRequest } from "../_shared/platform_reset.ts";
@@ -32,19 +32,23 @@ async function work() {
       }
       if (!items.length) await command("advance");
     } else if (job.phase === "r2") {
+      if (Date.now() < Date.parse(job.consumed_at) + 16 * 60 * 1000) {
+        return {phase:job.phase,waiting_for_uploads:true};
+      }
       const config = r2ConfigFromEnv();
-      const keys = await listResetObjects(config);
-      // No continuation cursor: deleting the first page makes the next first
-      // page the remaining objects, including orphaned or late uploads.
-      const outcomes = await Promise.all(keys.map(key => deleteR2Object(config, key)));
+      const page = await listResetObjects(config, fetch, job.r2_after ?? undefined);
+      const { data: keys, error } = await client.rpc("platform_reset_filter_r2_keys", {p_keys:page,p_lease:job.lease});
+      if(error) throw error;
+      // Advance past protected files as well, so a page of review media cannot
+      // trap cleanup on the first page. Failed deletions never move the cursor.
+      const outcomes = await Promise.all((keys as string[]).map(key => deleteR2Object(config, key)));
       if (outcomes.some(outcome => !outcome.ok)) throw new Error("R2 deletion failed");
-      if (!keys.length) await command("advance");
+      if (page.length) await command("r2_cursor", page[page.length-1]);
+      else await command("advance");
     } else if (job.phase === "accounts") {
-      const { data, error } = await client.auth.admin.listUsers({ page: 1, perPage: 50 });
-      if (error) throw error;
-      const others = data.users.filter(user => user.id !== job.keeper_id);
-      for (const user of others) {
-        const { error } = await client.auth.admin.deleteUser(user.id);
+      const others = await command("account_batch") as string[];
+      for (const id of others) {
+        const { error } = await client.auth.admin.deleteUser(id);
         if (error) throw error;
       }
       if (!others.length) await command("advance");
@@ -82,11 +86,19 @@ Deno.serve(async request => {
   if (body.action === "status") {
     let paymentsReady = false;
     let mediaReady = false;
-    try { fygaroPaymentConfigFromEnv(); paymentsReady = true; } catch { /* Only readiness, never secret values. */ }
+    try { await requireFygaroCheckout(client); paymentsReady = true; } catch { /* Only readiness, never secret values. */ }
     try { r2ConfigFromEnv(); mediaReady = true; } catch { /* Same. */ }
     return jsonResponse({ ...status, payments_ready: paymentsReady, media_ready: mediaReady,
       reset_ready: mediaReady && !!Deno.env.get("DAILY_QUIZ_CRON_SECRET") && status.reset_worker_scheduled,
       payment_webhook: "https://nimgsgnkcvddomrgkawb.supabase.co/functions/v1/fygaro-webhook" });
+  }
+  if (body.action === "protect_review") {
+    if (status.role !== "super_developer") return jsonResponse({error:"Only the platform owner can configure review protection."},403);
+    const valid=(value:unknown,max:number)=>Array.isArray(value) && value.length>0 && value.length<=max && value.every(v=>typeof v==='string' && v.length<=320);
+    if(!valid(body.emails,20)||!valid(body.church_ids,10)) return jsonResponse({error:"Enter review login emails and church IDs."},400);
+    const {error}=await client.rpc("platform_reset_protect_review",{p_actor:user.id,p_emails:body.emails,p_church_ids:body.church_ids});
+    if(error) return jsonResponse({error:error.code==='P0001' ? error.message : "Review protection could not be saved. Check the accounts and church IDs."},400);
+    return jsonResponse({saved:true});
   }
   if (body.action !== "reset") return jsonResponse({ error: "Unknown action." }, 400);
   if (!status.reset.can_start || status.role !== "super_developer") return jsonResponse({ error: "This reset is unavailable or has already been used." }, 403);

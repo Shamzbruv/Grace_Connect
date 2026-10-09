@@ -11,6 +11,7 @@ import 'package:grace_connect/tutorial/tutorial_storage.dart';
 import 'package:grace_connect/tutorial/tutorial_tooltip.dart';
 import 'package:grace_connect/tutorial/tutorial_definition.dart';
 import 'package:grace_connect/tutorial/tutorial_registry.dart';
+import 'package:grace_connect/widgets/ui/app_scaffold.dart' as ui;
 
 const constPlaceholder = TutorialDefinition('missing', []);
 
@@ -87,6 +88,67 @@ Widget navigationPage(String screen) => TutorialScreenScope(
                 TutorialRegistry.definitions[screen]!.steps.first.targetId))));
 
 void main() {
+  testWidgets(
+      'Settings guide stays mounted through permission and layout changes',
+      (t) async {
+    final changing = ValueNotifier<double>(10);
+    addTearDown(changing.dispose);
+    final h = await mount(t, const Scaffold(body: Text('Home')));
+    h.nav.currentState!.push(MaterialPageRoute<void>(
+        builder: (_) => ui.AppScaffold(
+              title: 'Settings',
+              tutorialId: 'settings',
+              withBackground: true,
+              body: SingleChildScrollView(
+                  child: Column(children: [
+                const ListTile(title: Text('Devices & App'))
+                    .tutorial('settings.tools'),
+                ValueListenableBuilder<double>(
+                    valueListenable: changing,
+                    builder: (_, height, __) => SizeChangedLayoutNotifier(
+                        child: SizedBox(height: height))),
+                const SizedBox(height: 1200),
+              ])),
+            )));
+    await settleGuide(t);
+    await settleGuide(t);
+    expect(h.c.activeScreenId, 'settings');
+    expect(h.c.overlayVisible, true);
+    final firstGuide = t.element(find.byType(TutorialTooltip));
+    for (var i = 0; i < 12; i++) {
+      changing.value += 3;
+      await t.pump(const Duration(milliseconds: 50));
+      await t.pump();
+      expect(h.c.overlayVisible, true,
+          reason: 'Unrelated layout must not hide the guide');
+      expect(t.element(find.byType(TutorialTooltip)), same(firstGuide));
+    }
+    await t.tap(find.text('Next'));
+    await settleGuide(t);
+    expect(h.c.step?.targetId, 'settings.tools');
+    await t.tap(find.text('Got it'));
+    await settleGuide(t);
+    expect(h.c.isSeen('settings', 1), true);
+    expect(t.takeException(), isNull);
+  });
+
+  testWidgets('scrolling large guide text does not hide or restart the guide',
+      (t) async {
+    t.view.physicalSize = const Size(320, 440);
+    t.view.devicePixelRatio = 1;
+    addTearDown(t.view.resetPhysicalSize);
+    addTearDown(t.view.resetDevicePixelRatio);
+    final h = await mount(t, page(), scale: 2);
+    final scroll = find.descendant(
+        of: find.byType(TutorialTooltip),
+        matching: find.byType(SingleChildScrollView));
+    await t.drag(scroll, const Offset(0, -45));
+    await t.pump();
+    expect(h.c.overlayVisible, true);
+    expect(h.c.activeStepIndex, 0);
+    expect(find.byType(TutorialTooltip), findsOneWidget);
+    expect(t.takeException(), isNull);
+  });
   for (final size in [const Size(320, 568), const Size(568, 320)]) {
     testWidgets('large-text guide controls stay visible at $size', (t) async {
       t.view.physicalSize = size;

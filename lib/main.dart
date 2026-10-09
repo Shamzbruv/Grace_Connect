@@ -48,6 +48,8 @@ import 'screens/analytics/analytics_screen.dart';
 import 'screens/announcements/announcements_screen.dart';
 import 'screens/counseling/counseling_intro_screen.dart';
 import 'screens/community/community_notification_route_screen.dart';
+import 'screens/bible/daily_grace_screen.dart';
+import 'services/daily_grace_service.dart';
 import 'screens/community/saved_items_screen.dart';
 import 'screens/dashboard/church_overview_detail_screen.dart';
 import 'screens/daily_word/daily_word_screen.dart';
@@ -241,6 +243,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    unawaited(DailyGraceService.initialize(NotificationService.navigatorKey));
   }
 
   @override
@@ -321,6 +324,11 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
             themeMode: themeProvider.themeMode,
             home: const AuthWrapper(),
             routes: {
+              '/daily_grace': (context) => DailyGraceScreen(
+                  reference:
+                      ModalRoute.of(context)?.settings.arguments is String
+                          ? ModalRoute.of(context)!.settings.arguments as String
+                          : null),
               if (kDebugMode)
                 '/tutorial-preview': (_) => const TutorialPreview(),
               '/login': (context) => const LoginScreen(),

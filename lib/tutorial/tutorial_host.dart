@@ -105,9 +105,31 @@ class _TutorialHostState extends State<TutorialHost>
     if (!mounted) {
       return;
     }
+    final scene = _runtime?.active;
+    // Background cards, permission checks and app-bar back state can change
+    // layout without changing the active target. Keep the guide mounted;
+    // hiding it here changes route/layout state again and creates a flicker loop.
+    if (!_blocked &&
+        scene != null &&
+        scene.token == _scene &&
+        scene.screenId == _screenId &&
+        _controller?.current != null) {
+      if (_positioning) {
+        return;
+      }
+      final step = _controller?.step;
+      if (step != null &&
+          _positionedStep == step.targetId &&
+          _controller?.overlayVisible == true) {
+        final rect = _targetRect(scene.token, step.targetId);
+        if (rect != null) {
+          if (rect != _rect) setState(() => _rect = rect);
+          return;
+        }
+      }
+    }
     _request++;
     _settle?.cancel();
-    final scene = _runtime?.active;
     _block(true);
     if (scene?.token != _scene || scene?.screenId != _screenId) {
       _scene = scene?.token;
@@ -143,6 +165,24 @@ class _TutorialHostState extends State<TutorialHost>
       }
       await _position(request);
     });
+  }
+
+  Rect? _targetRect(Object scope, String targetId) {
+    final target = _runtime?.target(scope, targetId);
+    if (target == null || !target.mounted) return null;
+    final render = target.findRenderObject(), host = context.findRenderObject();
+    if (render is! RenderBox ||
+        host is! RenderBox ||
+        !render.attached ||
+        !render.hasSize ||
+        !host.hasSize ||
+        render.size.isEmpty) {
+      return null;
+    }
+    final rect =
+        (host.globalToLocal(render.localToGlobal(Offset.zero)) & render.size)
+            .intersect(Offset.zero & host.size);
+    return rect.isEmpty ? null : rect;
   }
 
   Future<void> _position(int request) async {
@@ -236,7 +276,7 @@ class _TutorialHostState extends State<TutorialHost>
   @override
   Widget build(BuildContext context) {
     final visible = _controller?.overlayVisible == true && _rect != null;
-    return NotificationListener<SizeChangedLayoutNotification>(
+    final content = NotificationListener<SizeChangedLayoutNotification>(
         onNotification: (_) {
           if (!_positioning) {
             _runtime?.changed();
@@ -250,12 +290,13 @@ class _TutorialHostState extends State<TutorialHost>
               }
               return false;
             },
-            child: Stack(fit: StackFit.expand, children: [
-              ExcludeSemantics(excluding: visible, child: widget.child),
-              if (visible)
-                Positioned.fill(
-                    child: TutorialOverlay(
-                        controller: _controller!, target: _rect!)),
-            ])));
+            child: ExcludeSemantics(excluding: visible, child: widget.child)));
+    // Scrolling the guide's own text must never reposition or restart it.
+    return Stack(fit: StackFit.expand, children: [
+      content,
+      if (visible)
+        Positioned.fill(
+            child: TutorialOverlay(controller: _controller!, target: _rect!)),
+    ]);
   }
 }

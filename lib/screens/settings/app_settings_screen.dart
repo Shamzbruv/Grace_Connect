@@ -4,6 +4,8 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../services/haptic_service.dart';
+import '../../services/daily_grace_service.dart';
+import '../../widgets/daily_grace_card.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../providers/theme_provider.dart';
@@ -129,6 +131,8 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
                   },
                 ),
                 const SizedBox(height: 16),
+                if (DailyGraceService.supportsPin)
+                  const DailyGraceWidgetSettings(),
                 _buildSwitchTile(
                   context,
                   'Data Saver',

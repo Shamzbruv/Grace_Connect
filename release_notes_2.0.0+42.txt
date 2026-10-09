@@ -1,0 +1,5 @@
+Welcome to Grace Connect 2.0!
+• Add Daily Grace to your Android home screen for daily Scripture and quick app shortcuts, even offline.
+• Find and reopen your saved reels from Saved.
+• Enjoy smoother Settings tutorials without flickering.
+• Improved saved-item previews, loading and accessibility.

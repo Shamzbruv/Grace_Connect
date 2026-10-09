@@ -1,0 +1,9 @@
+<resources>
+    <string name="daily_grace_title">DAILY GRACE</string>
+    <string name="daily_grace_brand">Grace Connect</string>
+    <string name="daily_grace_description">A daily Scripture and shortcuts to read and connect. Works offline.</string>
+    <string name="daily_grace_read">Read Scripture</string>
+    <string name="daily_grace_connect">Connect</string>
+    <string name="daily_grace_preview_verse">Yahweh is my shepherd: I shall lack nothing.</string>
+    <string name="daily_grace_preview_reference">Psalms 23:1 · WEB</string>
+</resources>

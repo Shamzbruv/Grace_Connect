@@ -1,5 +1,9 @@
 project_id = "nimgsgnkcvddomrgkawb"
 
+# Every request is authenticated with Auth and checked against the owner role.
+[functions.developer-fygaro-settings]
+verify_jwt = false
+
 [auth.email.template.invite]
 subject = "You are invited to Grace Connect"
 content_path = "./supabase/templates/invite.html"
