@@ -232,6 +232,10 @@ void main() {
       generator,
       contains('canonicalSelection = await loadPublishedGlobalSelection('),
     );
-    expect(generator, contains('hasConflict = canonicalFactKeys.some('));
+    // A local history conflict must never create a separate question set.
+    // Global now checks all audiences' history before generating once.
+    expect(generator, contains('selected = canonicalSelection;'));
+    expect(generator, contains('(!cronAuthorized && !regenerating)'));
+    expect(generator, isNot(contains('hasConflict = canonicalFactKeys.some(')));
   });
 }

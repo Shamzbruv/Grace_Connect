@@ -24,13 +24,26 @@ Deno.serve(async (request) => {
   const monthKey = jamaicaMonthDateKey(targetMonth);
   const monthLabel = jamaicaMonthLabel(targetMonth);
   const { start, end } = jamaicaMonthRange(targetMonth);
+  if (Date.now() < end.getTime() + 6 * 3_600_000) {
+    return jsonResponse({ ok: true, deferred: true, reason: "The final quiz is still open." });
+  }
 
-  const { data: attempts } = await client
-    .from("quiz_attempts")
-    .select("church_id_at_attempt, member_id, total_score, correct_answers, total_response_time_ms")
-    .eq("status", "completed")
-    .gte("completed_at", start.toISOString())
-    .lt("completed_at", end.toISOString());
+  // Page all completed attempts; the API row limit must never truncate awards.
+  // Month ownership comes from the quiz date, including overnight completions.
+  const attempts = [];
+  for (let offset = 0; ; offset += 500) {
+    const { data: page, error } = await client
+      .from("quiz_attempts")
+      .select("id, church_id_at_attempt, church_id, member_id, total_score, correct_answers, total_response_time_ms, daily_bible_quizzes!inner(quiz_date)")
+      .eq("status", "completed")
+      .gte("daily_bible_quizzes.quiz_date", jamaicaMonthDateKey(start))
+      .lt("daily_bible_quizzes.quiz_date", jamaicaMonthDateKey(end))
+      .order("id")
+      .range(offset, offset + 499);
+    if (error) return jsonResponse({ error: "Unable to load all quiz scores." }, 503);
+    attempts.push(...(page ?? []));
+    if ((page ?? []).length < 500) break;
+  }
 
   const byChurch = new Map<string, Map<string, {
     total_points: number;
@@ -40,7 +53,7 @@ Deno.serve(async (request) => {
   }>>();
 
   for (const attempt of attempts ?? []) {
-    const churchId = String(attempt.church_id_at_attempt ?? "");
+    const churchId = String(attempt.church_id_at_attempt ?? attempt.church_id ?? "");
     const memberId = String(attempt.member_id ?? "");
     if (!churchId || !memberId) continue;
     if (!byChurch.has(churchId)) byChurch.set(churchId, new Map());

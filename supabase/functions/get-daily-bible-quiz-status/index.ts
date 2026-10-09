@@ -1,7 +1,6 @@
 import {
   authenticatedUser,
   handleOptions,
-  jamaicaDateString,
   jsonResponse,
   nextJamaicaRefresh,
   profileQuizChurchId,
@@ -9,6 +8,7 @@ import {
   serviceClient,
   userProfile,
 } from "../_shared/grace.ts";
+import { quizDateForPlay, QUIZ_CALENDAR_ZONE } from "../_shared/quiz_window.ts";
 
 Deno.serve(async (request) => {
   const options = handleOptions(request);
@@ -22,7 +22,8 @@ Deno.serve(async (request) => {
     const churchId = profileQuizChurchId(profile);
     const leaderboardScope = profileQuizScope(profile);
 
-    const quizDate = jamaicaDateString();
+    const now = new Date();
+    const quizDate = quizDateForPlay(now);
     const refreshAt = nextJamaicaRefresh(7);
     const { data: quiz } = await client
       .from("daily_bible_quizzes")
@@ -30,6 +31,8 @@ Deno.serve(async (request) => {
       .eq("church_id", churchId)
       .eq("quiz_date", quizDate)
       .eq("status", "published")
+      .lte("available_at", now.toISOString())
+      .gt("expires_at", now.toISOString())
       .maybeSingle();
 
     if (!quiz) {
@@ -71,6 +74,8 @@ Deno.serve(async (request) => {
       ok: true,
       available: true,
       quiz,
+      window_closes_at: quiz.expires_at,
+      quiz_calendar_timezone: QUIZ_CALENDAR_ZONE,
       attempt,
       can_start: !attempt,
       can_resume: Boolean(attempt && attempt.status !== "completed"),

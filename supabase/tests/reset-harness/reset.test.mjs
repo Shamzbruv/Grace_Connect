@@ -53,6 +53,10 @@ async function fixture() {
   `);
   await db.exec(migration);
   await db.exec(guardCompletion);
+  const tutorials = await readFile(new URL('../../migrations/20261002025212_user_tutorial_progress.sql', import.meta.url), 'utf8');
+  await db.exec('begin;'+tutorials+'commit;');
+  const surveys=await readFile(new URL('../../migrations/20261002212722_app_experience_surveys.sql',import.meta.url),'utf8');
+  await db.exec(surveys);
   return db;
 }
 async function value(db, sql) { return Object.values((await db.query(sql)).rows[0])[0]; }

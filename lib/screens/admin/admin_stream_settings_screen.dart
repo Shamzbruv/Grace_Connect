@@ -1,3 +1,4 @@
+import 'package:grace_connect/tutorial/tutorial_anchor.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -288,7 +289,8 @@ class _AdminStreamSettingsScreenState extends State<AdminStreamSettingsScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text('Live Stream Settings',
-            style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+                style: GoogleFonts.poppins(fontWeight: FontWeight.bold))
+            .tutorial('live_management.overview'),
         backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
         foregroundColor: Theme.of(context).appBarTheme.foregroundColor,
       ),
@@ -335,7 +337,7 @@ class _AdminStreamSettingsScreenState extends State<AdminStreamSettingsScreen> {
                 },
                 onChanged: (_) =>
                     setState(() {}), // Rebuild to update UI state if needed
-              ),
+              ).tutorial('live_management.tools'),
               const SizedBox(height: 12),
               if (_showPreview && _previewController != null)
                 Container(
@@ -414,6 +416,6 @@ class _AdminStreamSettingsScreenState extends State<AdminStreamSettingsScreen> {
           ),
         ),
       ),
-    );
+    ).tutorialScreen('live_management', ready: true);
   }
 }

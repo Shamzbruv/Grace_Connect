@@ -1,3 +1,4 @@
+import 'package:grace_connect/tutorial/tutorial_anchor.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -176,118 +177,124 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
         : currentProfile?.uid;
 
     return AppScaffold(
+      tutorialId: 'public_profile',
       title: 'Public Profile',
       showBottomMenu: true,
       body: FutureBuilder<SocialProfile?>(
         future: _profileFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
+        builder: (context, snapshot) => TutorialReadiness(
+          ready: snapshot.connectionState != ConnectionState.waiting &&
+              !snapshot.hasError &&
+              snapshot.hasData,
+          child: Builder(builder: (context) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator());
+            }
 
-          final profile = snapshot.data;
-          if (profile == null) {
-            return _EmptyProfileState(
-              onRetry: () => setState(() => _profileFuture = _loadProfile()),
-            );
-          }
+            final profile = snapshot.data;
+            if (profile == null) {
+              return _EmptyProfileState(
+                onRetry: () => setState(() => _profileFuture = _loadProfile()),
+              );
+            }
 
-          final isOwnProfile = profile.userId == currentUserId;
-          return RefreshIndicator(
-            onRefresh: () async {
-              setState(() => _profileFuture = _loadProfile());
-              await _profileFuture;
-            },
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(20, 24, 20, 120),
-              children: [
-                _ProfileHeader(
-                  profile: profile,
-                  followerCount:
-                      _followerCountOverride ?? profile.followerCount,
-                  showFollowingCount: isOwnProfile,
-                ),
-                const SizedBox(height: 18),
-                if (profile.bio.trim().isNotEmpty)
-                  _InfoSection(
-                    icon: Icons.auto_stories_outlined,
-                    title: 'About',
-                    body: profile.bio.trim(),
+            final isOwnProfile = profile.userId == currentUserId;
+            return RefreshIndicator(
+              onRefresh: () async {
+                setState(() => _profileFuture = _loadProfile());
+                await _profileFuture;
+              },
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(20, 24, 20, 120),
+                children: [
+                  _ProfileHeader(
+                    profile: profile,
+                    followerCount:
+                        _followerCountOverride ?? profile.followerCount,
+                    showFollowingCount: isOwnProfile,
                   ),
-                if (profile.churchName.trim().isNotEmpty)
-                  _InfoSection(
-                    icon: Icons.church_outlined,
-                    title: 'Church',
-                    body: profile.churchName.trim(),
-                  ),
-                const SizedBox(height: 16),
-                if (isOwnProfile)
-                  FilledButton.icon(
-                    onPressed: () => Navigator.of(context)
-                        .pushNamed('/edit_public_profile')
-                        .then((_) {
-                      if (mounted) {
-                        setState(() => _profileFuture = _loadProfile());
-                      }
-                    }),
-                    icon: const Icon(Icons.edit_outlined),
-                    label: const Text('Edit Public Profile'),
-                  )
-                else ...[
-                  FilledButton.icon(
-                    onPressed:
-                        _updatingFollow ? null : () => _toggleFollow(profile),
-                    icon: Icon(
-                      _followStatus == 'accepted'
-                          ? Icons.person_remove_outlined
-                          : Icons.person_add_alt_1_outlined,
+                  const SizedBox(height: 18),
+                  if (profile.bio.trim().isNotEmpty)
+                    _InfoSection(
+                      icon: Icons.auto_stories_outlined,
+                      title: 'About',
+                      body: profile.bio.trim(),
                     ),
-                    label: Text(
-                      _followStatus == 'accepted'
-                          ? 'Following'
-                          : _followStatus == 'pending'
-                              ? 'Requested'
-                              : 'Follow',
+                  if (profile.churchName.trim().isNotEmpty)
+                    _InfoSection(
+                      icon: Icons.church_outlined,
+                      title: 'Church',
+                      body: profile.churchName.trim(),
                     ),
-                  ),
-                  const SizedBox(height: 10),
-                  OutlinedButton.icon(
-                    onPressed: profile.acceptsMessages && !_startingMessage
-                        ? () => _startMessage(profile)
-                        : null,
-                    icon: _startingMessage
-                        ? const SizedBox.square(
-                            dimension: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.chat_bubble_outline),
-                    label: Text(
-                      _startingMessage ? 'Opening…' : 'Message',
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 24),
-                Text(
-                  'Public Posts',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w900,
+                  const SizedBox(height: 16),
+                  if (isOwnProfile)
+                    FilledButton.icon(
+                      onPressed: () => Navigator.of(context)
+                          .pushNamed('/edit_public_profile')
+                          .then((_) {
+                        if (mounted) {
+                          setState(() => _profileFuture = _loadProfile());
+                        }
+                      }),
+                      icon: const Icon(Icons.edit_outlined),
+                      label: const Text('Edit Public Profile'),
+                    )
+                  else ...[
+                    FilledButton.icon(
+                      onPressed:
+                          _updatingFollow ? null : () => _toggleFollow(profile),
+                      icon: Icon(
+                        _followStatus == 'accepted'
+                            ? Icons.person_remove_outlined
+                            : Icons.person_add_alt_1_outlined,
                       ),
-                ),
-                const SizedBox(height: 12),
-                _PublicPostsSection(postsFuture: _postsFuture),
-                const SizedBox(height: 24),
-                Text('Reel Grace',
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleLarge
-                        ?.copyWith(fontWeight: FontWeight.w900)),
-                const SizedBox(height: 12),
-                ProfileReelsGrid(
-                    key: ObjectKey(_profileFuture), authorId: profile.userId),
-              ],
-            ),
-          );
-        },
+                      label: Text(
+                        _followStatus == 'accepted'
+                            ? 'Following'
+                            : _followStatus == 'pending'
+                                ? 'Requested'
+                                : 'Follow',
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    OutlinedButton.icon(
+                      onPressed: profile.acceptsMessages && !_startingMessage
+                          ? () => _startMessage(profile)
+                          : null,
+                      icon: _startingMessage
+                          ? const SizedBox.square(
+                              dimension: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.chat_bubble_outline),
+                      label: Text(
+                        _startingMessage ? 'Opening…' : 'Message',
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 24),
+                  Text(
+                    'Public Posts',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w900,
+                        ),
+                  ).tutorial('public_profile.tools'),
+                  const SizedBox(height: 12),
+                  _PublicPostsSection(postsFuture: _postsFuture),
+                  const SizedBox(height: 24),
+                  Text('Reel Grace',
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleLarge
+                          ?.copyWith(fontWeight: FontWeight.w900)),
+                  const SizedBox(height: 12),
+                  ProfileReelsGrid(
+                      key: ObjectKey(_profileFuture), authorId: profile.userId),
+                ],
+              ),
+            );
+          }),
+        ),
       ),
     );
   }

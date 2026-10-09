@@ -1,3 +1,4 @@
+import 'package:grace_connect/tutorial/tutorial_anchor.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -110,7 +111,7 @@ class _DonationsScreenState extends State<DonationsScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Giving'),
+        title: const Text('Giving').tutorial('donations.overview'),
         actions: [
           IconButton(
             tooltip: 'Refresh',
@@ -122,78 +123,82 @@ class _DonationsScreenState extends State<DonationsScreen> {
       bottomNavigationBar: const AppBottomMenu(),
       body: FutureBuilder<String?>(
         future: _givingUrlFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
+        builder: (context, snapshot) => TutorialReadiness(
+          ready: snapshot.connectionState != ConnectionState.waiting &&
+              !snapshot.hasError,
+          child: Builder(builder: (context) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator());
+            }
 
-          final givingUrl = snapshot.data;
+            final givingUrl = snapshot.data;
 
-          return ListView(
-            padding: const EdgeInsets.all(18),
-            children: [
-              Container(
-                padding: const EdgeInsets.all(18),
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: theme.colorScheme.outline.withValues(alpha: 0.18),
+            return ListView(
+              padding: const EdgeInsets.all(18),
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(18),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: theme.colorScheme.outline.withValues(alpha: 0.18),
+                    ),
                   ),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(
-                      Icons.volunteer_activism_outlined,
-                      size: 34,
-                      color: theme.colorScheme.primary,
-                    ),
-                    const SizedBox(height: 14),
-                    Text(
-                      'Give securely',
-                      style: theme.textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.w800,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        Icons.volunteer_activism_outlined,
+                        size: 34,
+                        color: theme.colorScheme.primary,
                       ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      givingUrl == null
-                          ? 'Your church has not configured its SpurrOpen giving link yet. SpurrOpen is free to sign up for, and your church admin can add the giving link from settings.'
-                          : 'You will be redirected to your church SpurrOpen giving page.',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
+                      const SizedBox(height: 14),
+                      Text(
+                        'Give securely',
+                        style: theme.textTheme.headlineSmall?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 18),
-                    SizedBox(
-                      width: double.infinity,
-                      child: FilledButton.icon(
-                        onPressed: givingUrl == null
-                            ? null
-                            : () => _openGivingLink(givingUrl),
-                        icon: const Icon(Icons.open_in_new_outlined),
-                        label: const Text('Open Giving Page'),
+                      const SizedBox(height: 8),
+                      Text(
+                        givingUrl == null
+                            ? 'Your church has not configured its SpurrOpen giving link yet. SpurrOpen is free to sign up for, and your church admin can add the giving link from settings.'
+                            : 'You will be redirected to your church SpurrOpen giving page.',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-              ),
-              if (canManageGiving) ...[
-                const SizedBox(height: 14),
-                OutlinedButton.icon(
-                  onPressed: () async {
-                    await Navigator.pushNamed(context, '/settings/finance');
-                    if (mounted) _loadGivingUrl();
-                  },
-                  icon: const Icon(Icons.settings_outlined),
-                  label: const Text('Configure SpurrOpen Link'),
-                ),
+                      const SizedBox(height: 18),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          onPressed: givingUrl == null
+                              ? null
+                              : () => _openGivingLink(givingUrl),
+                          icon: const Icon(Icons.open_in_new_outlined),
+                          label: const Text('Open Giving Page'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ).tutorial('donations.tools'),
+                if (canManageGiving) ...[
+                  const SizedBox(height: 14),
+                  OutlinedButton.icon(
+                    onPressed: () async {
+                      await Navigator.pushNamed(context, '/settings/finance');
+                      if (mounted) _loadGivingUrl();
+                    },
+                    icon: const Icon(Icons.settings_outlined),
+                    label: const Text('Configure SpurrOpen Link'),
+                  ),
+                ],
               ],
-            ],
-          );
-        },
+            );
+          }),
+        ),
       ),
-    );
+    ).tutorialScreen('donations', ready: true);
   }
 }

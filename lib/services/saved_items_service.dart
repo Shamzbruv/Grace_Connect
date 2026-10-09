@@ -14,6 +14,7 @@ class SavedItem {
     this.mediaUrl = '',
     this.mediaType = '',
     this.createdAt,
+    this.isAvailable = true,
   });
 
   final String id;
@@ -24,6 +25,7 @@ class SavedItem {
   final String mediaUrl;
   final String mediaType;
   final DateTime? createdAt;
+  final bool isAvailable;
 
   factory SavedItem.fromMap(Map<String, dynamic> data) {
     final metadata = data['metadata'];
@@ -45,6 +47,7 @@ class SavedItem {
           data['media_type']?.toString() ??
           '',
       createdAt: _dateValue(data['created_at']),
+      isAvailable: data['is_available'] != false,
     );
   }
 
@@ -68,18 +71,17 @@ class SavedItemsService {
     if (userId == null) return const [];
 
     try {
-      final rows = await _supabase
-          .from('social_saved_items')
-          .select()
-          .eq('user_id', userId)
-          .order('created_at', ascending: false)
-          .limit(100);
+      final rows = await _supabase.rpc('get_my_saved_items') as List;
+      if (_userId != userId) return const [];
       return rows
           .map((row) => SavedItem.fromMap(Map<String, dynamic>.from(row)))
           .toList();
     } catch (error) {
       debugPrint('Saved items unavailable: $error');
-      return _localSavedItems(userId);
+      final local = await _localSavedItems(userId);
+      if (_userId != userId) return const [];
+      if (local.isEmpty) rethrow;
+      return local;
     }
   }
 
@@ -151,25 +153,24 @@ class SavedItemsService {
   Future<void> unsave({
     required String entityType,
     required String entityId,
+    bool localOnly = false,
   }) async {
     final userId = _userId;
     if (userId == null || entityId.trim().isEmpty) return;
 
-    try {
+    if (!localOnly) {
       await _supabase
           .from('social_saved_items')
           .delete()
           .eq('user_id', userId)
           .eq('entity_type', entityType)
           .eq('entity_id', entityId);
-    } catch (error) {
-      debugPrint('Saved items table unavailable, using local unsave: $error');
-      await _unsaveLocally(
-        userId: userId,
-        entityType: entityType,
-        entityId: entityId,
-      );
     }
+    await _unsaveLocally(
+      userId: userId,
+      entityType: entityType,
+      entityId: entityId,
+    );
   }
 
   String _localKey(String userId) => 'local_social_saved_items_$userId';

@@ -1,3 +1,4 @@
+import 'package:grace_connect/tutorial/tutorial_anchor.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -295,11 +296,21 @@ class AppBottomMenu extends StatelessWidget {
 
   Widget _longPressable(int index, Widget child) {
     final handler = onDestinationLongPressed;
-    if (handler == null) return child;
+    final target = TutorialAnchor(
+        id: 'bottom_nav.${const [
+          'feed',
+          'events',
+          'home',
+          'bible',
+          'more'
+        ][index]}',
+        global: true,
+        child: child);
+    if (handler == null) return target;
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
       onLongPress: () => handler(index),
-      child: child,
+      child: target,
     );
   }
 

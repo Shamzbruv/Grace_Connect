@@ -16,6 +16,8 @@ import {
   userProfile,
 } from "../_shared/grace.ts";
 import { fallbackQuizQuestions, QuizQuestion } from "../_shared/quiz_bank.ts";
+import { quizClosesAt } from "../_shared/quiz_window.ts";
+import { contentQuotaExhausted } from "../_shared/content_batch_errors.ts";
 import {
   canonicalQuizFactKeys,
   rotatingQuizFactExclusions,
@@ -256,15 +258,10 @@ async function quizHasExactlyFiveQuestions(
   client: ReturnType<typeof serviceClient>,
   quizId: string,
 ): Promise<boolean> {
-  try {
-    const { data: rows, error } = await client
-      .from("daily_bible_quiz_questions")
-      .select("id")
-      .eq("quiz_id", quizId);
-    return !error && rows?.length === 5;
-  } catch (_) {
-    return false;
-  }
+  const { data: rows, error } = await client
+    .from("daily_bible_quiz_questions").select("id").eq("quiz_id", quizId);
+  if (error) throw new Error("Quiz readiness could not be verified.");
+  return rows?.length === 5;
 }
 
 async function quizUniquenessSettings(
@@ -554,7 +551,7 @@ async function loadPublishedGlobalSelection(
   // released to members yet. Both states have already passed
   // replace_daily_bible_quiz_questions (the DB-level fact-conflict guard),
   // so both are equally safe to mirror.
-  const { data: quiz } = await client
+  const { data: quiz, error: quizReadError } = await client
     .from("daily_bible_quizzes")
     .select(
       "id, generation_source, quiz_mode, study_chapter_key, source_daily_motivation_id",
@@ -563,6 +560,7 @@ async function loadPublishedGlobalSelection(
     .eq("quiz_date", quizDate)
     .in("status", ["scheduled", "published"])
     .maybeSingle();
+  if (quizReadError) throw new Error("Canonical quiz could not be loaded.");
   if (!quiz?.id) return null;
   // Only mirror Global if it was built for today's exact contract. A stale
   // or mismatched row (wrong chapter link, wrong quiz_mode) must never be
@@ -582,7 +580,8 @@ async function loadPublishedGlobalSelection(
     )
     .eq("quiz_id", quiz.id)
     .order("question_order");
-  if (error || !rows || rows.length !== 5) return null;
+  if (error) throw new Error("Canonical questions could not be loaded.");
+  if (!rows || rows.length !== 5) return null;
 
   const questions: QuizQuestion[] = rows.map((row) => ({
     question: String(row.question_text ?? ""),
@@ -613,6 +612,26 @@ async function loadPublishedGlobalSelection(
   return { questions, source, reusedRecent: false };
 }
 
+async function matchesCanonical(
+  client: ReturnType<typeof serviceClient>,
+  quizId: string,
+  questions: QuizQuestion[],
+): Promise<boolean> {
+  if (questions.length !== 5) return false;
+  const { data, error } = await client.from("daily_bible_quiz_questions")
+    .select("question_text,correct_answer,option_a,option_b,option_c,option_d")
+    .eq("quiz_id", quizId).order("question_order");
+  return !error && data?.length === 5 &&
+    data.every((row, index) =>
+      row.question_text === questions[index].question &&
+      row.correct_answer === questions[index].correct_answer &&
+      [row.option_a, row.option_b, row.option_c, row.option_d].every((
+        option,
+        i,
+      ) => option === questions[index].options[i])
+    );
+}
+
 Deno.serve(async (request) => {
   const options = handleOptions(request);
   if (options) return options;
@@ -623,12 +642,28 @@ Deno.serve(async (request) => {
   const client = serviceClient();
   const requestBody = await request.json().catch(() => ({}));
   const action = String(requestBody.action ?? "release");
+  if (!["prepare", "release", "regenerate_scheduled"].includes(action)) {
+    return jsonResponse({ error: "Unsupported action." }, 400);
+  }
   const preparing = action === "prepare";
   const regenerating = action === "regenerate_scheduled";
   const shouldPublish = !preparing && !regenerating;
   const cronAuthorized = hasCronSecret(request, "DAILY_QUIZ_CRON_SECRET");
   const today = jamaicaDateString();
   let quizDate = preparing ? dateOffset(today, 1) : today;
+  if (preparing && cronAuthorized && requestBody.quiz_date != null) {
+    const date = String(requestBody.quiz_date);
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(date) || date <= today ||
+      date > dateOffset(today, 62) || Number.isNaN(Date.parse(date)) ||
+      new Date(date).toISOString().slice(0, 10) !== date
+    ) {
+      return jsonResponse({
+        error: "Choose a valid future preparation date within 62 days.",
+      }, 400);
+    }
+    quizDate = date;
+  }
   let churchIds: string[] = [];
   let requestedQuiz: Record<string, unknown> | null = null;
 
@@ -656,7 +691,19 @@ Deno.serve(async (request) => {
     }
     requestedQuiz = quiz;
     quizDate = String(quiz.quiz_date);
-    churchIds = [String(quiz.church_id)];
+    const { data: peers, error: peersError } = await client
+      .from("daily_bible_quizzes").select("church_id")
+      .eq("quiz_date", quizDate).eq("status", "scheduled");
+    if (peersError) {
+      return jsonResponse(
+        { error: "Shared audiences could not be loaded." },
+        503,
+      );
+    }
+    churchIds = [
+      GLOBAL_VISITOR_CHURCH_ID,
+      ...(peers ?? []).map((row) => String(row.church_id)),
+    ];
   } else if (cronAuthorized) {
     const { data: churchRows } = await client
       .from("users")
@@ -682,59 +729,80 @@ Deno.serve(async (request) => {
         error: "Today's quiz opens at 7:00 AM Jamaica time.",
       }, 425);
     }
-    churchIds = [profileQuizChurchId(await userProfile(client, userId))];
+    churchIds = [
+      GLOBAL_VISITOR_CHURCH_ID,
+      profileQuizChurchId(await userProfile(client, userId)),
+    ];
   }
 
-  const runId = await createGenerationRun(
-    client,
-    quizDate,
-    regenerating
-      ? "developer_refresh"
-      : preparing
-      ? "cron_prepare"
-      : cronAuthorized
-      ? "cron_release"
-      : "user",
-  );
-  let uniquenessSettings: QuizUniquenessSettings;
-  try {
-    uniquenessSettings = await quizUniquenessSettings(client);
-  } catch (error) {
-    const message = error instanceof Error
-      ? error.message
-      : "Quiz uniqueness settings could not be verified.";
-    await updateGenerationRun(client, runId, {
-      completed_at: new Date().toISOString(),
-      churches_checked: churchIds.length,
-      ai_status: "not_called",
-      error_message: message,
-    });
-    return jsonResponse({ error: message }, 503);
+  churchIds = Array.from(new Set(churchIds));
+  if (regenerating && requestedQuiz?.church_id !== GLOBAL_VISITOR_CHURCH_ID) {
+    return jsonResponse({
+      error:
+        "Refresh the Global quiz to keep every audience on the same question set.",
+    }, 409);
   }
-  const availableAt = quizReleaseAt(quizDate);
-  const expiresAt = quizReleaseAt(dateOffset(quizDate, 1));
-  const chapterStudy = isChapterStudyDate(quizDate);
-  let studyContext: DailyWordStudyContext | null = null;
-  if (chapterStudy) {
+  const { data: generationLease, error: leaseError } = await client.rpc(
+    "quiz_generation_lease",
+    { p_date: quizDate },
+  );
+  if (leaseError) {
+    return jsonResponse({
+      error: "Quiz preparation is temporarily unavailable.",
+    }, 503);
+  }
+  if (!generationLease) return jsonResponse({ ok: true, preparing: true }, 202);
+  try {
+    const runId = await createGenerationRun(
+      client,
+      quizDate,
+      regenerating
+        ? "developer_refresh"
+        : preparing
+        ? "cron_prepare"
+        : cronAuthorized
+        ? "cron_release"
+        : "user",
+    );
+    let uniquenessSettings: QuizUniquenessSettings;
     try {
-      studyContext = await dailyWordStudyContext(client, quizDate);
+      uniquenessSettings = await quizUniquenessSettings(client);
     } catch (error) {
       const message = error instanceof Error
         ? error.message
-        : "The Daily Word study chapter could not be loaded.";
+        : "Quiz uniqueness settings could not be verified.";
       await updateGenerationRun(client, runId, {
         completed_at: new Date().toISOString(),
         churches_checked: churchIds.length,
         ai_status: "not_called",
         error_message: message,
-        metadata: { action, quiz_mode: "chapter_study" },
       });
       return jsonResponse({ error: message }, 503);
     }
-  }
-  const quizPrompt = (blockedFactKeys: Set<string>, variationBatch = 0) =>
-    chapterStudy && studyContext
-      ? `You are creating a chapter-study Bible Quiz for Grace Connect.
+    const availableAt = quizReleaseAt(quizDate);
+    const expiresAt = quizClosesAt(quizDate);
+    const chapterStudy = isChapterStudyDate(quizDate);
+    let studyContext: DailyWordStudyContext | null = null;
+    if (chapterStudy) {
+      try {
+        studyContext = await dailyWordStudyContext(client, quizDate);
+      } catch (error) {
+        const message = error instanceof Error
+          ? error.message
+          : "The Daily Word study chapter could not be loaded.";
+        await updateGenerationRun(client, runId, {
+          completed_at: new Date().toISOString(),
+          churches_checked: churchIds.length,
+          ai_status: "not_called",
+          error_message: message,
+          metadata: { action, quiz_mode: "chapter_study" },
+        });
+        return jsonResponse({ error: message }, 503);
+      }
+    }
+    const quizPrompt = (blockedFactKeys: Set<string>, variationBatch = 0) =>
+      chapterStudy && studyContext
+        ? `You are creating a chapter-study Bible Quiz for Grace Connect.
 The Daily Word asked members to study ${studyContext.chapter.book} ${studyContext.chapter.chapter}. Every question and every scripture reference MUST be answerable solely from this exact chapter. Do not refer to any other Bible chapter.
 Public-domain World English Bible chapter text:
 ${studyContext.chapter.text}
@@ -743,502 +811,532 @@ Generate 12 varied, fact-based multiple-choice questions. Cover different people
 The Jamaica release date is ${quizDate}. This is variation batch ${variationBatch}.
 Each question needs four distinct options, one unambiguous correct answer, a concise explanation grounded in the supplied text, and references only in the form "${studyContext.chapter.book} ${studyContext.chapter.chapter}:Verse".
 Do not reuse these canonical passage-and-answer facts: ${
-        rotatingQuizFactExclusions(blockedFactKeys, variationBatch).join(
-          ", ",
-        ) ||
-        "none"
-      }.
+          rotatingQuizFactExclusions(blockedFactKeys, variationBatch).join(
+            ", ",
+          ) ||
+          "none"
+        }.
 Avoid tricks, denomination-specific interpretation, prophecy-date predictions, prosperity claims, and copyrighted quotations.
 Return valid JSON only in this shape:
 {"questions":[{"question":"string","options":["string","string","string","string"],"correct_option_index":0,"correct_answer":"string","explanation":"string","scripture_references":["Book Chapter:Verse"],"category":"string","difficulty":"easy"}]}`
-      : `You are creating Bible Quiz questions for Grace Connect, a Christian church app.
+        : `You are creating Bible Quiz questions for Grace Connect, a Christian church app.
 Generate 12 varied, fact-based, respectful multiple-choice questions strictly grounded in Scripture.
 The Jamaica release date is ${quizDate}. Avoid famous starter questions and paraphrases of the same fact.
 This is variation batch ${variationBatch}; deliberately explore less commonly used passages and facts.
 Mix Old Testament, Gospels, Acts, Epistles, wisdom, prophets, parables, miracles, women and men of faith, and Christian living.
 Each question needs four distinct options, one unambiguous correct answer, a concise explanation, and accurate references.
 Do not reuse these canonical passage-and-answer facts: ${
-        rotatingQuizFactExclusions(blockedFactKeys, variationBatch).join(
-          ", ",
-        ) ||
-        "none"
-      }.
+          rotatingQuizFactExclusions(blockedFactKeys, variationBatch).join(
+            ", ",
+          ) ||
+          "none"
+        }.
 Avoid denomination-specific interpretations, tricks, prophecy-date predictions, prosperity claims, and copyrighted quotations.
 Return valid JSON only in this shape:
 {"questions":[{"question":"string","options":["string","string","string","string"],"correct_option_index":0,"correct_answer":"string","explanation":"string","scripture_references":["Book Chapter:Verse"],"category":"string","difficulty":"easy"}]}`;
 
-  let sharedAiResponse: unknown = null;
-  let aiStatus = "not_called";
-  let sharedAiAttempted = false;
-  // Populated whenever both AI providers come back empty, so the eventual
-  // "fewer than five facts available" error can say *why* -- an HTTP
-  // failure, a truncated/malformed response, quota, etc. -- instead of
-  // leaving every AI failure mode indistinguishable from genuine fact
-  // exhaustion, which is what made this expensive to diagnose in production.
-  let lastAiDiagnostic: string | null = null;
-  // Which provider actually produced the current sharedAiResponse -- surfaced
-  // in the run metadata so a Hugging Face outage being silently covered by
-  // Gemini (or vice versa) is visible, not just inferred from the absence of
-  // an error.
-  let lastAiProvider: "huggingface" | "gemini" | null = null;
-  const ensureSharedAiResponse = async (blockedFactKeys: Set<string>) => {
-    if (sharedAiAttempted) return;
-    sharedAiAttempted = true;
-    try {
-      // The baseline is shared for cron scalability, but is seeded with a real
-      // audience history (global is processed first for cron runs). Any later
-      // church that needs more candidates gets its own rotating targeted calls.
-      // callAiJson tries Hugging Face first and only calls Gemini if Hugging
-      // Face fails -- Gemini is a backup provider, not a second independent
-      // source, so the two must never be blended into one prompt response.
-      const { data, diagnostic, provider } = await callAiJson(
-        quizPrompt(blockedFactKeys, 0),
-        3600,
-      );
-      sharedAiResponse = data;
-      if (diagnostic) lastAiDiagnostic = diagnostic;
-      if (provider) lastAiProvider = provider;
-      aiStatus =
-        Array.isArray((sharedAiResponse as AiQuizResponse | null)?.questions)
-          ? "received"
-          : "invalid";
-    } catch (error) {
-      aiStatus = "failed";
-      lastAiDiagnostic = `callAiJson threw: ${
-        error instanceof Error ? error.message : String(error)
-      }`;
-    }
-  };
-  const targetedAiResponse = async (
-    blockedFactKeys: Set<string>,
-    variationBatch: number,
-  ) => {
-    try {
-      const { data, diagnostic, provider } = await callAiJson(
-        quizPrompt(blockedFactKeys, variationBatch),
-        3600,
-      );
-      if (diagnostic) lastAiDiagnostic = diagnostic;
-      if (provider) lastAiProvider = provider;
-      if (Array.isArray((data as AiQuizResponse | null)?.questions)) {
-        aiStatus = "received";
-        return data;
+    let sharedAiResponse: unknown = null;
+    let aiStatus = "not_called";
+    let sharedAiAttempted = false;
+    // Populated whenever both AI providers come back empty, so the eventual
+    // "fewer than five facts available" error can say *why* -- an HTTP
+    // failure, a truncated/malformed response, quota, etc. -- instead of
+    // leaving every AI failure mode indistinguishable from genuine fact
+    // exhaustion, which is what made this expensive to diagnose in production.
+    let lastAiDiagnostic: string | null = null;
+    // Which provider actually produced the current sharedAiResponse -- surfaced
+    // in the run metadata so a Hugging Face outage being silently covered by
+    // Gemini (or vice versa) is visible, not just inferred from the absence of
+    // an error.
+    let lastAiProvider: "huggingface" | "gemini" | null = null;
+    const ensureSharedAiResponse = async (blockedFactKeys: Set<string>) => {
+      if (sharedAiAttempted) return;
+      sharedAiAttempted = true;
+      try {
+        // The baseline is shared for cron scalability, but is seeded with a real
+        // audience history (global is processed first for cron runs). Any later
+        // church that needs more candidates gets its own rotating targeted calls.
+        // callAiJson tries Hugging Face first and only calls Gemini if Hugging
+        // Face fails -- Gemini is a backup provider, not a second independent
+        // source, so the two must never be blended into one prompt response.
+        const { data, diagnostic, provider } = await callAiJson(
+          quizPrompt(blockedFactKeys, 0),
+          3600,
+        );
+        sharedAiResponse = data;
+        if (diagnostic) lastAiDiagnostic = diagnostic;
+        if (provider) lastAiProvider = provider;
+        aiStatus =
+          Array.isArray((sharedAiResponse as AiQuizResponse | null)?.questions)
+            ? "received"
+            : "invalid";
+      } catch (error) {
+        aiStatus = "failed";
+        lastAiDiagnostic = `callAiJson threw: ${
+          error instanceof Error ? error.message : String(error)
+        }`;
       }
-      aiStatus = "invalid";
-    } catch (error) {
-      aiStatus = "failed";
-      lastAiDiagnostic = `callAiJson threw: ${
-        error instanceof Error ? error.message : String(error)
-      }`;
-    }
-    return null;
-  };
-  await updateGenerationRun(client, runId, {
-    churches_checked: churchIds.length,
-    ai_status: aiStatus,
-  });
+    };
+    const targetedAiResponse = async (
+      blockedFactKeys: Set<string>,
+      variationBatch: number,
+    ) => {
+      try {
+        const { data, diagnostic, provider } = await callAiJson(
+          quizPrompt(blockedFactKeys, variationBatch),
+          3600,
+        );
+        if (diagnostic) lastAiDiagnostic = diagnostic;
+        if (provider) lastAiProvider = provider;
+        if (Array.isArray((data as AiQuizResponse | null)?.questions)) {
+          aiStatus = "received";
+          return data;
+        }
+        aiStatus = "invalid";
+      } catch (error) {
+        aiStatus = "failed";
+        lastAiDiagnostic = `callAiJson threw: ${
+          error instanceof Error ? error.message : String(error)
+        }`;
+      }
+      return null;
+    };
+    await updateGenerationRun(client, runId, {
+      churches_checked: churchIds.length,
+      ai_status: aiStatus,
+    });
 
-  let published = 0;
-  let scheduled = 0;
-  let skippedExisting = 0;
-  let failedChurches = 0;
-  const sources = new Set<string>();
-  const issues: GenerationIssue[] = [];
-  const expectedChapterKey = studyContext?.chapter.key ?? null;
-  const expectedDailyWordId = studyContext?.motivationId ?? null;
-  // Grace Connect Global and every church are meant to see the identical
-  // Daily Bible Quiz every day, not an independently generated variant per
-  // audience. Whichever audience is processed first in this run selects the
-  // real question set; everyone after it reuses that exact selection
-  // instead of making its own AI call -- one generation per day total,
-  // regardless of how many churches exist, not one per church.
-  let canonicalSelection: Awaited<ReturnType<typeof selectFiveQuestions>> | null =
-    null;
-  // Global is very often already published by the time a later run (a cron
-  // retry, or a member opening the app) processes a church that still needs
-  // one -- without this, that later run would go straight to its own fresh
-  // AI call and could produce different content than what Global already
-  // has, defeating "always identical" the moment the two runs don't overlap.
-  if (!regenerating) {
-    canonicalSelection = await loadPublishedGlobalSelection(
-      client,
-      quizDate,
-      expectedChapterKey,
-      expectedDailyWordId,
-    );
-  }
-
-  for (const churchId of churchIds) {
-    const existingResult = requestedQuiz
-      ? { data: requestedQuiz }
-      : await client
-        .from("daily_bible_quizzes")
-        .select("*")
-        .eq("church_id", churchId)
-        .eq("quiz_date", quizDate)
-        .maybeSingle();
-    const existing = existingResult.data as Record<string, unknown> | null;
-
-    if (existing?.status === "published") {
-      if (shouldPublish) await publishQuiz(client, existing, churchId, issues);
-      skippedExisting++;
-      continue;
-    }
-
-    const existingReady = existing?.id
-      ? await quizHasExactlyFiveQuestions(client, String(existing.id))
-      : false;
-    const existingContractReady = chapterStudy
-      ? existing?.quiz_mode === "chapter_study" &&
-        existing?.study_chapter_key === expectedChapterKey &&
-        existing?.source_daily_motivation_id === expectedDailyWordId
-      : existing?.quiz_mode === "pop_quiz" &&
-        existing?.study_chapter_key == null &&
-        existing?.source_daily_motivation_id == null;
-    if (
-      !regenerating && existingReady && existingContractReady &&
-      existing?.status === "scheduled"
-    ) {
-      const { error: uniquenessError } = await client.rpc(
-        "validate_daily_bible_quiz_uniqueness",
-        { p_quiz_id: existing.id },
+    let published = 0;
+    let scheduled = 0;
+    let skippedExisting = 0;
+    let failedChurches = 0;
+    const sources = new Set<string>();
+    const issues: GenerationIssue[] = [];
+    const expectedChapterKey = studyContext?.chapter.key ?? null;
+    const expectedDailyWordId = studyContext?.motivationId ?? null;
+    // Grace Connect Global and every church are meant to see the identical
+    // Daily Bible Quiz every day, not an independently generated variant per
+    // audience. Whichever audience is processed first in this run selects the
+    // real question set; everyone after it reuses that exact selection
+    // instead of making its own AI call -- one generation per day total,
+    // regardless of how many churches exist, not one per church.
+    let canonicalSelection:
+      | Awaited<ReturnType<typeof selectFiveQuestions>>
+      | null = null;
+    // Global is very often already published by the time a later run (a cron
+    // retry, or a member opening the app) processes a church that still needs
+    // one -- without this, that later run would go straight to its own fresh
+    // AI call and could produce different content than what Global already
+    // has, defeating "always identical" the moment the two runs don't overlap.
+    if (!regenerating) {
+      canonicalSelection = await loadPublishedGlobalSelection(
+        client,
+        quizDate,
+        expectedChapterKey,
+        expectedDailyWordId,
       );
-      if (!uniquenessError) {
+    }
+
+    for (const churchId of churchIds) {
+      const existingResult = requestedQuiz?.church_id === churchId
+        ? { data: requestedQuiz, error: null }
+        : await client
+          .from("daily_bible_quizzes")
+          .select("*")
+          .eq("church_id", churchId)
+          .eq("quiz_date", quizDate)
+          .maybeSingle();
+      if (existingResult.error) {
+        throw new Error("Existing quiz could not be loaded.");
+      }
+      const existing = existingResult.data as Record<string, unknown> | null;
+
+      if (existing?.status === "published") {
         if (shouldPublish) {
-          if (await publishQuiz(client, existing, churchId, issues)) {
-            published++;
-          } else {
-            failedChurches++;
-          }
-        } else {
-          scheduled++;
+          await publishQuiz(client, existing, churchId, issues);
         }
         skippedExisting++;
         continue;
       }
-      // A scheduled row created before strict mode may already repeat retained
-      // history. Regenerate it in this same release slot instead of skipping it
-      // and discovering the conflict only when members try to open the quiz.
-    }
 
-    let blockedFactKeys: Set<string>;
-    try {
-      blockedFactKeys = await blockedQuestionFactKeys(
-        client,
-        churchId,
-        quizDate,
-      );
-    } catch (error) {
-      failedChurches++;
-      issues.push({
-        church_id: churchId,
-        stage: "strict_uniqueness_history",
-        message: error instanceof Error
-          ? error.message
-          : "Quiz fact history could not be verified.",
-      });
-      continue;
-    }
-    if (regenerating && existing?.id) {
-      const { data: currentRows, error: currentRowsError } = await client
-        .from("daily_bible_quiz_questions")
-        .select(
-          "fact_keys, question_text, correct_answer, scripture_references, category, difficulty, option_a, option_b, option_c, option_d, correct_option_index, explanation",
-        )
-        .eq("quiz_id", existing.id);
-      if (currentRowsError) {
+      const existingReady = existing?.id
+        ? await quizHasExactlyFiveQuestions(client, String(existing.id))
+        : false;
+      const existingContractReady = chapterStudy
+        ? existing?.quiz_mode === "chapter_study" &&
+          existing?.study_chapter_key === expectedChapterKey &&
+          existing?.source_daily_motivation_id === expectedDailyWordId
+        : existing?.quiz_mode === "pop_quiz" &&
+          existing?.study_chapter_key == null &&
+          existing?.source_daily_motivation_id == null;
+      if (
+        !regenerating && existingReady && existingContractReady &&
+        (churchId === GLOBAL_VISITOR_CHURCH_ID ||
+          await matchesCanonical(
+            client,
+            String(existing?.id),
+            canonicalSelection?.questions ?? [],
+          )) &&
+        existing?.status === "scheduled"
+      ) {
+        const { error: uniquenessError } = await client.rpc(
+          "validate_daily_bible_quiz_uniqueness",
+          { p_quiz_id: existing.id },
+        );
+        if (!uniquenessError) {
+          if (shouldPublish) {
+            if (await publishQuiz(client, existing, churchId, issues)) {
+              published++;
+            } else {
+              failedChurches++;
+            }
+          } else {
+            scheduled++;
+          }
+          skippedExisting++;
+          continue;
+        }
+        // A scheduled row created before strict mode may already repeat retained
+        // history. Regenerate it in this same release slot instead of skipping it
+        // and discovering the conflict only when members try to open the quiz.
+      }
+
+      let blockedFactKeys: Set<string>;
+      try {
+        blockedFactKeys = await blockedQuestionFactKeys(
+          client,
+          churchId,
+          quizDate,
+        );
+      } catch (error) {
         failedChurches++;
         issues.push({
           church_id: churchId,
-          stage: "strict_uniqueness_current_quiz",
-          message: currentRowsError.message,
+          stage: "strict_uniqueness_history",
+          message: error instanceof Error
+            ? error.message
+            : "Quiz fact history could not be verified.",
         });
         continue;
       }
-      for (const row of currentRows ?? []) {
-        if (Array.isArray(row.fact_keys)) {
-          row.fact_keys.map(String).map((key) => key.trim()).filter(Boolean)
-            .forEach((key) => blockedFactKeys.add(key));
+      if (regenerating && existing?.id) {
+        const { data: currentRows, error: currentRowsError } = await client
+          .from("daily_bible_quiz_questions")
+          .select(
+            "fact_keys, question_text, correct_answer, scripture_references, category, difficulty, option_a, option_b, option_c, option_d, correct_option_index, explanation",
+          )
+          .eq("quiz_id", existing.id);
+        if (currentRowsError) {
+          failedChurches++;
+          issues.push({
+            church_id: churchId,
+            stage: "strict_uniqueness_current_quiz",
+            message: currentRowsError.message,
+          });
+          continue;
         }
-        const candidate = validateQuestion(
-          {
-            question: row.question_text,
-            options: [row.option_a, row.option_b, row.option_c, row.option_d],
-            correct_option_index: row.correct_option_index,
-            correct_answer: row.correct_answer,
-            explanation: row.explanation,
-            scripture_references: row.scripture_references,
-            category: row.category,
-            difficulty: row.difficulty,
-          },
-          expectedChapterKey,
-        );
-        if (candidate) {
-          canonicalQuizFactKeys(candidate).forEach((key) =>
-            blockedFactKeys.add(key)
+        for (const row of currentRows ?? []) {
+          if (Array.isArray(row.fact_keys)) {
+            row.fact_keys.map(String).map((key) => key.trim()).filter(Boolean)
+              .forEach((key) => blockedFactKeys.add(key));
+          }
+          const candidate = validateQuestion(
+            {
+              question: row.question_text,
+              options: [row.option_a, row.option_b, row.option_c, row.option_d],
+              correct_option_index: row.correct_option_index,
+              correct_answer: row.correct_answer,
+              explanation: row.explanation,
+              scripture_references: row.scripture_references,
+              category: row.category,
+              difficulty: row.difficulty,
+            },
+            expectedChapterKey,
           );
+          if (candidate) {
+            canonicalQuizFactKeys(candidate).forEach((key) =>
+              blockedFactKeys.add(key)
+            );
+          }
         }
       }
-    }
 
-    // Scheduled quizzes publish exactly as reviewed. AI is only called when a
-    // quiz really needs to be generated or deliberately refreshed.
-    let selected: Awaited<ReturnType<typeof selectFiveQuestions>> | null =
-      null;
-    if (!regenerating && canonicalSelection != null) {
-      // Mirroring is only safe if none of the canonical facts were already
-      // used in *this* church's own retained history -- e.g. Global picked a
-      // fact fresh for itself, but this specific church already asked it in
-      // an earlier quiz. Falling through to this church's own generation
-      // below is what keeps that case from turning into "no quiz today",
-      // the exact failure this whole change exists to prevent.
-      const canonicalFactKeys = canonicalSelection.questions.flatMap((q) =>
-        canonicalQuizFactKeys(q)
-      );
-      const hasConflict = canonicalFactKeys.some((key) =>
-        blockedFactKeys.has(key)
-      );
-      if (!hasConflict) selected = canonicalSelection;
-    }
-    if (selected != null) {
-      // Another audience earlier in this same run already produced the
-      // day's real question set; every later audience gets the identical
-      // five questions instead of triggering its own AI call.
-    } else {
-    await ensureSharedAiResponse(blockedFactKeys);
-    const seed = `${quizDate}:${churchId}:${
-      regenerating ? crypto.randomUUID() : "scheduled"
-    }`;
-    try {
-      selected = await selectFiveQuestions(
-        sharedAiResponse,
-        seed,
-        blockedFactKeys,
-        uniquenessSettings.guaranteeUnique,
-        expectedChapterKey,
-      );
-    } catch (initialError) {
-      // Once the shared pool and curated bank are exhausted, make focused AI
-      // requests containing this church's actual canonical exclusions. Merge
-      // valid candidates across batches; never weaken the blocked set.
-      const accumulated = Array.isArray(
-          (sharedAiResponse as AiQuizResponse | null)?.questions,
-        )
-        ? [...((sharedAiResponse as AiQuizResponse).questions ?? [])]
-        : ([] as QuizQuestion[]);
-      let targetedError: unknown = initialError;
-      for (let batch = 1; batch <= 3; batch++) {
-        const targeted = await targetedAiResponse(blockedFactKeys, batch);
-        if (Array.isArray((targeted as AiQuizResponse | null)?.questions)) {
-          accumulated.push(
-            ...((targeted as AiQuizResponse).questions ?? []),
-          );
-        }
+      // Scheduled quizzes publish exactly as reviewed. AI is only called when a
+      // quiz really needs to be generated or deliberately refreshed.
+      let selected: Awaited<ReturnType<typeof selectFiveQuestions>> | null =
+        null;
+      if (
+        canonicalSelection != null &&
+        (!regenerating || churchId !== GLOBAL_VISITOR_CHURCH_ID)
+      ) {
+        selected = canonicalSelection;
+      }
+      if (
+        selected == null &&
+        (churchId !== GLOBAL_VISITOR_CHURCH_ID ||
+          (!cronAuthorized && !regenerating))
+      ) {
+        failedChurches++;
+        issues.push({
+          church_id: churchId,
+          stage: "canonical_pending",
+          message:
+            "The shared daily question set is awaiting scheduled preparation. No per-user or per-church AI request was made.",
+        });
+        continue;
+      }
+      if (selected != null) {
+        // Another audience earlier in this same run already produced the
+        // day's real question set; every later audience gets the identical
+        // five questions instead of triggering its own AI call.
+      } else {
+        await ensureSharedAiResponse(blockedFactKeys);
+        const seed = `${quizDate}:${GLOBAL_VISITOR_CHURCH_ID}:${
+          regenerating ? crypto.randomUUID() : "scheduled"
+        }`;
         try {
           selected = await selectFiveQuestions(
-            { questions: accumulated },
+            sharedAiResponse,
             seed,
             blockedFactKeys,
             uniquenessSettings.guaranteeUnique,
             expectedChapterKey,
           );
-          targetedError = null;
-          break;
-        } catch (error) {
-          targetedError = error;
+        } catch (initialError) {
+          // Once the shared pool and curated bank are exhausted, make focused AI
+          // requests containing this church's actual canonical exclusions. Merge
+          // valid candidates across batches; never weaken the blocked set.
+          const accumulated = Array.isArray(
+              (sharedAiResponse as AiQuizResponse | null)?.questions,
+            )
+            ? [...((sharedAiResponse as AiQuizResponse).questions ?? [])]
+            : ([] as QuizQuestion[]);
+          let targetedError: unknown = initialError;
+          for (let batch = 1; batch <= 3; batch++) {
+            if (contentQuotaExhausted(lastAiDiagnostic)) break;
+            const targeted = await targetedAiResponse(blockedFactKeys, batch);
+            if (Array.isArray((targeted as AiQuizResponse | null)?.questions)) {
+              accumulated.push(
+                ...((targeted as AiQuizResponse).questions ?? []),
+              );
+            }
+            try {
+              selected = await selectFiveQuestions(
+                { questions: accumulated },
+                seed,
+                blockedFactKeys,
+                uniquenessSettings.guaranteeUnique,
+                expectedChapterKey,
+              );
+              targetedError = null;
+              break;
+            } catch (error) {
+              targetedError = error;
+            }
+          }
+          if (targetedError != null) {
+            failedChurches++;
+            const baseMessage = targetedError instanceof Error
+              ? targetedError.message
+              : initialError instanceof Error
+              ? initialError.message
+              : "Five unseen Scripture facts were not available.";
+            issues.push({
+              church_id: churchId,
+              stage: "strict_uniqueness_exhausted",
+              message: lastAiDiagnostic
+                ? `${baseMessage} [last AI call: ${lastAiDiagnostic}]`
+                : baseMessage,
+            });
+            continue;
+          }
         }
       }
-      if (targetedError != null) {
+      if (selected == null) {
         failedChurches++;
-        const baseMessage = targetedError instanceof Error
-          ? targetedError.message
-          : initialError instanceof Error
-          ? initialError.message
-          : "Five unseen Scripture facts were not available.";
         issues.push({
           church_id: churchId,
           stage: "strict_uniqueness_exhausted",
           message: lastAiDiagnostic
-            ? `${baseMessage} [last AI call: ${lastAiDiagnostic}]`
-            : baseMessage,
+            ? `Five unseen Scripture facts were not available. [last AI call: ${lastAiDiagnostic}]`
+            : "Five unseen Scripture facts were not available.",
         });
         continue;
       }
-    }
-    }
-    if (!regenerating && selected != null) canonicalSelection = selected;
-    if (selected == null) {
-      failedChurches++;
-      issues.push({
-        church_id: churchId,
-        stage: "strict_uniqueness_exhausted",
-        message: lastAiDiagnostic
-          ? `Five unseen Scripture facts were not available. [last AI call: ${lastAiDiagnostic}]`
-          : "Five unseen Scripture facts were not available.",
-      });
-      continue;
-    }
-    sources.add(selected.source);
-    const uniquenessNote = uniquenessSettings.guaranteeUnique
-      ? "Strict uniqueness verified against all retained published and scheduled Scripture facts."
-      : selected.reusedRecent
-      ? `Relaxed uniqueness reused a fact after checking the configured ${uniquenessSettings.relaxedHistoryDays}-day window.`
-      : `Relaxed uniqueness checked the configured ${uniquenessSettings.relaxedHistoryDays}-day window.`;
-    const validationNotes = chapterStudy && studyContext
-      ? `All five questions are grounded in ${studyContext.chapter.book} ${studyContext.chapter.chapter}, the linked Daily Word chapter. ${uniquenessNote}`
-      : `Pop quiz. ${uniquenessNote}`;
+      sources.add(selected.source);
+      const uniquenessNote = uniquenessSettings.guaranteeUnique
+        ? "Strict uniqueness verified against all retained published and scheduled Scripture facts."
+        : selected.reusedRecent
+        ? `Relaxed uniqueness reused a fact after checking the configured ${uniquenessSettings.relaxedHistoryDays}-day window.`
+        : `Relaxed uniqueness checked the configured ${uniquenessSettings.relaxedHistoryDays}-day window.`;
+      const validationNotes = chapterStudy && studyContext
+        ? `All five questions are grounded in ${studyContext.chapter.book} ${studyContext.chapter.chapter}, the linked Daily Word chapter. ${uniquenessNote}`
+        : `Pop quiz. ${uniquenessNote}`;
 
-    let quiz = existing;
-    let quizError: { message: string } | null = null;
-    if (!quiz) {
-      const inserted = await client
-        .from("daily_bible_quizzes")
-        .insert({
+      let quiz = existing;
+      let quizError: { message: string } | null = null;
+      if (!quiz) {
+        const inserted = await client
+          .from("daily_bible_quizzes")
+          .insert({
+            church_id: churchId,
+            quiz_date: quizDate,
+            available_at: availableAt.toISOString(),
+            expires_at: expiresAt.toISOString(),
+            status: "draft",
+            generation_source: selected.source,
+            generation_status: "pending",
+            notification_sent_at: null,
+            validation_notes: validationNotes,
+            quiz_mode: chapterStudy ? "chapter_study" : "pop_quiz",
+            study_chapter_key: expectedChapterKey,
+            source_daily_motivation_id: expectedDailyWordId,
+          })
+          .select("*")
+          .single();
+        quiz = inserted.data;
+        quizError = inserted.error;
+      }
+      if (quizError || !quiz) {
+        failedChurches++;
+        issues.push({
           church_id: churchId,
-          quiz_date: quizDate,
-          available_at: availableAt.toISOString(),
-          expires_at: expiresAt.toISOString(),
-          status: "draft",
-          generation_source: selected.source,
-          generation_status: "pending",
-          notification_sent_at: null,
-          validation_notes: validationNotes,
-          quiz_mode: chapterStudy ? "chapter_study" : "pop_quiz",
-          study_chapter_key: expectedChapterKey,
-          source_daily_motivation_id: expectedDailyWordId,
-        })
-        .select("*")
-        .single();
-      quiz = inserted.data;
-      quizError = inserted.error;
-    }
-    if (quizError || !quiz) {
-      failedChurches++;
-      issues.push({
-        church_id: churchId,
-        stage: "quiz_upsert",
-        message: quizError?.message ?? "Quiz row could not be saved.",
-      });
-      continue;
-    }
+          stage: "quiz_upsert",
+          message: quizError?.message ?? "Quiz row could not be saved.",
+        });
+        continue;
+      }
 
-    if (existing) {
-      const configured = await client
-        .from("daily_bible_quizzes")
-        .update({
-          quiz_mode: chapterStudy ? "chapter_study" : "pop_quiz",
-          study_chapter_key: expectedChapterKey,
-          source_daily_motivation_id: expectedDailyWordId,
-        })
-        .eq("id", quiz.id)
-        .select("*")
-        .single();
-      if (configured.error || !configured.data) {
+      if (existing) {
+        const configured = await client
+          .from("daily_bible_quizzes")
+          .update({
+            quiz_mode: chapterStudy ? "chapter_study" : "pop_quiz",
+            study_chapter_key: expectedChapterKey,
+            source_daily_motivation_id: expectedDailyWordId,
+          })
+          .eq("id", quiz.id)
+          .select("*")
+          .single();
+        if (configured.error || !configured.data) {
+          failedChurches++;
+          issues.push({
+            church_id: churchId,
+            stage: "quiz_study_contract",
+            message: configured.error?.message ??
+              "Quiz study linkage could not be saved.",
+          });
+          continue;
+        }
+        quiz = configured.data;
+      }
+      if (!quiz) {
         failedChurches++;
         issues.push({
           church_id: churchId,
           stage: "quiz_study_contract",
-          message: configured.error?.message ??
-            "Quiz study linkage could not be saved.",
+          message: "Quiz study linkage returned no row.",
         });
         continue;
       }
-      quiz = configured.data;
-    }
-    if (!quiz) {
-      failedChurches++;
-      issues.push({
-        church_id: churchId,
-        stage: "quiz_study_contract",
-        message: "Quiz study linkage returned no row.",
-      });
-      continue;
-    }
-    const readyQuiz = quiz;
+      const readyQuiz = quiz;
 
-    const questions = [];
-    for (const question of selected.questions) {
-      questions.push({
-        ...question,
-        fact_keys: canonicalQuizFactKeys(question),
-        question_hash: await hashQuestion(question),
-      });
-    }
-    const targetStatus = shouldPublish ? "published" : "scheduled";
-    const { error: replacementError } = await client.rpc(
-      "replace_daily_bible_quiz_questions",
-      {
-        p_quiz_id: readyQuiz.id,
-        p_questions: questions,
-        p_generation_source: selected.source,
-        p_generation_status: selected.source === "fallback"
-          ? "fallback"
-          : "generated",
-        p_validation_notes: validationNotes,
-        p_status: targetStatus,
-      },
-    );
-    if (replacementError) {
-      failedChurches++;
-      issues.push({
-        church_id: churchId,
-        stage: "atomic_question_replace",
-        message: replacementError.message,
-      });
-      if (!regenerating) {
-        await client.from("daily_bible_quizzes").update({
-          status: "failed",
-          generation_status: "failed",
-        }).eq("id", readyQuiz.id);
+      const questions = [];
+      for (const question of selected.questions) {
+        questions.push({
+          ...question,
+          fact_keys: canonicalQuizFactKeys(question),
+          question_hash: await hashQuestion(question),
+        });
       }
-      continue;
-    }
-
-    if (shouldPublish) {
-      if (
-        await publishQuiz(
-          client,
-          { ...readyQuiz, status: "published", notification_sent_at: null },
-          churchId,
-          issues,
-        )
-      ) {
-        published++;
-      } else {
+      const targetStatus = shouldPublish ? "published" : "scheduled";
+      const { error: replacementError } = await client.rpc(
+        "replace_daily_bible_quiz_questions",
+        {
+          p_quiz_id: readyQuiz.id,
+          p_questions: questions,
+          p_generation_source: selected.source,
+          p_generation_status: selected.source === "fallback"
+            ? "fallback"
+            : "generated",
+          p_validation_notes: validationNotes,
+          p_status: targetStatus,
+        },
+      );
+      if (replacementError) {
         failedChurches++;
+        issues.push({
+          church_id: churchId,
+          stage: "atomic_question_replace",
+          message: replacementError.message,
+        });
+        if (!regenerating) {
+          await client.from("daily_bible_quizzes").update({
+            status: "failed",
+            generation_status: "failed",
+          }).eq("id", readyQuiz.id);
+        }
+        continue;
       }
-    } else {
-      scheduled++;
+
+      if (churchId === GLOBAL_VISITOR_CHURCH_ID) canonicalSelection = selected;
+      if (shouldPublish) {
+        if (
+          await publishQuiz(
+            client,
+            { ...readyQuiz, status: "published", notification_sent_at: null },
+            churchId,
+            issues,
+          )
+        ) {
+          published++;
+        } else {
+          failedChurches++;
+        }
+      } else {
+        scheduled++;
+      }
     }
-  }
 
-  await updateGenerationRun(client, runId, {
-    completed_at: new Date().toISOString(),
-    churches_checked: churchIds.length,
-    quizzes_published: published,
-    ai_status: aiStatus,
-    source_summary: Array.from(sources).join(",") || "none",
-    error_message: issues.length
-      ? issues.map((issue) =>
-        `${issue.church_id}:${issue.stage}:${issue.message}`
-      ).slice(0, 5).join(" | ")
-      : null,
-    metadata: {
-      action,
-      quiz_mode: chapterStudy ? "chapter_study" : "pop_quiz",
-      study_chapter_key: expectedChapterKey,
-      scheduled,
-      skipped_existing: skippedExisting,
-      failed_churches: failedChurches,
-      ai_provider: lastAiProvider,
-      issues,
-    },
-  });
+    await updateGenerationRun(client, runId, {
+      completed_at: new Date().toISOString(),
+      churches_checked: churchIds.length,
+      quizzes_published: published,
+      ai_status: aiStatus,
+      source_summary: Array.from(sources).join(",") || "none",
+      error_message: issues.length
+        ? issues.map((issue) =>
+          `${issue.church_id}:${issue.stage}:${issue.message}`
+        ).slice(0, 5).join(" | ")
+        : null,
+      metadata: {
+        action,
+        quiz_mode: chapterStudy ? "chapter_study" : "pop_quiz",
+        study_chapter_key: expectedChapterKey,
+        scheduled,
+        skipped_existing: skippedExisting,
+        failed_churches: failedChurches,
+        ai_provider: lastAiProvider,
+        issues,
+      },
+    });
 
-  if (failedChurches > 0) {
+    if (failedChurches > 0) {
+      return jsonResponse({
+        error: issues[0]?.message ??
+          "One or more quizzes could not be generated without repeating a fact.",
+        action,
+        quiz_date: quizDate,
+        quiz_mode: chapterStudy ? "chapter_study" : "pop_quiz",
+        study_chapter_key: expectedChapterKey,
+        churches_checked: churchIds.length,
+        quizzes_published: published,
+        quizzes_scheduled: scheduled,
+        failed_churches: failedChurches,
+      }, uniquenessSettings.guaranteeUnique ? 409 : 500);
+    }
     return jsonResponse({
-      error: issues[0]?.message ??
-        "One or more quizzes could not be generated without repeating a fact.",
+      ok: true,
       action,
       quiz_date: quizDate,
       quiz_mode: chapterStudy ? "chapter_study" : "pop_quiz",
@@ -1246,18 +1344,12 @@ Return valid JSON only in this shape:
       churches_checked: churchIds.length,
       quizzes_published: published,
       quizzes_scheduled: scheduled,
-      failed_churches: failedChurches,
-    }, uniquenessSettings.guaranteeUnique ? 409 : 500);
+      source: Array.from(sources).join(",") || "existing",
+    });
+  } finally {
+    await client.rpc("quiz_generation_lease", {
+      p_date: quizDate,
+      p_release: generationLease,
+    });
   }
-  return jsonResponse({
-    ok: true,
-    action,
-    quiz_date: quizDate,
-    quiz_mode: chapterStudy ? "chapter_study" : "pop_quiz",
-    study_chapter_key: expectedChapterKey,
-    churches_checked: churchIds.length,
-    quizzes_published: published,
-    quizzes_scheduled: scheduled,
-    source: Array.from(sources).join(",") || "existing",
-  });
 });

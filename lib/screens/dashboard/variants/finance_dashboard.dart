@@ -1,3 +1,4 @@
+import 'package:grace_connect/tutorial/tutorial_anchor.dart';
 import 'package:flutter/material.dart';
 import '../widgets/dashboard_scaffold.dart';
 import '../widgets/action_card.dart';
@@ -31,7 +32,7 @@ class FinanceDashboard extends StatelessWidget {
           description: 'Analyze giving trends',
           icon: Icons.bar_chart,
           onTap: () => Navigator.pushNamed(context, '/finance'),
-        ),
+        ).tutorial('dashboard.actions'),
       ],
     );
   }

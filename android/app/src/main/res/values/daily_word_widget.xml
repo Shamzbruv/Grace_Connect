@@ -1,0 +1,8 @@
+<resources>
+    <string name="daily_word_widget_title">DAILY WORD</string>
+    <string name="daily_word_widget_description">Daily encouragement, likes and a moment to reflect. Tap the heart to like in Grace Connect.</string>
+    <string name="daily_word_widget_preview">Bring a moment of encouragement to your day, and share the words that strengthen your faith.</string>
+    <string name="daily_word_widget_reflection">Reflections inspired by Scripture</string>
+    <string name="daily_word_widget_read">Read reflection</string>
+    <string name="daily_word_widget_like">♡ Like</string>
+</resources>

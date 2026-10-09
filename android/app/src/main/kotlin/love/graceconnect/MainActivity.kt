@@ -16,9 +16,33 @@ import java.security.MessageDigest
 class MainActivity : FlutterActivity() {
     private var videoExporter: GraceVideoExporter? = null
     private val configChannel = "love.graceconnect/config"
+    private var widgetChannel: MethodChannel? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        widgetChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "love.graceconnect/home_widget").also { channel ->
+            channel.setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "requestPin" -> result.success(DailyGraceWidget.requestPin(this))
+                    "requestQuotePin" -> result.success(DailyWordWidget.requestPin(this))
+                    "configureQuoteWidget" -> {
+                        try {
+                            DailyWordWidget.configure(this, call.argument<String>("apiUrl").orEmpty(),
+                                call.argument<String>("apiKey").orEmpty(), call.argument<String>("viewerId").orEmpty())
+                            result.success(null)
+                        } catch (_: Exception) { result.error("widget_config", "Unable to configure Daily Word widget", null) }
+                    }
+                    "quoteViewer" -> { DailyWordWidget.setViewer(this, call.argument<String>("viewerId").orEmpty()); result.success(null) }
+                    "quoteEngagement" -> {
+                        DailyWordWidget.setEngagement(this, call.argument<String>("id").orEmpty(),
+                            (call.argument<Number>("count")?.toLong() ?: 0), call.argument<Boolean>("liked") == true)
+                        result.success(null)
+                    }
+                    "initialDestination" -> result.success(takeWidgetDestination(intent))
+                    else -> result.notImplemented()
+                }
+            }
+        }
         videoExporter = GraceVideoExporter(this)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "love.graceconnect/media_export")
             .setMethodCallHandler { call, result ->
@@ -48,6 +72,28 @@ class MainActivity : FlutterActivity() {
                 }
             }
 
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        takeWidgetDestination(intent)?.let { widgetChannel?.invokeMethod("open", it) }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        DailyGraceWidget.updateAll(this)
+        DailyWordWidget.refresh(this)
+    }
+
+    private fun takeWidgetDestination(intent: Intent?): Map<String, String>? {
+        if (intent?.action != DailyGraceWidget.ACTION) return null
+        val destination = intent.getStringExtra(DailyGraceWidget.EXTRA_DESTINATION) ?: return null
+        intent.removeExtra(DailyGraceWidget.EXTRA_DESTINATION)
+        if (destination !in setOf("scripture", "community", "quote")) return null
+        return mapOf("destination" to destination, "reference" to
+            intent.getStringExtra(DailyGraceWidget.EXTRA_REFERENCE).orEmpty().take(80),
+            "like" to (destination == "quote" && DailyWordWidget.isTrustedLike(this, intent)).toString())
     }
 
     private fun setSecureScreen(enabled: Boolean) {

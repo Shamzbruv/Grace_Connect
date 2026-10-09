@@ -8,9 +8,9 @@ import { authenticatedUser, serviceClient } from "../_shared/grace.ts";
 import { isAllowedWebSubscriptionOrigin } from "../_shared/web_subscription_origin.ts";
 import {
   buildFygaroCheckoutUrl,
-  fygaroPaymentConfigFromEnv,
   signFygaroCheckoutJwt,
 } from "../_shared/fygaro.ts";
+import { requireFygaroCheckout } from '../_shared/fygaro_configuration.ts';
 
 const allowedHeaders = "authorization, x-client-info, apikey, content-type";
 const PROVIDER = "fygaro";
@@ -111,7 +111,7 @@ Deno.serve(async (request) => {
       if (error) throw error;
       let checkoutReady = false;
       try {
-        fygaroPaymentConfigFromEnv();
+        await requireFygaroCheckout(client);
         checkoutReady = true;
       } catch (_) { /* Account management remains available during setup. */ }
       return response(origin, { ok: true, context: { ...data, checkoutReady } });
@@ -130,7 +130,7 @@ Deno.serve(async (request) => {
       // Configuration is read before the session row is created, so a
       // misconfigured deployment does not leave orphan "created" sessions
       // that were never offered to anyone.
-      const config = fygaroPaymentConfigFromEnv();
+      const config = await requireFygaroCheckout(client);
 
       const returnUrl = String(body.returnUrl ?? "").trim() || null;
       const { data: session, error } = await client.rpc(

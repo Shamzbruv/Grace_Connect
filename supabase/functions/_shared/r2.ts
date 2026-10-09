@@ -85,6 +85,7 @@ export type PresignOptions = {
   now?: Date;
   /** Server-only bucket listing. Object signing callers never set this. */
   listObjects?: boolean;
+  listStartAfter?: string;
 };
 
 export async function presignR2Url(options: PresignOptions): Promise<string> {
@@ -125,6 +126,7 @@ export async function presignR2Url(options: PresignOptions): Promise<string> {
     ["X-Amz-Expires", String(expires)],
     ["X-Amz-SignedHeaders", signedHeaders],
     ...(options.listObjects ? [["list-type", "2"], ["max-keys", "50"], ["encoding-type", "url"]] as Array<[string,string]> : []),
+    ...(options.listObjects && options.listStartAfter ? [["start-after", options.listStartAfter]] as Array<[string,string]> : []),
   ];
   const canonicalQuery = query
     .map(([name, value]) => [rfc3986(name), rfc3986(value)] as const)

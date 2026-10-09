@@ -7,11 +7,11 @@
 
 import { serviceClient } from "../_shared/grace.ts";
 import {
-  fygaroWebhookConfigFromEnv,
   monthlyPeriodFrom,
   normalizeFygaroPayment,
   verifyFygaroWebhook,
 } from "../_shared/fygaro.ts";
+import { loadFygaroConfiguration } from '../_shared/fygaro_configuration.ts';
 
 const PROVIDER = "fygaro";
 
@@ -38,9 +38,16 @@ Deno.serve(async (request) => {
     return json({ error: "Payload too large." }, 413);
   }
 
+  let verificationConfig;
+  try {
+    verificationConfig = (await loadFygaroConfiguration(serviceClient())).webhook;
+  } catch {
+    // A temporary database/configuration outage must ask Fygaro to retry.
+    return json({error:'Payment verification is temporarily unavailable.'},503);
+  }
   try {
     await verifyFygaroWebhook({
-      config: fygaroWebhookConfigFromEnv(),
+      config: verificationConfig,
       signatureHeader: request.headers.get("Fygaro-Signature") ?? "",
       keyIdHeader: request.headers.get("Fygaro-Key-ID"),
       rawBody,

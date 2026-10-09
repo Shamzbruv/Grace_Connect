@@ -1,5 +1,9 @@
 project_id = "nimgsgnkcvddomrgkawb"
 
+# Every request is authenticated with Auth and checked against the owner role.
+[functions.developer-fygaro-settings]
+verify_jwt = false
+
 [auth.email.template.invite]
 subject = "You are invited to Grace Connect"
 content_path = "./supabase/templates/invite.html"
@@ -63,6 +67,10 @@ content_path = "./templates/identity_unlinked_notification.html"
 verify_jwt = false
 
 [functions.generate-daily-bible-quiz]
+verify_jwt = false
+
+# Private cron-secret authentication is enforced inside the worker.
+[functions.prepare-monthly-daily-content]
 verify_jwt = false
 
 [functions.cleanup-daily-bible-quiz-attempts]

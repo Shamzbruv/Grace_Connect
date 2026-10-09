@@ -109,8 +109,8 @@ android {
         applicationId graceConnectApplicationId
         minSdkVersion 26
         targetSdkVersion 36
-        versionCode 40
-        versionName "1.1.1"
+        versionCode 42
+        versionName "2.0.0"
         multiDexEnabled true
         manifestPlaceholders = [
             googleMapsApiKey: androidMapsApiKey,
@@ -157,6 +157,7 @@ flutter {
 }
 
 dependencies {
+    testImplementation 'junit:junit:4.13.2'
     // Match video_player_android's Media3 version to keep playback and export compatible.
     implementation 'androidx.media3:media3-transformer:1.5.1'
     implementation 'androidx.media3:media3-effect:1.5.1'

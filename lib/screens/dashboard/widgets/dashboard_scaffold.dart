@@ -1,3 +1,4 @@
+import 'package:grace_connect/tutorial/tutorial_anchor.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
@@ -28,7 +29,8 @@ class DashboardScaffold extends StatelessWidget {
       backgroundColor: theme.scaffoldBackgroundColor,
       appBar: AppBar(
         title:
-            Text(title, style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
+            Text(title, style: GoogleFonts.outfit(fontWeight: FontWeight.bold))
+                .tutorial('dashboard.welcome'),
         backgroundColor: Colors.transparent,
         elevation: 0,
         centerTitle: false,

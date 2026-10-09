@@ -1,3 +1,4 @@
+import 'package:grace_connect/tutorial/tutorial_anchor.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -619,6 +620,8 @@ class _RoleManagementScreenState extends State<RoleManagementScreen> {
     }
 
     return AppScaffold(
+      tutorialId: 'role_management',
+      tutorialReady: canManageRoles,
       title: 'Role Management',
       body: !canManageRoles
           ? const Center(child: Text('You do not have access to assign roles.'))
@@ -643,7 +646,7 @@ class _RoleManagementScreenState extends State<RoleManagementScreen> {
                   onChanged: (value) {
                     setState(() => _searchQuery = value.trim().toLowerCase());
                   },
-                ),
+                ).tutorial('role_management.tools'),
                 const SizedBox(height: 16),
                 _SectionHeader(
                   title: 'Members',
@@ -652,46 +655,52 @@ class _RoleManagementScreenState extends State<RoleManagementScreen> {
                 const SizedBox(height: 10),
                 StreamBuilder<List<UserProfile>>(
                   stream: _userService.getMembers(_churchId!),
-                  builder: (context, snapshot) {
-                    if (snapshot.hasError) {
-                      return AppCard(
-                        child:
-                            Text('Could not load members: ${snapshot.error}'),
-                      );
-                    }
-
-                    if (!snapshot.hasData) {
-                      return const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 24),
-                        child: Center(child: AppLoader()),
-                      );
-                    }
-
-                    final members = snapshot.data!.where((member) {
-                      if (_searchQuery.isEmpty) return true;
-                      return member.fullName
-                              .toLowerCase()
-                              .contains(_searchQuery) ||
-                          member.email.toLowerCase().contains(_searchQuery);
-                    }).toList()
-                      ..sort((a, b) => a.fullName.compareTo(b.fullName));
-
-                    if (members.isEmpty) {
-                      return const AppCard(
-                        child: Text('No members match that search.'),
-                      );
-                    }
-
-                    return Column(
-                      children: members.map((member) {
-                        return _MemberRoleCard(
-                          member: member,
-                          isEditing: false,
-                          onTap: () => _toggleInlineEditor(member),
+                  builder: (context, snapshot) => TutorialReadiness(
+                    ready:
+                        snapshot.connectionState != ConnectionState.waiting &&
+                            !snapshot.hasError &&
+                            snapshot.hasData,
+                    child: Builder(builder: (context) {
+                      if (snapshot.hasError) {
+                        return AppCard(
+                          child:
+                              Text('Could not load members: ${snapshot.error}'),
                         );
-                      }).toList(),
-                    );
-                  },
+                      }
+
+                      if (!snapshot.hasData) {
+                        return const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 24),
+                          child: Center(child: AppLoader()),
+                        );
+                      }
+
+                      final members = snapshot.data!.where((member) {
+                        if (_searchQuery.isEmpty) return true;
+                        return member.fullName
+                                .toLowerCase()
+                                .contains(_searchQuery) ||
+                            member.email.toLowerCase().contains(_searchQuery);
+                      }).toList()
+                        ..sort((a, b) => a.fullName.compareTo(b.fullName));
+
+                      if (members.isEmpty) {
+                        return const AppCard(
+                          child: Text('No members match that search.'),
+                        );
+                      }
+
+                      return Column(
+                        children: members.map((member) {
+                          return _MemberRoleCard(
+                            member: member,
+                            isEditing: false,
+                            onTap: () => _toggleInlineEditor(member),
+                          );
+                        }).toList(),
+                      );
+                    }),
+                  ),
                 ),
                 const SizedBox(height: 24),
                 AppCard(
@@ -1205,8 +1214,10 @@ class _MemberRoleCard extends StatelessWidget {
                   // IconButton as its foreground, which in light mode painted a
                   // near-black icon on the near-black primary background.
                   style: IconButton.styleFrom(
-                    backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
-                    foregroundColor: Theme.of(context).colorScheme.onSecondaryContainer,
+                    backgroundColor:
+                        Theme.of(context).colorScheme.secondaryContainer,
+                    foregroundColor:
+                        Theme.of(context).colorScheme.onSecondaryContainer,
                   ),
                   onPressed: onTap,
                   tooltip: isEditing ? 'Close role editor' : 'Manage roles',

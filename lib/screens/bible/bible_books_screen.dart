@@ -1,3 +1,4 @@
+import 'package:grace_connect/tutorial/tutorial_anchor.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
@@ -372,7 +373,7 @@ class _BibleBooksScreenState extends State<BibleBooksScreen> {
                   icon: Icons.psychology_alt_outlined,
                   showBadge: snapshot.data?.quiz.showBadge == true,
                 ),
-              );
+              ).tutorial('bible.quiz', enabled: widget.allowDailyQuiz);
             },
           ),
           titleSpacing: 4,
@@ -382,7 +383,7 @@ class _BibleBooksScreenState extends State<BibleBooksScreen> {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: GoogleFonts.poppins(fontWeight: FontWeight.bold),
-          ),
+          ).tutorial('bible.read'),
           backgroundColor: Colors.indigo,
           actions: [
             IconButton(
@@ -392,7 +393,7 @@ class _BibleBooksScreenState extends State<BibleBooksScreen> {
                 delegate: BibleSearchDelegate(),
               ),
               icon: const Icon(Icons.search),
-            ),
+            ).tutorial('bible.search'),
             FutureBuilder<_BibleActionAvailability>(
               future: _actionAvailabilityFuture,
               builder: (context, snapshot) {

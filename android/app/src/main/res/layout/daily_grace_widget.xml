@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/grace_content" android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:padding="20dp" android:background="@drawable/daily_grace_background">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
+        <ImageView android:layout_width="24dp" android:layout_height="24dp" android:src="@drawable/ic_stat_grace_connect"
+            android:tint="#E8C77F" android:contentDescription="@string/daily_grace_brand" />
+        <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+            android:layout_marginStart="8dp" android:text="@string/daily_grace_title" android:textColor="#E8C77F"
+            android:textSize="12sp" android:textStyle="bold" android:letterSpacing="0.12" />
+        <TextView android:id="@+id/grace_date" android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:textColor="#BAC6D6" android:textSize="11sp" android:maxLines="1" />
+    </LinearLayout>
+    <TextView android:id="@+id/grace_verse" android:layout_width="match_parent" android:layout_height="0dp"
+        android:layout_weight="1" android:layout_marginTop="12dp" android:gravity="center_vertical"
+        android:fontFamily="serif" android:textColor="#FFF9EB" android:textSize="17sp"
+        android:text="@string/daily_grace_preview_verse" android:maxLines="7" android:ellipsize="end" />
+    <TextView android:id="@+id/grace_reference" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:text="@string/daily_grace_preview_reference" android:textColor="#E8C77F" android:textSize="11sp"
+        android:layout_marginTop="8dp" android:layout_marginBottom="12dp" android:maxLines="1" android:ellipsize="end" />
+    <LinearLayout android:layout_width="match_parent" android:layout_height="42dp" android:orientation="horizontal">
+        <TextView android:id="@+id/grace_read" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
+            android:background="@drawable/daily_grace_button" android:gravity="center" android:text="@string/daily_grace_read"
+            android:textColor="#102C45" android:textStyle="bold" android:textSize="12sp" android:maxLines="1" />
+        <TextView android:id="@+id/grace_connect" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
+            android:layout_marginStart="8dp" android:background="@drawable/daily_grace_secondary" android:gravity="center"
+            android:text="@string/daily_grace_connect" android:textColor="#F4EBDD" android:textStyle="bold" android:textSize="12sp" android:maxLines="1" />
+    </LinearLayout>
+</LinearLayout>

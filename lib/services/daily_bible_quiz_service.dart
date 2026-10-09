@@ -4,6 +4,12 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'supabase_resilience.dart';
 
+class QuizClosedException implements Exception {
+  @override
+  String toString() =>
+      'This daily quiz has closed. Your saved answers are kept.';
+}
+
 class DailyBibleQuizService {
   DailyBibleQuizService({SupabaseClient? client})
       : _client = client ?? Supabase.instance.client;
@@ -169,6 +175,11 @@ class DailyBibleQuizService {
         return map;
       }
     } catch (error, stackTrace) {
+      if (error is FunctionException &&
+          error.details is Map &&
+          (error.details as Map)['code'] == 'quiz_closed') {
+        throw QuizClosedException();
+      }
       if (SupabaseResilience.isTransientNetworkError(error)) {
         SupabaseResilience.logTransientNetworkError(
           'Daily Bible Quiz $functionName',

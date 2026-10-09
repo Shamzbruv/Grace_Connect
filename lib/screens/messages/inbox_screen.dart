@@ -1,3 +1,4 @@
+import 'package:grace_connect/tutorial/tutorial_anchor.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -91,6 +92,8 @@ class _InboxScreenState extends State<InboxScreen> {
     final currentUser = context.watch<UserRoleProvider>().userProfile;
 
     return AppScaffold(
+      tutorialId: 'inbox',
+      tutorialReady: currentUser != null,
       title: 'Inbox',
       actions: [
         IconButton(
@@ -184,64 +187,69 @@ class _MessagesPane extends StatelessWidget {
   Widget build(BuildContext context) {
     return StreamBuilder<List<DirectConversation>>(
       stream: messageService.watchConversations(),
-      builder: (context, snapshot) {
-        if (snapshot.hasError) {
-          return Center(
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Text('Could not load inbox: ${snapshot.error}'),
-            ),
-          );
-        }
-        if (!snapshot.hasData) return const Center(child: AppLoader());
-
-        final conversations = snapshot.data!;
-        if (conversations.isEmpty) {
-          return Center(
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.inbox_outlined,
-                    size: 56,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'No messages yet',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  const SizedBox(height: 12),
-                  FilledButton.icon(
-                    onPressed: onStartMessage,
-                    icon: const Icon(Icons.edit_outlined),
-                    label: const Text('Start a Message'),
-                  ),
-                  const SizedBox(height: 10),
-                  OutlinedButton.icon(
-                    onPressed: () =>
-                        Navigator.of(context).pushNamed('/grace_rooms'),
-                    icon: const Icon(Icons.forum_outlined),
-                    label: const Text('Open Grace Rooms'),
-                  ),
-                ],
+      builder: (context, snapshot) => TutorialReadiness(
+        ready: snapshot.connectionState != ConnectionState.waiting &&
+            !snapshot.hasError &&
+            snapshot.hasData,
+        child: Builder(builder: (context) {
+          if (snapshot.hasError) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text('Could not load inbox: ${snapshot.error}'),
               ),
+            );
+          }
+          if (!snapshot.hasData) return const Center(child: AppLoader());
+
+          final conversations = snapshot.data!;
+          if (conversations.isEmpty) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.inbox_outlined,
+                      size: 56,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'No messages yet',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 12),
+                    FilledButton.icon(
+                      onPressed: onStartMessage,
+                      icon: const Icon(Icons.edit_outlined),
+                      label: const Text('Start a Message'),
+                    ),
+                    const SizedBox(height: 10),
+                    OutlinedButton.icon(
+                      onPressed: () =>
+                          Navigator.of(context).pushNamed('/grace_rooms'),
+                      icon: const Icon(Icons.forum_outlined),
+                      label: const Text('Open Grace Rooms'),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }
+
+          return ListView.builder(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 88),
+            itemCount: conversations.length,
+            itemBuilder: (context, index) => _ConversationTile(
+              conversation: conversations[index],
+              currentUser: currentUser,
+              messageService: messageService,
             ),
           );
-        }
-
-        return ListView.builder(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 88),
-          itemCount: conversations.length,
-          itemBuilder: (context, index) => _ConversationTile(
-            conversation: conversations[index],
-            currentUser: currentUser,
-            messageService: messageService,
-          ),
-        );
-      },
+        }),
+      ),
     );
   }
 }

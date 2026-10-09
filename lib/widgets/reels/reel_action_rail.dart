@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../models/reel.dart';
+import '../../tutorial/tutorial_anchor.dart';
 
 /// The right-side action column. Grace Connect's own styling rather than a
 /// copy of another app's: rounded surface-tinted buttons with the app's icon
@@ -15,6 +16,7 @@ class ReelActionRail extends StatelessWidget {
     required this.onShare,
     required this.onProfile,
     required this.onMore,
+    this.tutorialTarget = false,
   });
 
   final Reel reel;
@@ -24,6 +26,7 @@ class ReelActionRail extends StatelessWidget {
   final VoidCallback onShare;
   final VoidCallback onProfile;
   final VoidCallback onMore;
+  final bool tutorialTarget;
 
   @override
   Widget build(BuildContext context) {
@@ -67,7 +70,7 @@ class ReelActionRail extends StatelessWidget {
           label: '',
           onTap: onMore,
           semanticLabel: 'More options',
-        ),
+        ).tutorial('reels.options', enabled: tutorialTarget),
       ],
     );
   }

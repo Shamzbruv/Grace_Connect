@@ -1,3 +1,4 @@
+import 'package:grace_connect/tutorial/tutorial_anchor.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -692,7 +693,8 @@ class _LiveStreamingScreenState extends State<LiveStreamingScreen>
     return Scaffold(
       appBar: AppBar(
         title: Text(_churchName ?? 'Live Service',
-            style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+                style: GoogleFonts.poppins(fontWeight: FontWeight.bold))
+            .tutorial('live_streaming.overview'),
         backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
         foregroundColor: Theme.of(context).appBarTheme.foregroundColor,
         actions: [
@@ -821,7 +823,7 @@ class _LiveStreamingScreenState extends State<LiveStreamingScreen>
                     ],
                   ),
                 ),
-    );
+    ).tutorialScreen('live_streaming', ready: !_isLoading && _error == null);
   }
 
   Widget _buildEngagementCard(BuildContext context) {

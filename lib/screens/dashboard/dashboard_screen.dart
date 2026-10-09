@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/user_role_provider.dart';
 import '../../logic/dashboard_resolver.dart';
+import '../../tutorial/tutorial_registry.dart';
+import '../../tutorial/tutorial_screen_scope.dart';
 import '../signup screen/complete_profile_screen.dart';
 
 // Variants
@@ -52,25 +54,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final dashboardType = DashboardResolver.resolve(roles);
 
     // 3. Render appropriate widget
-    switch (dashboardType) {
-      case DashboardType.pastor:
-        return const PastorDashboard();
-      case DashboardType.admin:
-        return const AdminDashboard();
-      case DashboardType.finance:
-        return const FinanceDashboard();
-      case DashboardType.ministryLeader:
-        return const MinistryDashboard(isLeader: true);
-      case DashboardType.care:
-        // Re-use Ministry or create specific later
-        return const MinistryDashboard(isLeader: true);
-      case DashboardType.service:
-        // Use MinistryWorker variant for now
-        return const MinistryDashboard(isLeader: false);
-      case DashboardType.ministryWorker:
-        return const MinistryDashboard(isLeader: false);
-      case DashboardType.member:
-        return const MemberDashboard();
-    }
+    final dashboard = switch (dashboardType) {
+      DashboardType.pastor => const PastorDashboard(),
+      DashboardType.admin => const AdminDashboard(),
+      DashboardType.finance => const FinanceDashboard(),
+      DashboardType.ministryLeader ||
+      DashboardType.care =>
+        const MinistryDashboard(isLeader: true),
+      DashboardType.service ||
+      DashboardType.ministryWorker =>
+        const MinistryDashboard(isLeader: false),
+      DashboardType.member => const MemberDashboard(),
+    };
+    return TutorialScreenScope(
+        screenId: TutorialRegistry.dashboardId(roles), child: dashboard);
   }
 }

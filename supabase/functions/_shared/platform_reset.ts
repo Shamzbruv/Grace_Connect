@@ -1,6 +1,6 @@
 import { presignR2Url, type R2Config } from "./r2.ts";
 
-export const RESET_CONFIRMATION = "DELETE ALL DATA EXCEPT MY DEVELOPER ACCOUNT";
+export const RESET_CONFIRMATION = "RESET APP EXCEPT PROTECTED ACCOUNTS AND CHURCHES";
 
 export function validateResetRequest(body: Record<string, unknown>): boolean {
   return body.confirmation === RESET_CONFIRMATION &&
@@ -26,8 +26,8 @@ export function parseResetObjectKeys(xml: string): string[] {
   return keys;
 }
 
-export async function listResetObjects(config: R2Config, fetcher = fetch): Promise<string[]> {
-  const url = await presignR2Url({ config, method: "GET", key: "", listObjects: true, expiresInSeconds: 60 });
+export async function listResetObjects(config: R2Config, fetcher = fetch, startAfter?: string): Promise<string[]> {
+  const url = await presignR2Url({ config, method: "GET", key: "", listObjects: true, listStartAfter: startAfter, expiresInSeconds: 60 });
   const response = await fetcher(url, { signal: AbortSignal.timeout(15000) });
   if (!response.ok) throw new Error("R2 object listing failed.");
   return parseResetObjectKeys(await response.text());

@@ -4,6 +4,7 @@ import '../../models/reel.dart';
 import '../../services/media_playback_coordinator.dart';
 import '../reels/reel_grace_screen.dart';
 import 'community_feed_screen.dart';
+import '../../tutorial/tutorial_screen_scope.dart';
 
 /// Host for the Feed destination's two modes.
 ///
@@ -68,12 +69,17 @@ class _FeedHubScreenState extends State<FeedHubScreen> {
     return IndexedStack(
       index: mode == PrimaryFeedMode.community ? 0 : 1,
       children: [
-        CommunityFeedScreen(
-          showBottomMenu: false,
-          showFindChurchAction: widget.showFindChurchAction,
-        ),
-        ReelGraceScreen(
-            isActive: widget.isActive && mode == PrimaryFeedMode.reelGrace),
+        TutorialVisibility(
+            visible: widget.isActive && mode == PrimaryFeedMode.community,
+            child: CommunityFeedScreen(
+              showBottomMenu: false,
+              showFindChurchAction: widget.showFindChurchAction,
+            )),
+        TutorialVisibility(
+            visible: widget.isActive && mode == PrimaryFeedMode.reelGrace,
+            child: ReelGraceScreen(
+                isActive:
+                    widget.isActive && mode == PrimaryFeedMode.reelGrace)),
       ],
     );
   }

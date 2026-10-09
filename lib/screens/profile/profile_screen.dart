@@ -1,3 +1,4 @@
+import 'package:grace_connect/tutorial/tutorial_anchor.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -186,7 +187,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               Navigator.push(context,
                   MaterialPageRoute(builder: (_) => const EditProfileScreen()));
             },
-          )
+          ).tutorial('profile.tools')
         ],
       ),
       body: SingleChildScrollView(
@@ -328,7 +329,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                 ),
               ],
-            ),
+            ).tutorial('profile.overview'),
 
             const SizedBox(height: 12), // Overlap adjustment
 
@@ -562,7 +563,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ],
         ),
       ),
-    );
+    ).tutorialScreen('profile', ready: true);
   }
 
   Widget _buildChip(BuildContext context, IconData icon, String label) {

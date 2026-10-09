@@ -39,3 +39,16 @@ Deno.test('failed R2 requests cannot advance cleanup', async () => {
   const keys = await listResetObjects(config, (() => Promise.resolve(new Response(xml(['a'])))) as typeof fetch);
   assert(keys[0] === 'a');
 });
+
+Deno.test('reset listing signs its cursor so retained media cannot trap cleanup on page one', async () => {
+  const after='reels/protected/odd & 日本語.mp4';
+  let requested='';
+  const rows=await listResetObjects(config, async input=>{
+    requested=String(input);
+    return new Response(xml(['reels/remaining/video.mp4']));
+  },after);
+  const url=new URL(requested);
+  assert(url.searchParams.get('start-after')===after);
+  assert(!!url.searchParams.get('X-Amz-Signature'));
+  assert(rows[0]==='reels/remaining/video.mp4');
+});

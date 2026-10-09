@@ -48,6 +48,8 @@ import 'screens/analytics/analytics_screen.dart';
 import 'screens/announcements/announcements_screen.dart';
 import 'screens/counseling/counseling_intro_screen.dart';
 import 'screens/community/community_notification_route_screen.dart';
+import 'screens/bible/daily_grace_screen.dart';
+import 'services/daily_grace_service.dart';
 import 'screens/community/saved_items_screen.dart';
 import 'screens/dashboard/church_overview_detail_screen.dart';
 import 'screens/daily_word/daily_word_screen.dart';
@@ -86,12 +88,23 @@ import 'screens/grace_rooms/grace_room_chat_screen.dart';
 import 'services/analytics_service.dart';
 import 'widgets/auth_required.dart';
 import 'widgets/live_mini_player_overlay.dart';
+import 'tutorial/tutorial_controller.dart';
+import 'tutorial/tutorial_runtime.dart';
+import 'tutorial/tutorial_service.dart';
+import 'tutorial/tutorial_host.dart';
+import 'tutorial/tutorial_session.dart';
+import 'tutorial/tutorial_preview.dart';
+import 'experience/app_experience_controller.dart';
+import 'experience/app_experience_service.dart';
+import 'experience/app_experience_host.dart';
 
 /// Resolved once. Rebuilding this list would make Navigator re-attach its
 /// observers on every frame that rebuilds MaterialApp.
 final List<NavigatorObserver> _navigatorObservers = [
   if (Analytics.observer != null) Analytics.observer!,
+  TutorialNavigationObserver(_tutorialRuntime),
 ];
+final TutorialRuntime _tutorialRuntime = TutorialRuntime();
 
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -107,6 +120,10 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   }
   await NotificationService().showDataOnlyBackgroundMessage(message);
 }
+
+const _supabaseUrl = 'https://nimgsgnkcvddomrgkawb.supabase.co';
+const _supabasePublishableKey =
+    'sb_publishable_-lsEclVqaNPAlO4h7z3vtw_Q8xZY3cN';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -129,8 +146,8 @@ Future<void> main() async {
   await HapticService.load();
 
   await Supabase.initialize(
-    url: 'https://nimgsgnkcvddomrgkawb.supabase.co',
-    anonKey: 'sb_publishable_-lsEclVqaNPAlO4h7z3vtw_Q8xZY3cN',
+    url: _supabaseUrl,
+    anonKey: _supabasePublishableKey,
     authOptions: const FlutterAuthClientOptions(
       authFlowType: AuthFlowType.pkce,
       detectSessionInUri: true,
@@ -146,6 +163,16 @@ Future<void> main() async {
       providers: [
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
         ChangeNotifierProvider(create: (_) => UserRoleProvider()),
+        ChangeNotifierProvider(
+            create: (_) => AppExperienceController(
+                backend: AppExperienceService(Supabase.instance.client),
+                platform: defaultTargetPlatform == TargetPlatform.iOS
+                    ? 'ios'
+                    : 'android')),
+        ChangeNotifierProvider(
+            create: (_) => TutorialController(
+                service: TutorialService(Supabase.instance.client))),
+        ChangeNotifierProvider<TutorialRuntime>.value(value: _tutorialRuntime),
       ],
       child: const MyApp(),
     ),
@@ -210,6 +237,7 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
+  StreamSubscription<AuthState>? _widgetAuthSubscription;
   Widget _protected(
     Widget child, {
     AppFeature feature = AppFeature.appShell,
@@ -220,10 +248,28 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    SupabaseClient? widgetClient;
+    if (DailyGraceService.supportsPin) {
+      try {
+        widgetClient = Supabase.instance.client;
+      } catch (_) {
+        // Offline previews can show bundled Scripture without an Auth client.
+      }
+    }
+    unawaited(DailyGraceService.initialize(NotificationService.navigatorKey,
+        quoteApiUrl: _supabaseUrl,
+        quoteApiKey: _supabasePublishableKey,
+        viewerId: widgetClient?.auth.currentUser?.id ?? ''));
+    if (widgetClient != null) {
+      _widgetAuthSubscription = widgetClient.auth.onAuthStateChange.listen(
+          (event) => unawaited(
+              DailyGraceService.syncQuoteViewer(event.session?.user.id ?? '')));
+    }
   }
 
   @override
   void dispose() {
+    unawaited(_widgetAuthSubscription?.cancel());
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -289,14 +335,24 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
             // tracking does not depend on remembering to instrument each
             // new screen by hand.
             navigatorObservers: _navigatorObservers,
-            builder: (context, child) => LiveMiniPlayerOverlay(
+            builder: (context, child) => TutorialSession(
+                child: TutorialHost(
+                    child: AppExperienceHost(
+                        child: LiveMiniPlayerOverlay(
               child: child ?? const SizedBox.shrink(),
-            ),
+            )))),
             theme: AppTheme.lightTheme,
             darkTheme: AppTheme.darkTheme,
             themeMode: themeProvider.themeMode,
             home: const AuthWrapper(),
             routes: {
+              '/daily_grace': (context) => DailyGraceScreen(
+                  reference:
+                      ModalRoute.of(context)?.settings.arguments is String
+                          ? ModalRoute.of(context)!.settings.arguments as String
+                          : null),
+              if (kDebugMode)
+                '/tutorial-preview': (_) => const TutorialPreview(),
               '/login': (context) => const LoginScreen(),
               '/auth/callback': (context) => const AuthCallbackScreen(),
               '/forgot_password': (context) => const ForgotPasswordScreen(),
@@ -515,6 +571,8 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
                   builder: (_) => _protected(
                     DailyWordScreen(
                       motivationId: uri?.queryParameters['id'],
+                      likeOnOpen:
+                          settings.arguments == DailyQuoteWidgetAction.like,
                     ),
                     feature: AppFeature.dailyWord,
                   ),
